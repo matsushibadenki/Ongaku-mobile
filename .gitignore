@@ -75,3 +75,11 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+
+
+# アップロードしてはいけません。
+# 素材
+dontUpload/
+# 開発用Webサイト
+website/

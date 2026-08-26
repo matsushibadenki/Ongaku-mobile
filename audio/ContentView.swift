@@ -63,6 +63,7 @@ struct ContentView: View {
     @State private var selectedTab: RootTab = .nowPlaying
     @State private var selectedLibraryCategory: LibraryCategory = .artists
     @State private var selectedSearchScope: SearchScope = .songs
+    @State private var isSearchPresented = false
     @State private var isShowingSettings = false
     @State private var libraryPath = NavigationPath()
     @State private var hasPreparedEffectsScreen = false
@@ -333,10 +334,18 @@ struct ContentView: View {
 
                     searchRoot
                         .scrollContentBackground(.hidden)
+                        .scrollDismissesKeyboard(.interactively)
                 }
                 .navigationTitle(L10n.tr("search.title"))
                 .toolbar { settingsToolbar }
-                .searchable(text: $player.searchText, prompt: L10n.tr("search.prompt"))
+                .searchable(
+                    text: $player.searchText,
+                    isPresented: $isSearchPresented,
+                    prompt: L10n.tr("search.prompt")
+                )
+                .onSubmit(of: .search) {
+                    isSearchPresented = false
+                }
             }
             .tag(RootTab.search)
             .toolbar(.hidden, for: .tabBar)
@@ -359,6 +368,9 @@ struct ContentView: View {
             scheduleEffectsPresentationUpdate()
         }
         .onChange(of: selectedTab) { _, newValue in
+            if newValue != .search {
+                isSearchPresented = false
+            }
             scheduleEffectsPresentationUpdate(refreshViewIdentity: newValue == .effects)
         }
         .onChange(of: scenePhase) { _, newPhase in
