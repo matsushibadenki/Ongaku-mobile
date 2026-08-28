@@ -65,6 +65,7 @@ struct ContentView: View {
     @State private var selectedSearchScope: SearchScope = .songs
     @State private var isSearchPresented = false
     @State private var isShowingSettings = false
+    @State private var isShowingDesktopSync = false
     @State private var libraryPath = NavigationPath()
     @State private var hasPreparedEffectsScreen = false
     @State private var shouldRenderEffectsControls = false
@@ -106,6 +107,8 @@ struct ContentView: View {
             // LIBRARY
             NavigationStack(path: $libraryPath) {
                 VStack(spacing: 0) {
+                    libraryHeader
+
                     if player.mediaLibraryAccess == .authorized {
                         if player.isLibraryBootstrapInProgress {
                             HStack(spacing: 10) {
@@ -150,7 +153,6 @@ struct ContentView: View {
                     }
                 }
                 .background(Theme.background)
-                .navigationTitle(L10n.tr("library.title"))
                 .toolbar { settingsToolbar }
                 .navigationDestination(for: LibraryRoute.self) { route in
                     switch route {
@@ -363,6 +365,9 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(player: player, isShowing: $isShowingSettings)
         }
+        .sheet(isPresented: $isShowingDesktopSync) {
+            DesktopSyncView()
+        }
         .onAppear {
             player.startInitialBootstrapIfNeeded()
             scheduleEffectsPresentationUpdate()
@@ -486,6 +491,31 @@ struct ContentView: View {
                 Image(systemName: "person.crop.circle")
             }
         }
+    }
+
+    private var libraryHeader: some View {
+        HStack(spacing: 10) {
+            Text(L10n.tr("library.title"))
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+
+            Button {
+                isShowingDesktopSync = true
+            } label: {
+                Image(systemName: "desktopcomputer.and.arrow.down")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(player.accentColor)
+            }
+            .accessibilityLabel(L10n.tr("settings.sync.title"))
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 5)
+        .padding(.bottom, 10)
     }
     
     @ViewBuilder
@@ -1274,9 +1304,11 @@ struct SectionHeader: View {
 }
 
 struct SettingsView: View {
+    @EnvironmentObject private var desktopSync: DesktopSyncController
     @ObservedObject var player: AudioPlayerViewModel
     @Binding var isShowing: Bool
     @State private var isShowingCacheDeletionConfirmation = false
+    @State private var isShowingDesktopSync = false
     
     var body: some View {
         NavigationStack {
@@ -1284,6 +1316,26 @@ struct SettingsView: View {
                 Section(L10n.tr("settings.section.info")) {
                     LabeledContent(L10n.tr("settings.access_status"), value: player.mediaLibraryAccess.description)
                     LabeledContent(L10n.tr("settings.current_track"), value: player.trackTitle)
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section(L10n.tr("settings.section.sync")) {
+                    Button {
+                        isShowingDesktopSync = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "desktopcomputer.and.arrow.down")
+                                .foregroundStyle(player.accentColor)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(L10n.tr("settings.sync.title"))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text(L10n.tr("settings.sync.detail"))
+                                    .font(.appCaption())
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
                 }
                 .listRowBackground(Theme.secondaryBackground)
                 
@@ -1392,6 +1444,10 @@ struct SettingsView: View {
             .onAppear {
                 player.refreshPreparedAudioCacheStatistics()
             }
+            .sheet(isPresented: $isShowingDesktopSync) {
+                DesktopSyncView()
+                    .environmentObject(desktopSync)
+            }
             .confirmationDialog(
                 L10n.tr("settings.audio_cache.clear_confirmation.title"),
                 isPresented: $isShowingCacheDeletionConfirmation,
@@ -1415,12 +1471,14 @@ struct SettingsView_Previews: PreviewProvider {
                 player: AudioPlayerViewModel(),
                 isShowing: .constant(true)
             )
+            .environmentObject(DesktopSyncController())
             .previewDevice("iPhone SE (3rd generation)")
 
             SettingsView(
                 player: AudioPlayerViewModel(),
                 isShowing: .constant(true)
             )
+            .environmentObject(DesktopSyncController())
             .previewDevice("iPhone 16 Pro Max")
         }
     }

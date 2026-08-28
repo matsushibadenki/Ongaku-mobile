@@ -1,1 +1,2 @@
-"NSAppleMusicUsageDescription" = "ライブラリ内の曲一覧とプレイリストを表示するために使用します。";
+"NSAppleMusicUsageDescription" = "ミュージックライブラリの楽曲や、アプリ専用のOngakuフォルダ内の楽曲を再生するためにアクセスが必要です。";
+"NSLocalNetworkUsageDescription" = "選択した音楽ファイルをOngaku Desktopと安全に同期するためにローカルネットワークを使用します。";

@@ -1,1 +1,2 @@
-"NSAppleMusicUsageDescription" = "Used to show songs and playlists from your library.";
+"NSAppleMusicUsageDescription" = "Ongaku needs access to play songs from your music library and its local Ongaku folder.";
+"NSLocalNetworkUsageDescription" = "Ongaku uses your local network to securely sync selected music files with Ongaku Desktop.";

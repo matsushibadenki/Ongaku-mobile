@@ -20,6 +20,9 @@ struct LocalTrackMetadata: Sendable {
 
 final class LocalMediaManager: @unchecked Sendable {
     static let shared = LocalMediaManager()
+    static let supportedAudioExtensions: Set<String> = [
+        "aac", "aif", "aiff", "alac", "caf", "flac", "m4a", "mp3", "wav",
+    ]
     private let fileManager = FileManager.default
     
     // アプリが自由にアクセス・作成できる Documents ディレクトリ内の「Ongaku」フォルダ
@@ -40,7 +43,6 @@ final class LocalMediaManager: @unchecked Sendable {
     func scanLocalFiles() async -> [LocalTrackMetadata] {
         ensureOngakuDirectoryExists()
         
-        let supportedExtensions = ["mp3", "m4a", "wav", "flac", "aif", "aiff"]
         var fileURLs: [URL] = []
         
         guard let enumerator = fileManager.enumerator(
@@ -52,7 +54,7 @@ final class LocalMediaManager: @unchecked Sendable {
         while let fileURL = enumerator.nextObject() as? URL {
             guard !Task.isCancelled else { return [] }
             let ext = fileURL.pathExtension.lowercased()
-            if supportedExtensions.contains(ext) {
+            if Self.supportedAudioExtensions.contains(ext) {
                 fileURLs.append(fileURL)
             }
         }

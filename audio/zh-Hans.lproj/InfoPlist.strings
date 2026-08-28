@@ -1,1 +1,2 @@
-"NSAppleMusicUsageDescription" = "用于显示资料库中的歌曲列表和播放列表。";
+"NSAppleMusicUsageDescription" = "Ongaku需要访问权限，以播放音乐资料库和本地Ongaku文件夹中的歌曲。";
+"NSLocalNetworkUsageDescription" = "Ongaku使用本地网络与Ongaku Desktop安全同步所选音乐文件。";

@@ -238,10 +238,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var hasStartedInitialBootstrap = false
     private var initialBootstrapTask: Task<Void, Never>?
     private var systemLibraryRefreshTask: Task<Void, Never>?
+    private var deferredLocalLibraryScanTask: Task<Void, Never>?
     private var localLibraryScanTask: Task<Void, Never>?
     private var librarySnapshotPersistenceTask: Task<Void, Never>?
     private var systemLibraryRefreshGeneration: UInt64 = 0
     private var deferredLibrarySnapshot: SystemLibrarySnapshot?
+    /// Files in Documents/Ongaku are an app-owned source. Keep them separate
+    /// from MediaPlayer snapshots so a later fast/detailed system refresh can
+    /// never overwrite them.
+    private var localLibraryTracks: [LocalTrackMetadata] = []
 
     private var isPlaybackBusyForLibraryWork: Bool {
         if isPlaying || isProcessing || isPlaybackStarting { return true }
@@ -692,6 +697,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     deinit {
         initialBootstrapTask?.cancel()
         systemLibraryRefreshTask?.cancel()
+        deferredLocalLibraryScanTask?.cancel()
         localLibraryScanTask?.cancel()
         librarySnapshotPersistenceTask?.cancel()
         searchTask?.cancel()
@@ -1311,6 +1317,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     self.isInitialLibraryLoading = false
                     self.systemLibraryRefreshTask = nil
                     self.libraryLoadingMessage = nil
+                    // A system-only snapshot does not contain files stored in
+                    // Documents/Ongaku. Always merge those files back after a
+                    // reload so local songs cannot disappear from the UI.
+                    self.scanLocalLibrary()
                 }
             }
             let fastWorker = Task.detached(priority: .background) {
@@ -1363,9 +1373,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func scanLocalLibrary() {
+        guard !isScanningLocalLibrary else { return }
         guard !isPlaybackBusyForLibraryWork,
-              !isScanningLocalLibrary,
-              systemLibraryRefreshTask == nil else { return }
+              systemLibraryRefreshTask == nil else {
+            scheduleDeferredLocalLibraryScan()
+            return
+        }
+
+        deferredLocalLibraryScanTask?.cancel()
+        deferredLocalLibraryScanTask = nil
 
         isScanningLocalLibrary = true
         libraryLoadingMessage = L10n.tr("settings.local_library_scanning")
@@ -1388,6 +1404,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             }
             guard !Task.isCancelled else { return }
 
+            self.localLibraryTracks = localTracks
+
             let baseSnapshot = SystemLibrarySnapshot(
                 songs: self.systemSongs.filter { $0.url == nil },
                 artists: self.systemArtists.filter { !$0.isLocalLibraryIdentifier },
@@ -1396,6 +1414,26 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             let mergedSnapshot = Self.mergedSystemLibrarySnapshot(base: baseSnapshot, with: localTracks)
             self.applySystemLibrarySnapshot(mergedSnapshot, restorePlayback: false, isFinal: false)
             self.persistCachedSystemLibrarySnapshot(mergedSnapshot)
+        }
+    }
+
+    /// A transfer can finish while the system library is still rebuilding or
+    /// while playback owns the audio engine. Preserve that scan request and
+    /// run it as soon as library work becomes safe instead of silently losing it.
+    private func scheduleDeferredLocalLibraryScan() {
+        guard deferredLocalLibraryScanTask == nil else { return }
+        deferredLocalLibraryScanTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                if !self.isPlaybackBusyForLibraryWork,
+                   !self.isScanningLocalLibrary,
+                   self.systemLibraryRefreshTask == nil {
+                    self.deferredLocalLibraryScanTask = nil
+                    self.scanLocalLibrary()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         }
     }
 
@@ -4842,18 +4880,20 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         restorePlayback: Bool,
         isFinal: Bool
     ) {
+        let effectiveSnapshot = snapshotIncludingLocalLibrary(snapshot)
+
         // Library publishing is intentionally independent from the audio
         // pipeline. Avoid a large array publish during an active transition or
         // render; apply the latest snapshot on the next idle tick instead.
-        if isPlaybackBusyForLibraryWork || hasResidentLocalPlaybackTrack {
-            deferredLibrarySnapshot = snapshot
+        if isPlaybackBusyForLibraryWork {
+            deferredLibrarySnapshot = effectiveSnapshot
             if isFinal {
                 isLibraryBootstrapInProgress = false
             }
             return
         }
 
-        applyLibrarySnapshotToPublishedState(snapshot)
+        applyLibrarySnapshotToPublishedState(effectiveSnapshot)
         if isFinal {
             isLibraryBootstrapInProgress = false
         }
@@ -4874,10 +4914,20 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func flushDeferredLibrarySnapshotIfPlaybackIsIdle() {
         guard !isPlaybackBusyForLibraryWork,
-              !hasResidentLocalPlaybackTrack,
               let snapshot = deferredLibrarySnapshot else { return }
         deferredLibrarySnapshot = nil
-        applyLibrarySnapshotToPublishedState(snapshot)
+        applyLibrarySnapshotToPublishedState(snapshotIncludingLocalLibrary(snapshot))
+    }
+
+    private func snapshotIncludingLocalLibrary(
+        _ snapshot: SystemLibrarySnapshot
+    ) -> SystemLibrarySnapshot {
+        let systemOnly = SystemLibrarySnapshot(
+            songs: snapshot.songs.filter { $0.url == nil },
+            artists: snapshot.artists.filter { !$0.isLocalLibraryIdentifier },
+            albums: snapshot.albums.filter { !$0.isLocalLibraryIdentifier }
+        )
+        return Self.mergedSystemLibrarySnapshot(base: systemOnly, with: localLibraryTracks)
     }
 
     /// Stops nonessential library I/O as soon as audible playback begins.
