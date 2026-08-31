@@ -188,6 +188,147 @@ nonisolated struct StoredEffectSetting: Codable, Hashable, Sendable {
     var parameters: [String: Double]
 }
 
+nonisolated enum LibraryTrackSource: String, Codable, Hashable, Sendable {
+    case systemMusic
+    case ongakuManaged
+
+    var localizedName: String {
+        switch self {
+        case .systemMusic:
+            return L10n.tr("library.source.music")
+        case .ongakuManaged:
+            return L10n.tr("library.source.ongaku")
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .systemMusic:
+            return "music.note"
+        case .ongakuManaged:
+            return "waveform.badge.plus"
+        }
+    }
+}
+
+nonisolated enum LibraryTrackCapability: String, Codable, CaseIterable, Hashable, Sendable {
+    case browse
+    case play
+    case addToPlaylist
+    case metadataOverlay
+    case editEmbeddedMetadata
+    case exportAudio
+    case deleteAudio
+    case syncWithMac
+
+    var localizedName: String {
+        L10n.tr("library.capability.\(rawValue)")
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .browse: return "rectangle.grid.1x2"
+        case .play: return "play.fill"
+        case .addToPlaylist: return "text.badge.plus"
+        case .metadataOverlay: return "tag"
+        case .editEmbeddedMetadata: return "pencil"
+        case .exportAudio: return "square.and.arrow.up"
+        case .deleteAudio: return "trash"
+        case .syncWithMac: return "laptopcomputer.and.iphone"
+        }
+    }
+}
+
+nonisolated struct LibraryTrackOverlay: Codable, Hashable, Sendable {
+    let trackKey: String
+    var isFavorite: Bool
+    var rating: Int
+    var playCount: Int
+    var skipCount: Int
+    var lastPlayedAt: Date?
+    var displayTags: [String]
+    var updatedAt: Date
+
+    static func empty(for song: SystemSong) -> LibraryTrackOverlay {
+        LibraryTrackOverlay(
+            trackKey: song.overlayKey,
+            isFavorite: false,
+            rating: 0,
+            playCount: 0,
+            skipCount: 0,
+            lastPlayedAt: nil,
+            displayTags: [],
+            updatedAt: .now
+        )
+    }
+
+    mutating func normalize() {
+        rating = min(max(rating, 0), 5)
+        playCount = max(playCount, 0)
+        skipCount = max(skipCount, 0)
+        var seen: Set<String> = []
+        displayTags = displayTags.compactMap { value in
+            let tag = String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(24))
+            guard !tag.isEmpty else { return nil }
+            let key = tag.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            guard seen.insert(key).inserted else { return nil }
+            return tag
+        }
+        displayTags = Array(displayTags.prefix(12))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case trackKey, isFavorite, rating, playCount, skipCount, lastPlayedAt, displayTags, updatedAt
+    }
+
+    init(
+        trackKey: String,
+        isFavorite: Bool,
+        rating: Int,
+        playCount: Int,
+        skipCount: Int,
+        lastPlayedAt: Date?,
+        displayTags: [String],
+        updatedAt: Date
+    ) {
+        self.trackKey = trackKey
+        self.isFavorite = isFavorite
+        self.rating = rating
+        self.playCount = playCount
+        self.skipCount = skipCount
+        self.lastPlayedAt = lastPlayedAt
+        self.displayTags = displayTags
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        trackKey = try container.decode(String.self, forKey: .trackKey)
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        rating = try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0
+        playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
+        skipCount = try container.decodeIfPresent(Int.self, forKey: .skipCount) ?? 0
+        lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
+        displayTags = try container.decodeIfPresent([String].self, forKey: .displayTags) ?? []
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+        normalize()
+    }
+}
+
+nonisolated struct OngakuPlaylist: Identifiable, Codable, Hashable, Sendable {
+    var id: UUID
+    var name: String
+    var trackKeys: [String]
+    var createdAt: Date
+    var updatedAt: Date
+
+    mutating func normalize() {
+        name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        var seen: Set<String> = []
+        trackKeys = trackKeys.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+}
+
 nonisolated enum HeadphoneHRTFPreset: String, Codable, CaseIterable, Hashable, Sendable {
     case natural
     case frontal
@@ -239,6 +380,27 @@ nonisolated struct SystemSong: Identifiable, Hashable, Codable, Sendable {
     let url: URL? // ローカルファイルの場合にパスを保持
     var normalizedSearchTerms: [String] = []
     nonisolated func getNormalizedSearchTerms() -> [String] { normalizedSearchTerms }
+
+    var source: LibraryTrackSource {
+        url == nil ? .systemMusic : .ongakuManaged
+    }
+
+    var overlayKey: String {
+        "\(source.rawValue):\(id)"
+    }
+
+    var capabilities: Set<LibraryTrackCapability> {
+        switch source {
+        case .systemMusic:
+            return [.browse, .play, .addToPlaylist, .metadataOverlay]
+        case .ongakuManaged:
+            return Set(LibraryTrackCapability.allCases)
+        }
+    }
+
+    func supports(_ capability: LibraryTrackCapability) -> Bool {
+        capabilities.contains(capability)
+    }
 }
 
 nonisolated struct SystemArtist: Identifiable, Hashable, Codable, Sendable {

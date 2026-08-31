@@ -31,6 +31,7 @@ enum LibraryRoute: Hashable {
     case artist(SystemArtist)
     case album(SystemAlbum)
     case playlist(SystemPlaylist)
+    case ongakuPlaylist(OngakuPlaylist)
 }
 
 private enum LibraryCategory: String, CaseIterable, Identifiable {
@@ -66,6 +67,8 @@ struct ContentView: View {
     @State private var isSearchPresented = false
     @State private var isShowingSettings = false
     @State private var isShowingDesktopSync = false
+    @State private var isCreatingOngakuPlaylist = false
+    @State private var newOngakuPlaylistName = ""
     @State private var libraryPath = NavigationPath()
     @State private var hasPreparedEffectsScreen = false
     @State private var shouldRenderEffectsControls = false
@@ -162,6 +165,12 @@ struct ContentView: View {
                         AlbumSongsView(album: album, player: player, onPlay: { selectedTab = .nowPlaying })
                     case .playlist(let playlist):
                         PlaylistSongsView(playlist: playlist, player: player, onPlay: { selectedTab = .nowPlaying })
+                    case .ongakuPlaylist(let playlist):
+                        OngakuPlaylistSongsView(
+                            playlist: playlist,
+                            player: player,
+                            onPlay: { selectedTab = .nowPlaying }
+                        )
                     }
                 }
             }
@@ -530,27 +539,103 @@ struct ContentView: View {
     
     private var playlistsView: some View {
         Group {
-            if player.filteredSystemPlaylists.isEmpty {
-                emptyStateView(message: L10n.tr("empty.playlists"))
+            if player.filteredSystemPlaylists.isEmpty && player.ongakuPlaylists.isEmpty {
+                VStack(spacing: 16) {
+                    Button {
+                        newOngakuPlaylistName = ""
+                        isCreatingOngakuPlaylist = true
+                    } label: {
+                        Label(
+                            L10n.tr("library.ongaku_playlist.create"),
+                            systemImage: "plus.circle.fill"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(player.accentColor)
+
+                    emptyStateView(message: L10n.tr("empty.playlists"))
+                }
+                .padding(.horizontal, 16)
             } else {
-                List(player.filteredSystemPlaylists) { playlist in
-                    NavigationLink(value: LibraryRoute.playlist(playlist)) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "music.note.list").foregroundStyle(player.accentColor)
-                                .frame(width: 40, height: 40)
-                            VStack(alignment: .leading, spacing: 2) {
-                                MarqueeView(text: playlist.name, font: .headline, color: Theme.textPrimary, maxWidth: Theme.maxContentWidth - 80)
-                                Text(L10n.songCount(playlist.songCount)).font(.caption).foregroundStyle(Theme.textSecondary)
+                List {
+                    Section {
+                        Button {
+                            newOngakuPlaylistName = ""
+                            isCreatingOngakuPlaylist = true
+                        } label: {
+                            Label(L10n.tr("library.ongaku_playlist.create"), systemImage: "plus.circle.fill")
+                                .foregroundStyle(player.accentColor)
+                        }
+                    }
+
+                    if !player.ongakuPlaylists.isEmpty {
+                        Section(L10n.tr("library.ongaku_playlist.section")) {
+                            ForEach(player.ongakuPlaylists) { playlist in
+                                NavigationLink(value: LibraryRoute.ongakuPlaylist(playlist)) {
+                                    playlistRow(
+                                        name: playlist.name,
+                                        count: player.songs(in: playlist).count,
+                                        systemImage: "waveform.badge.plus"
+                                    )
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        player.deleteOngakuPlaylist(playlist)
+                                    } label: {
+                                        Label(L10n.tr("common.delete"), systemImage: "trash")
+                                    }
+                                }
                             }
                         }
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
                     }
-                    .listRowBackground(Color.clear)
+
+                    if !player.filteredSystemPlaylists.isEmpty {
+                        Section(L10n.tr("library.music_playlist.section")) {
+                            ForEach(player.filteredSystemPlaylists) { playlist in
+                                NavigationLink(value: LibraryRoute.playlist(playlist)) {
+                                    playlistRow(
+                                        name: playlist.name,
+                                        count: playlist.songCount,
+                                        systemImage: "music.note.list"
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .reservingTabBarSpace()
             }
         }
+        .alert(L10n.tr("library.ongaku_playlist.create"), isPresented: $isCreatingOngakuPlaylist) {
+            TextField(L10n.tr("library.ongaku_playlist.name"), text: $newOngakuPlaylistName)
+            Button(L10n.tr("common.create")) {
+                _ = player.createOngakuPlaylist(named: newOngakuPlaylistName)
+            }
+            Button(L10n.tr("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.tr("library.ongaku_playlist.create_description"))
+        }
+    }
+
+    private func playlistRow(name: String, count: Int, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(player.accentColor)
+                .frame(width: 40, height: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                MarqueeView(
+                    text: name,
+                    font: .headline,
+                    color: Theme.textPrimary,
+                    maxWidth: Theme.maxContentWidth - 80
+                )
+                Text(L10n.songCount(count))
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .frame(width: Theme.maxContentWidth, alignment: .leading)
     }
     
     private var artistsView: some View {
@@ -641,7 +726,13 @@ struct ContentView: View {
                             isPlaying: player.isPlaying,
                             isProcessing: player.isLoading,
                             artwork: player.songArtwork(for: song),
-                            accentColor: player.accentColor
+                            accentColor: player.accentColor,
+                            overlay: player.overlay(for: song),
+                            ongakuPlaylists: player.ongakuPlaylists,
+                            onFavoriteChange: { player.setFavorite($0, for: song) },
+                            onRatingChange: { player.setRating($0, for: song) },
+                            onTagsChange: { player.setDisplayTags($0, for: song) },
+                            onAddToPlaylist: { player.add(song, to: $0) }
                         )
                     }
                     .buttonStyle(.plain)
@@ -784,7 +875,13 @@ struct ContentView: View {
                                         isPlaying: player.isPlaying,
                                         isProcessing: player.isLoading,
                                         artwork: player.songArtwork(for: song),
-                                        accentColor: player.accentColor
+                                        accentColor: player.accentColor,
+                                        overlay: player.overlay(for: song),
+                                        ongakuPlaylists: player.ongakuPlaylists,
+                                        onFavoriteChange: { player.setFavorite($0, for: song) },
+                                        onRatingChange: { player.setRating($0, for: song) },
+                                        onTagsChange: { player.setDisplayTags($0, for: song) },
+                                        onAddToPlaylist: { player.add(song, to: $0) }
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -984,7 +1081,13 @@ struct AlbumSongsView: View {
                                 isPlaying: player.isPlaying,
                                 isProcessing: player.isLoading,
                                 artwork: player.songArtwork(for: song),
-                                accentColor: player.accentColor
+                                accentColor: player.accentColor,
+                                overlay: player.overlay(for: song),
+                                ongakuPlaylists: player.ongakuPlaylists,
+                                onFavoriteChange: { player.setFavorite($0, for: song) },
+                                onRatingChange: { player.setRating($0, for: song) },
+                                onTagsChange: { player.setDisplayTags($0, for: song) },
+                                onAddToPlaylist: { player.add(song, to: $0) }
                             )
                         }
                         .buttonStyle(.plain)
@@ -1031,7 +1134,13 @@ struct PlaylistSongsView: View {
                     isPlaying: player.isPlaying,
                     isProcessing: player.isLoading,
                     artwork: player.songArtwork(for: song),
-                    accentColor: player.accentColor
+                    accentColor: player.accentColor,
+                    overlay: player.overlay(for: song),
+                    ongakuPlaylists: player.ongakuPlaylists,
+                    onFavoriteChange: { player.setFavorite($0, for: song) },
+                    onRatingChange: { player.setRating($0, for: song) },
+                    onTagsChange: { player.setDisplayTags($0, for: song) },
+                    onAddToPlaylist: { player.add(song, to: $0) }
                 )
             }
             .buttonStyle(.plain)
@@ -1042,6 +1151,66 @@ struct PlaylistSongsView: View {
         .listStyle(.plain)
         .reservingTabBarSpace()
         .navigationTitle(playlist.name)
+    }
+}
+
+struct OngakuPlaylistSongsView: View {
+    let playlist: OngakuPlaylist
+    let player: AudioPlayerViewModel
+    let onPlay: () -> Void
+
+    var body: some View {
+        let currentPlaylist = player.ongakuPlaylist(id: playlist.id) ?? playlist
+        let songs = player.songs(in: currentPlaylist)
+        Group {
+            if songs.isEmpty {
+                ContentUnavailableView(
+                    L10n.tr("library.ongaku_playlist.empty"),
+                    systemImage: "music.note.list",
+                    description: Text(L10n.tr("library.ongaku_playlist.empty_description"))
+                )
+            } else {
+                List(songs) { song in
+                    Button {
+                        player.playSystemQueue(
+                            songs,
+                            startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0,
+                            title: currentPlaylist.name
+                        )
+                        onPlay()
+                    } label: {
+                        SongRowView(
+                            song: song,
+                            isActive: player.isSongActive(song),
+                            isPlaying: player.isPlaying,
+                            isProcessing: player.isLoading,
+                            artwork: player.songArtwork(for: song),
+                            accentColor: player.accentColor,
+                            overlay: player.overlay(for: song),
+                            ongakuPlaylists: player.ongakuPlaylists,
+                            onFavoriteChange: { player.setFavorite($0, for: song) },
+                            onRatingChange: { player.setRating($0, for: song) },
+                            onTagsChange: { player.setDisplayTags($0, for: song) },
+                            onAddToPlaylist: { player.add(song, to: $0) }
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            player.remove(song, from: currentPlaylist.id)
+                        } label: {
+                            Label(L10n.tr("library.ongaku_playlist.remove"), systemImage: "minus.circle")
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        .reservingTabBarSpace()
+        .navigationTitle(currentPlaylist.name)
     }
 }
 

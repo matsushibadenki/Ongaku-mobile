@@ -23,6 +23,19 @@ struct audioApp: App {
                     desktopSync.onLibraryChanged = {
                         player.scanLocalLibrary()
                     }
+                    desktopSync.overlayProvider = {
+                        player.syncTrackOverlays()
+                    }
+                    desktopSync.playlistOverlayProvider = {
+                        player.syncPlaylistOverlays()
+                    }
+                    desktopSync.onReceivedOverlays = { overlays in
+                        let receipt = player.mergeSyncedTrackOverlays(overlays)
+                        desktopSync.sendOverlayReceipt(receipt)
+                    }
+                    desktopSync.onReceivedPlaylistOverlays = { playlists in
+                        player.mergeSyncedPlaylistOverlays(playlists)
+                    }
                     desktopSync.start()
                     await desktopSync.refreshLocalLibrary()
                     player.scanLocalLibrary()

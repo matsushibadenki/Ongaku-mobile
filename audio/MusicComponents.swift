@@ -112,6 +112,13 @@ struct SongRowView: View {
     var artwork: UIImage? = nil
     var trailingText: String? = nil
     var accentColor: Color = Theme.accent
+    var overlay: LibraryTrackOverlay? = nil
+    var ongakuPlaylists: [OngakuPlaylist] = []
+    var onFavoriteChange: ((Bool) -> Void)? = nil
+    var onRatingChange: ((Int) -> Void)? = nil
+    var onTagsChange: (([String]) -> Void)? = nil
+    var onAddToPlaylist: ((UUID) -> Void)? = nil
+    @State private var isShowingTrackDetails = false
     
     var body: some View {
         HStack(spacing: 16) {
@@ -154,16 +161,59 @@ struct SongRowView: View {
                     maxWidth: Theme.maxContentWidth - 88
                 )
                 
-                MarqueeView(
-                    text: "\(song.artist) • \(song.album)",
-                    font: .system(size: 12, weight: .light),
-                    color: Theme.textSecondary,
-                    maxWidth: Theme.maxContentWidth - 88
-                )
+                HStack(spacing: 6) {
+                    MarqueeView(
+                        text: "\(song.artist) • \(song.album)",
+                        font: .system(size: 12, weight: .light),
+                        color: Theme.textSecondary,
+                        maxWidth: max(120, Theme.maxContentWidth - 170)
+                    )
+
+                    Label(song.source.localizedName, systemImage: song.source.systemImageName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(song.source == .ongakuManaged ? accentColor : Theme.textSecondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(
+                                    song.source == .ongakuManaged
+                                        ? accentColor.opacity(0.12)
+                                        : Color.white.opacity(0.06)
+                                )
+                        )
+                        .accessibilityLabel(
+                            L10n.tr("library.source.accessibility", song.source.localizedName)
+                        )
+                }
+
+                if let tags = overlay?.displayTags, !tags.isEmpty {
+                    Text(tags.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             
             Spacer(minLength: 4)
-            
+
+            if let overlay, overlay.isFavorite || overlay.rating > 0 {
+                HStack(spacing: 5) {
+                    if overlay.isFavorite {
+                        Image(systemName: "heart.fill")
+                            .foregroundStyle(accentColor)
+                    }
+                    if overlay.rating > 0 {
+                        Text("\(overlay.rating)★")
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .fixedSize(horizontal: true, vertical: false)
+            }
             if let trailingText {
                 Text(trailingText)
                     .font(.appCaption())
@@ -176,6 +226,248 @@ struct SongRowView: View {
             Rectangle()
                 .fill(isActive ? accentColor.opacity(0.05) : Color.clear)
         )
+        .contextMenu {
+            Button {
+                isShowingTrackDetails = true
+            } label: {
+                Label(L10n.tr("library.track_info.open"), systemImage: "info.circle")
+            }
+        }
+        .sheet(isPresented: $isShowingTrackDetails) {
+            TrackCapabilityDetailView(
+                song: song,
+                accentColor: accentColor,
+                overlay: overlay,
+                ongakuPlaylists: ongakuPlaylists,
+                onFavoriteChange: onFavoriteChange,
+                onRatingChange: onRatingChange,
+                onTagsChange: onTagsChange,
+                onAddToPlaylist: onAddToPlaylist
+            )
+        }
+    }
+}
+
+struct TrackCapabilityDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    let song: SystemSong
+    var accentColor: Color = Theme.accent
+    var overlay: LibraryTrackOverlay? = nil
+    var ongakuPlaylists: [OngakuPlaylist] = []
+    var onFavoriteChange: ((Bool) -> Void)? = nil
+    var onRatingChange: ((Int) -> Void)? = nil
+    var onTagsChange: (([String]) -> Void)? = nil
+    var onAddToPlaylist: ((UUID) -> Void)? = nil
+    @State private var tagsText = ""
+
+    private var availableCapabilities: [LibraryTrackCapability] {
+        LibraryTrackCapability.allCases.filter(song.supports)
+    }
+
+    private var unavailableCapabilities: [LibraryTrackCapability] {
+        LibraryTrackCapability.allCases.filter { !song.supports($0) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: song.source.systemImageName)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(song.source == .ongakuManaged ? accentColor : Theme.textSecondary)
+                            .frame(width: 42, height: 42)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(song.source == .ongakuManaged
+                                        ? accentColor.opacity(0.12)
+                                        : Color.white.opacity(0.06))
+                            )
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(song.title)
+                                .font(.headline)
+                                .foregroundStyle(Theme.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(L10n.joinedMetadata([song.artist, song.album]))
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 6)
+
+                    LabeledContent(L10n.tr("library.track_info.source")) {
+                        Label(song.source.localizedName, systemImage: song.source.systemImageName)
+                            .foregroundStyle(song.source == .ongakuManaged ? accentColor : Theme.textSecondary)
+                    }
+
+                    Text(sourceDescription)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if song.supports(.metadataOverlay), let overlay {
+                    Section {
+                        Toggle(
+                            L10n.tr("library.overlay.favorite"),
+                            isOn: Binding(
+                                get: { overlay.isFavorite },
+                                set: { onFavoriteChange?($0) }
+                            )
+                        )
+
+                        LabeledContent(L10n.tr("library.overlay.rating")) {
+                            HStack(spacing: 7) {
+                                ForEach(1...5, id: \.self) { rating in
+                                    Button {
+                                        onRatingChange?(overlay.rating == rating ? 0 : rating)
+                                    } label: {
+                                        Image(systemName: rating <= overlay.rating ? "star.fill" : "star")
+                                            .foregroundStyle(rating <= overlay.rating ? accentColor : Theme.textSecondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(L10n.tr("library.overlay.rating_value", rating))
+                                }
+                            }
+                        }
+
+                        LabeledContent(
+                            L10n.tr("library.overlay.play_count"),
+                            value: String(overlay.playCount)
+                        )
+                        LabeledContent(
+                            L10n.tr("library.overlay.skip_count"),
+                            value: String(overlay.skipCount)
+                        )
+                        if let lastPlayedAt = overlay.lastPlayedAt {
+                            LabeledContent(
+                                L10n.tr("library.overlay.last_played"),
+                                value: lastPlayedAt.formatted(date: .abbreviated, time: .omitted)
+                            )
+                        }
+
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(L10n.tr("library.overlay.tags"))
+                                .font(.subheadline.weight(.medium))
+                            TextField(L10n.tr("library.overlay.tags.placeholder"), text: $tagsText)
+                                .textInputAutocapitalization(.never)
+                            Button(L10n.tr("library.overlay.tags.save")) {
+                                onTagsChange?(parsedTags)
+                            }
+                            .disabled(parsedTags == overlay.displayTags)
+                        }
+
+                        if song.supports(.addToPlaylist) {
+                            if ongakuPlaylists.isEmpty {
+                                Text(L10n.tr("library.ongaku_playlist.create_hint"))
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.textSecondary)
+                            } else {
+                                Menu {
+                                    ForEach(ongakuPlaylists) { playlist in
+                                        Button(playlist.name) {
+                                            onAddToPlaylist?(playlist.id)
+                                        }
+                                    }
+                                } label: {
+                                    Label(
+                                        L10n.tr("library.ongaku_playlist.add"),
+                                        systemImage: "text.badge.plus"
+                                    )
+                                }
+                            }
+                        }
+                    } header: {
+                        Text(L10n.tr("library.overlay.section"))
+                    } footer: {
+                        Text(L10n.tr("library.overlay.footer"))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                capabilitySection(
+                    title: L10n.tr("library.track_info.available"),
+                    capabilities: availableCapabilities,
+                    isAvailable: true
+                )
+
+                if !unavailableCapabilities.isEmpty {
+                    capabilitySection(
+                        title: L10n.tr("library.track_info.restricted"),
+                        capabilities: unavailableCapabilities,
+                        isAvailable: false
+                    )
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle(L10n.tr("library.track_info.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L10n.tr("common.close")) { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(accentColor)
+        .onAppear {
+            tagsText = overlay?.displayTags.joined(separator: ", ") ?? ""
+        }
+    }
+
+    private var parsedTags: [String] {
+        tagsText
+            .split(whereSeparator: { $0 == "," || $0 == "、" })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var sourceDescription: String {
+        switch song.source {
+        case .systemMusic:
+            return L10n.tr("library.track_info.source.music.detail")
+        case .ongakuManaged:
+            return L10n.tr("library.track_info.source.ongaku.detail")
+        }
+    }
+
+    private func capabilitySection(
+        title: String,
+        capabilities: [LibraryTrackCapability],
+        isAvailable: Bool
+    ) -> some View {
+        Section {
+            ForEach(capabilities, id: \.self) { capability in
+                HStack(spacing: 12) {
+                    Image(systemName: capability.systemImageName)
+                        .foregroundStyle(isAvailable ? accentColor : Theme.textSecondary)
+                        .frame(width: 24)
+                    Text(capability.localizedName)
+                        .foregroundStyle(isAvailable ? Theme.textPrimary : Theme.textSecondary)
+                    Spacer(minLength: 8)
+                    Image(systemName: isAvailable ? "checkmark.circle.fill" : "lock.fill")
+                        .foregroundStyle(isAvailable ? Color.green : Theme.textSecondary)
+                        .accessibilityLabel(
+                            isAvailable
+                                ? L10n.tr("library.track_info.status.available")
+                                : L10n.tr("library.track_info.status.restricted")
+                        )
+                }
+                .accessibilityElement(children: .combine)
+            }
+        } header: {
+            Text(title)
+        } footer: {
+            if !isAvailable {
+                Text(L10n.tr("library.track_info.restricted.detail"))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -235,6 +527,66 @@ struct AlbumTileView: View {
         .frame(maxWidth: (Theme.maxContentWidth / 2) - 10)
     }
 }
+
+#if DEBUG
+struct SongRowView_Previews: PreviewProvider {
+    private static let musicSong = SystemSong(
+        id: 1,
+        title: "Midnight in Shibuya",
+        artist: "Aoi Ensemble",
+        album: "City Afterglow",
+        artistID: 10,
+        albumID: 20,
+        discNumber: 1,
+        trackNumber: 1,
+        duration: 248,
+        url: nil
+    )
+
+    private static let ongakuSong = SystemSong(
+        id: UInt64.max,
+        title: "A Very Long Track Title for Narrow Screens",
+        artist: "Ongaku Sessions",
+        album: "Transferred from Mac",
+        artistID: nil,
+        albumID: nil,
+        discNumber: 1,
+        trackNumber: 2,
+        duration: 312,
+        url: URL(fileURLWithPath: "/Documents/Ongaku/preview.flac")
+    )
+
+    static var previews: some View {
+        Group {
+            previewList
+                .previewDisplayName("iPhone SE")
+                .previewDevice("iPhone SE (3rd generation)")
+
+            previewList
+                .previewDisplayName("iPhone 16 Pro Max")
+                .previewDevice("iPhone 16 Pro Max")
+        }
+    }
+
+    private static var previewList: some View {
+        VStack(spacing: 0) {
+            SongRowView(
+                song: musicSong,
+                isActive: false,
+                isPlaying: false
+            )
+            SongRowView(
+                song: ongakuSong,
+                isActive: true,
+                isPlaying: true
+            )
+        }
+        .padding(.horizontal, 16)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
+    }
+}
+#endif
 
 struct EffectCard: View {
     let kind: RealtimeAudioEffectKind

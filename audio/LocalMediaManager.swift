@@ -24,11 +24,60 @@ final class LocalMediaManager: @unchecked Sendable {
         "aac", "aif", "aiff", "alac", "caf", "flac", "m4a", "mp3", "wav",
     ]
     private let fileManager = FileManager.default
+    private let metadataCacheLock = NSLock()
+
+    private struct LocalFileCandidate: Sendable {
+        let index: Int
+        let url: URL
+        let relativePath: String
+        let fileSize: Int64
+        let modificationTimestamp: TimeInterval
+    }
+
+    private struct CachedLocalTrack: Codable, Sendable {
+        let relativePath: String
+        let fileSize: Int64
+        let modificationTimestamp: TimeInterval
+        let title: String
+        let artist: String
+        let album: String
+        let duration: TimeInterval
+        let trackNumber: Int?
+        let discNumber: Int?
+
+        func metadata(at url: URL) -> LocalTrackMetadata {
+            LocalTrackMetadata(
+                url: url,
+                title: title,
+                artist: artist,
+                album: album,
+                duration: duration,
+                trackNumber: trackNumber,
+                discNumber: discNumber
+            )
+        }
+    }
+
+    private struct MetadataCache: Codable, Sendable {
+        let version: Int
+        let tracks: [CachedLocalTrack]
+    }
     
     // アプリが自由にアクセス・作成できる Documents ディレクトリ内の「Ongaku」フォルダ
     private var ongakuDirectory: URL {
         let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         return documents.appendingPathComponent("Ongaku", isDirectory: true)
+    }
+
+    var libraryDirectoryURL: URL {
+        ongakuDirectory
+    }
+
+    private var metadataCacheURL: URL {
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return documents
+            .appendingPathComponent("PlayerLibrary", isDirectory: true)
+            .appendingPathComponent("local-track-metadata-v1.json")
     }
     
     // フォルダの準備
@@ -42,55 +91,136 @@ final class LocalMediaManager: @unchecked Sendable {
     // 再帰的にファイルをスキャン
     func scanLocalFiles() async -> [LocalTrackMetadata] {
         ensureOngakuDirectoryExists()
-        
-        var fileURLs: [URL] = []
+
+        var candidates: [LocalFileCandidate] = []
+        let resourceKeys: Set<URLResourceKey> = [
+            .isRegularFileKey,
+            .fileSizeKey,
+            .contentModificationDateKey,
+        ]
         
         guard let enumerator = fileManager.enumerator(
             at: ongakuDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: Array(resourceKeys),
             options: [.skipsHiddenFiles]
         ) else { return [] }
         
         while let fileURL = enumerator.nextObject() as? URL {
             guard !Task.isCancelled else { return [] }
             let ext = fileURL.pathExtension.lowercased()
-            if Self.supportedAudioExtensions.contains(ext) {
-                fileURLs.append(fileURL)
+            guard Self.supportedAudioExtensions.contains(ext),
+                  let values = try? fileURL.resourceValues(forKeys: resourceKeys),
+                  values.isRegularFile == true else { continue }
+
+            let relativePath = fileURL.path.replacingOccurrences(
+                of: ongakuDirectory.path + "/",
+                with: "",
+                options: [.anchored]
+            )
+            candidates.append(LocalFileCandidate(
+                index: candidates.count,
+                url: fileURL,
+                relativePath: relativePath,
+                fileSize: Int64(values.fileSize ?? -1),
+                modificationTimestamp: values.contentModificationDate?.timeIntervalSinceReferenceDate ?? -1
+            ))
+        }
+
+        guard !candidates.isEmpty else {
+            saveMetadataCache([])
+            return []
+        }
+
+        let cachedByPath = Dictionary(
+            uniqueKeysWithValues: loadMetadataCache().map { ($0.relativePath, $0) }
+        )
+        var results: [(Int, LocalTrackMetadata)] = []
+        var changedCandidates: [LocalFileCandidate] = []
+
+        for candidate in candidates {
+            if let cached = cachedByPath[candidate.relativePath],
+               cached.fileSize == candidate.fileSize,
+               cached.modificationTimestamp == candidate.modificationTimestamp {
+                results.append((candidate.index, cached.metadata(at: candidate.url)))
+            } else {
+                changedCandidates.append(candidate)
             }
         }
 
-        // AVURLAsset metadata loading is I/O bound. A small bounded pool is
-        // substantially faster than the previous one-file-at-a-time scan,
-        // without creating hundreds of simultaneous decoder requests.
-        guard !fileURLs.isEmpty else { return [] }
-        let concurrency = min(4, fileURLs.count)
-        return await withTaskGroup(of: (Int, LocalTrackMetadata?).self) { group in
-            var results: [(Int, LocalTrackMetadata)] = []
-            var nextIndex = 0
+        // AVURLAsset metadata loading is I/O bound. Only added or modified
+        // files enter the bounded worker pool; unchanged files reuse cache.
+        if !changedCandidates.isEmpty {
+            let concurrency = min(4, changedCandidates.count)
+            let parsed = await withTaskGroup(of: (Int, LocalTrackMetadata?).self) { group in
+                var parsedResults: [(Int, LocalTrackMetadata)] = []
+                var nextIndex = 0
 
-            for _ in 0..<concurrency {
-                let index = nextIndex
-                nextIndex += 1
-                group.addTask { [weak self] in
-                    guard let self else { return (index, nil) }
-                    return (index, await self.extractMetadata(from: fileURLs[index]))
+                for _ in 0..<concurrency {
+                    let candidate = changedCandidates[nextIndex]
+                    nextIndex += 1
+                    group.addTask { [weak self] in
+                        guard let self else { return (candidate.index, nil) }
+                        return (candidate.index, await self.extractMetadata(from: candidate.url))
+                    }
                 }
+
+                while let result = await group.next() {
+                    if let metadata = result.1 {
+                        parsedResults.append((result.0, metadata))
+                    }
+                    guard nextIndex < changedCandidates.count else { continue }
+                    let candidate = changedCandidates[nextIndex]
+                    nextIndex += 1
+                    group.addTask { [weak self] in
+                        guard let self else { return (candidate.index, nil) }
+                        return (candidate.index, await self.extractMetadata(from: candidate.url))
+                    }
+                }
+
+                return parsedResults
             }
+            results.append(contentsOf: parsed)
+        }
 
-            while let result = await group.next() {
-                if let metadata = result.1 {
-                    results.append((result.0, metadata))
-                }
-                guard nextIndex < fileURLs.count else { continue }
-                let index = nextIndex
-                nextIndex += 1
-                group.addTask { [weak self] in
-                    guard let self else { return (index, nil) }
-                    return (index, await self.extractMetadata(from: fileURLs[index]))
-                }
-            }
+        let sortedResults = results.sorted { $0.0 < $1.0 }
+        let metadataByIndex = Dictionary(uniqueKeysWithValues: sortedResults)
+        let refreshedCache = candidates.compactMap { candidate -> CachedLocalTrack? in
+            guard let metadata = metadataByIndex[candidate.index] else { return nil }
+            return CachedLocalTrack(
+                relativePath: candidate.relativePath,
+                fileSize: candidate.fileSize,
+                modificationTimestamp: candidate.modificationTimestamp,
+                title: metadata.title,
+                artist: metadata.artist,
+                album: metadata.album,
+                duration: metadata.duration,
+                trackNumber: metadata.trackNumber,
+                discNumber: metadata.discNumber
+            )
+        }
+        saveMetadataCache(refreshedCache)
+        return sortedResults.map(\.1)
+    }
 
-            return results.sorted { $0.0 < $1.0 }.map(\.1)
+    private func loadMetadataCache() -> [CachedLocalTrack] {
+        metadataCacheLock.lock()
+        defer { metadataCacheLock.unlock() }
+        guard let data = try? Data(contentsOf: metadataCacheURL),
+              let cache = try? JSONDecoder().decode(MetadataCache.self, from: data),
+              cache.version == 1 else { return [] }
+        return cache.tracks
+    }
+
+    private func saveMetadataCache(_ tracks: [CachedLocalTrack]) {
+        metadataCacheLock.lock()
+        defer { metadataCacheLock.unlock() }
+        do {
+            let directory = metadataCacheURL.deletingLastPathComponent()
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(MetadataCache(version: 1, tracks: tracks))
+            try data.write(to: metadataCacheURL, options: .atomic)
+        } catch {
+            print("[LocalMediaManager] Failed to save metadata cache: \(error)")
         }
     }
     

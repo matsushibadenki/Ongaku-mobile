@@ -7,6 +7,7 @@
 
 import AVFoundation
 import Combine
+import Darwin
 import Foundation
 import MediaPlayer
 import MusicKit
@@ -70,6 +71,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     @Published var systemAlbums: [SystemAlbum] = []
     @Published var systemSongs: [SystemSong] = []
     @Published var systemPlaylists: [SystemPlaylist] = []
+    @Published private(set) var ongakuPlaylists: [OngakuPlaylist] = []
     @Published var searchText = ""
     @Published var effectSettings = AudioEffectModuleRegistry.makeDefaultSettings()
     @Published private(set) var selectedEffectPageTab: AudioEffectPageTab = .basic
@@ -94,6 +96,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     @Published private(set) var libraryLoadingMessage: String?
     @Published private(set) var isRequestingSystemLibraryAccess = false
     @Published private(set) var isRequestingAppleMusicAccess = false
+    @Published private(set) var trackOverlays: [String: LibraryTrackOverlay] = [:]
 
     @Published var filteredSystemArtists: [SystemArtist] = []
     @Published var filteredSystemAlbums: [SystemAlbum] = []
@@ -154,6 +157,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var lastAutoPeakAdjustTime: TimeInterval = 0
     private var lastManualParameterReductionTime: TimeInterval = 0
     private var lastTrackEndHandledAt: TimeInterval = 0
+    private var lastObservedSystemPlaybackSongID: UInt64?
+    private var lastObservedSystemPlaybackProgress = 0.0
+    private var lastOverlayCompletionKey: String?
+    private var lastOverlayCompletionAt: TimeInterval = 0
     private var lastExplicitRemoteTransportCommandAt: TimeInterval = 0
     private var forcedPausedUntil: TimeInterval = 0
 
@@ -238,10 +245,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var hasStartedInitialBootstrap = false
     private var initialBootstrapTask: Task<Void, Never>?
     private var systemLibraryRefreshTask: Task<Void, Never>?
+    private var systemLibraryChangeDebounceTask: Task<Void, Never>?
+    private var deferredSystemLibraryRefreshTask: Task<Void, Never>?
     private var deferredLocalLibraryScanTask: Task<Void, Never>?
     private var localLibraryScanTask: Task<Void, Never>?
+    private var localLibraryChangeDebounceTask: Task<Void, Never>?
+    private var localLibraryMonitor: DispatchSourceFileSystemObject?
     private var librarySnapshotPersistenceTask: Task<Void, Never>?
     private var systemLibraryRefreshGeneration: UInt64 = 0
+    private var hasPendingSystemLibraryChange = false
     private var deferredLibrarySnapshot: SystemLibrarySnapshot?
     /// Files in Documents/Ongaku are an app-owned source. Keep them separate
     /// from MediaPlayer snapshots so a later fast/detailed system refresh can
@@ -522,7 +534,16 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         // 検索対象のデータをキャプチャ（MainActor上で現在のスナップショットを取得）
         let poets = systemArtists
         let discography = systemAlbums
-        let tracks = systemSongs
+        let overlays = trackOverlays
+        let tracks = systemSongs.map { song in
+            var searchableSong = song
+            if let tags = overlays[song.overlayKey]?.displayTags {
+                searchableSong.normalizedSearchTerms.append(
+                    contentsOf: tags.map(Self.normalizeSearchText)
+                )
+            }
+            return searchableSong
+        }
         let lists = systemPlaylists
 
         searchTask = Task.detached(priority: .userInitiated) { [weak self] in
@@ -684,6 +705,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         super.init()
         PlaybackDebugLogger.event("vm.lifecycle.init instance=\(ObjectIdentifier(self))")
         loadLibraryState()
+        loadTrackOverlays()
+        loadOngakuPlaylists()
         mediaLibraryAccess = systemMediaLibrary.currentAccessState()
         cloudServiceAccessStatus = systemMediaLibrary.currentCloudServiceAuthorizationStatus()
         appleMusicAccessStatus = systemMediaLibrary.currentCloudServiceAuthorizationStatus()
@@ -691,14 +714,19 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         configureRemoteCommands()
         setupSearchDebounce()
         setupAppLifecycleObservers()
+        configureLibraryChangeObservers()
         configureOutputVolumeObservation()
     }
 
     deinit {
         initialBootstrapTask?.cancel()
         systemLibraryRefreshTask?.cancel()
+        systemLibraryChangeDebounceTask?.cancel()
+        deferredSystemLibraryRefreshTask?.cancel()
         deferredLocalLibraryScanTask?.cancel()
         localLibraryScanTask?.cancel()
+        localLibraryChangeDebounceTask?.cancel()
+        localLibraryMonitor?.cancel()
         librarySnapshotPersistenceTask?.cancel()
         searchTask?.cancel()
         appleMusicSearchTask?.cancel()
@@ -722,6 +750,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         for registration in remoteCommandRegistrations {
             registration.command.removeTarget(registration.target)
         }
+        MPMediaLibrary.default().endGeneratingLibraryChangeNotifications()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -814,6 +843,98 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         )
     }
 
+    private func configureLibraryChangeObservers() {
+        let mediaLibrary = MPMediaLibrary.default()
+        mediaLibrary.beginGeneratingLibraryChangeNotifications()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSystemMediaLibraryDidChange),
+            name: .MPMediaLibraryDidChange,
+            object: mediaLibrary
+        )
+        startLocalLibraryMonitoring()
+    }
+
+    private func startLocalLibraryMonitoring() {
+        localLibraryMonitor?.cancel()
+        localLibraryMonitor = nil
+
+        LocalMediaManager.shared.ensureOngakuDirectoryExists()
+        let directoryURL = LocalMediaManager.shared.libraryDirectoryURL
+        let descriptor = open(directoryURL.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            PlaybackDebugLogger.warning(
+                "library.local.monitor_unavailable path=\(directoryURL.path)"
+            )
+            return
+        }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .delete, .extend, .attrib, .link, .rename, .revoke],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.scheduleLocalLibraryChangeRefresh()
+            }
+        }
+        source.setCancelHandler {
+            close(descriptor)
+        }
+        localLibraryMonitor = source
+        source.resume()
+    }
+
+    private func scheduleLocalLibraryChangeRefresh(delay: Duration = .milliseconds(700)) {
+        localLibraryChangeDebounceTask?.cancel()
+        localLibraryChangeDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled else { return }
+            self.localLibraryChangeDebounceTask = nil
+            // Reopen the descriptor as well. A Files operation may replace or
+            // rename the directory inode that the previous source observed.
+            self.startLocalLibraryMonitoring()
+            self.scanLocalLibrary()
+        }
+    }
+
+    @objc private func handleSystemMediaLibraryDidChange() {
+        guard mediaLibraryAccess == .authorized else { return }
+        hasPendingSystemLibraryChange = true
+        systemLibraryChangeDebounceTask?.cancel()
+        systemLibraryChangeDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(900))
+            guard let self, !Task.isCancelled else { return }
+            self.systemLibraryChangeDebounceTask = nil
+            self.scheduleDeferredSystemLibraryRefresh()
+        }
+    }
+
+    private func scheduleDeferredSystemLibraryRefresh() {
+        guard hasPendingSystemLibraryChange else { return }
+
+        let canRefresh = mediaLibraryAccess == .authorized
+            && !isPlaybackBusyForLibraryWork
+            && !hasResidentLocalPlaybackTrack
+            && systemLibraryRefreshTask == nil
+        if canRefresh {
+            hasPendingSystemLibraryChange = false
+            deferredSystemLibraryRefreshTask?.cancel()
+            deferredSystemLibraryRefreshTask = nil
+            refreshSystemLibrary(showLoadingState: false)
+            return
+        }
+
+        guard deferredSystemLibraryRefreshTask == nil else { return }
+        deferredSystemLibraryRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !Task.isCancelled else { return }
+            self.deferredSystemLibraryRefreshTask = nil
+            self.scheduleDeferredSystemLibraryRefresh()
+        }
+    }
+
     private func configureOutputVolumeObservation() {
         let session = AVAudioSession.sharedInstance()
         outputVolumeObservation = session.observe(\.outputVolume, options: [.initial, .new]) { [weak self] _, change in
@@ -853,6 +974,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
         updateNowPlayingInfo(force: true)
         resumeAutomaticQualityUpgradeIfNeeded()
+        scheduleDeferredSystemLibraryRefresh()
+        scheduleLocalLibraryChangeRefresh(delay: .milliseconds(250))
     }
 
     @objc private func handleAppWillResignActive() {
@@ -1591,6 +1714,245 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         systemMediaLibrary.artwork(for: song.id, size: size)
     }
 
+    func overlay(for song: SystemSong) -> LibraryTrackOverlay {
+        trackOverlays[song.overlayKey] ?? .empty(for: song)
+    }
+
+    func setFavorite(_ isFavorite: Bool, for song: SystemSong) {
+        guard song.supports(.metadataOverlay) else { return }
+        updateOverlay(for: song) { overlay in
+            overlay.isFavorite = isFavorite
+        }
+    }
+
+    func setRating(_ rating: Int, for song: SystemSong) {
+        guard song.supports(.metadataOverlay) else { return }
+        updateOverlay(for: song) { overlay in
+            overlay.rating = min(max(rating, 0), 5)
+        }
+    }
+
+    func setDisplayTags(_ tags: [String], for song: SystemSong) {
+        guard song.supports(.metadataOverlay) else { return }
+        updateOverlay(for: song) { overlay in
+            overlay.displayTags = tags
+        }
+        if hasActiveSearch { performSearch() }
+    }
+
+    @discardableResult
+    func createOngakuPlaylist(named name: String) -> UUID? {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else { return nil }
+        var playlist = OngakuPlaylist(
+            id: UUID(),
+            name: normalizedName,
+            trackKeys: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+        playlist.normalize()
+        ongakuPlaylists.append(playlist)
+        ongakuPlaylists.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        persistOngakuPlaylists()
+        return playlist.id
+    }
+
+    func deleteOngakuPlaylist(_ playlist: OngakuPlaylist) {
+        ongakuPlaylists.removeAll { $0.id == playlist.id }
+        persistOngakuPlaylists()
+    }
+
+    func add(_ song: SystemSong, to playlistID: UUID) {
+        guard let index = ongakuPlaylists.firstIndex(where: { $0.id == playlistID }),
+              !ongakuPlaylists[index].trackKeys.contains(song.overlayKey) else { return }
+        ongakuPlaylists[index].trackKeys.append(song.overlayKey)
+        ongakuPlaylists[index].updatedAt = .now
+        persistOngakuPlaylists()
+    }
+
+    func remove(_ song: SystemSong, from playlistID: UUID) {
+        guard let index = ongakuPlaylists.firstIndex(where: { $0.id == playlistID }) else { return }
+        ongakuPlaylists[index].trackKeys.removeAll { $0 == song.overlayKey }
+        ongakuPlaylists[index].updatedAt = .now
+        persistOngakuPlaylists()
+    }
+
+    func songs(in playlist: OngakuPlaylist) -> [SystemSong] {
+        let songsByKey = Dictionary(
+            systemSongs.map { ($0.overlayKey, $0) },
+            uniquingKeysWith: { current, _ in current }
+        )
+        return playlist.trackKeys.compactMap { songsByKey[$0] }
+    }
+
+    func contains(_ song: SystemSong, in playlist: OngakuPlaylist) -> Bool {
+        playlist.trackKeys.contains(song.overlayKey)
+    }
+
+    func ongakuPlaylist(id: UUID) -> OngakuPlaylist? {
+        ongakuPlaylists.first { $0.id == id }
+    }
+
+    func syncTrackOverlays() -> [DeviceSyncTrackOverlay] {
+        systemSongs.compactMap { song in
+            guard song.source == .systemMusic,
+                  let overlay = trackOverlays[song.overlayKey] else { return nil }
+            return DeviceSyncTrackOverlay(
+                sourceKey: overlay.trackKey,
+                title: song.title,
+                artist: song.artist,
+                album: song.album,
+                duration: song.duration,
+                isFavorite: overlay.isFavorite,
+                rating: overlay.rating,
+                playCount: overlay.playCount,
+                skipCount: overlay.skipCount,
+                lastPlayedAt: overlay.lastPlayedAt,
+                displayTags: overlay.displayTags,
+                updatedAt: overlay.updatedAt
+            )
+        }
+    }
+
+    func syncPlaylistOverlays() -> [DeviceSyncPlaylistOverlay] {
+        let songsByKey = Dictionary(
+            systemSongs.map { ($0.overlayKey, $0) },
+            uniquingKeysWith: { current, _ in current }
+        )
+        return ongakuPlaylists.map { playlist in
+            DeviceSyncPlaylistOverlay(
+                id: playlist.id,
+                name: playlist.name,
+                tracks: playlist.trackKeys.compactMap { key in
+                    guard let song = songsByKey[key] else { return nil }
+                    return DeviceSyncTrackReference(
+                        sourceKey: song.overlayKey,
+                        title: song.title,
+                        artist: song.artist,
+                        album: song.album,
+                        duration: song.duration
+                    )
+                },
+                createdAt: playlist.createdAt,
+                updatedAt: playlist.updatedAt
+            )
+        }
+    }
+
+    func mergeSyncedPlaylistOverlays(_ remotePlaylists: [DeviceSyncPlaylistOverlay]) {
+        var didChange = false
+        for remote in remotePlaylists {
+            if let local = ongakuPlaylists.first(where: { $0.id == remote.id }),
+               local.updatedAt >= remote.updatedAt {
+                continue
+            }
+
+            var matchedKeys: [String] = []
+            var canApply = true
+            for reference in remote.tracks {
+                let matches = systemSongs.filter(reference.matches)
+                guard matches.count == 1, let song = matches.first else {
+                    canApply = false
+                    break
+                }
+                matchedKeys.append(song.overlayKey)
+            }
+            guard canApply else { continue }
+
+            var merged = OngakuPlaylist(
+                id: remote.id,
+                name: remote.name,
+                trackKeys: matchedKeys,
+                createdAt: remote.createdAt,
+                updatedAt: remote.updatedAt
+            )
+            merged.normalize()
+            guard !merged.name.isEmpty else { continue }
+            if let index = ongakuPlaylists.firstIndex(where: { $0.id == remote.id }) {
+                ongakuPlaylists[index] = merged
+            } else {
+                ongakuPlaylists.append(merged)
+            }
+            didChange = true
+        }
+        if didChange {
+            ongakuPlaylists.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            persistOngakuPlaylists()
+        }
+    }
+
+    func mergeSyncedTrackOverlays(
+        _ remoteOverlays: [DeviceSyncTrackOverlay]
+    ) -> DeviceSyncOverlayReceipt {
+        var didChange = false
+        var receiptItems: [DeviceSyncOverlayReceiptItem] = []
+        var ignoredCount = 0
+        for remote in remoteOverlays {
+            let matches = systemSongs.filter {
+                $0.source == .systemMusic && remote.matches($0)
+            }
+            // Ambiguous metadata must never update multiple unrelated songs.
+            guard matches.count == 1, let song = matches.first else {
+                ignoredCount += 1
+                continue
+            }
+
+            let existing = trackOverlays[song.overlayKey]
+            var merged = existing ?? .empty(for: song)
+            var fields: Set<DeviceSyncOverlayField> = []
+            if existing == nil || remote.updatedAt > merged.updatedAt {
+                if merged.isFavorite != remote.isFavorite {
+                    merged.isFavorite = remote.isFavorite
+                    fields.insert(.favorite)
+                }
+                let rating = min(max(remote.rating, 0), 5)
+                if merged.rating != rating {
+                    merged.rating = rating
+                    fields.insert(.rating)
+                }
+                if let tags = remote.displayTags, merged.displayTags != tags {
+                    merged.displayTags = tags
+                    fields.insert(.displayTags)
+                }
+            }
+            if remote.playCount > merged.playCount {
+                merged.playCount = remote.playCount
+                fields.insert(.playCount)
+            }
+            if remote.skipCount > merged.skipCount {
+                merged.skipCount = remote.skipCount
+                fields.insert(.skipCount)
+            }
+            if let remoteLastPlayedAt = remote.lastPlayedAt,
+               merged.lastPlayedAt.map({ remoteLastPlayedAt > $0 }) ?? true {
+                merged.lastPlayedAt = remoteLastPlayedAt
+                fields.insert(.lastPlayedAt)
+            }
+            if fields.isEmpty {
+                ignoredCount += 1
+            } else {
+                merged.updatedAt = max(merged.updatedAt, remote.updatedAt)
+                merged.normalize()
+                trackOverlays[song.overlayKey] = merged
+                didChange = true
+                receiptItems.append(DeviceSyncOverlayReceiptItem(
+                    sourceKey: remote.sourceKey,
+                    fields: fields.sorted { $0.rawValue < $1.rawValue }
+                ))
+            }
+        }
+        if didChange {
+            persistTrackOverlays()
+        }
+        return DeviceSyncOverlayReceipt(
+            id: UUID(),
+            appliedAt: .now,
+            items: receiptItems,
+            ignoredCount: ignoredCount
+        )
+    }
+
     func artistArtwork(for artist: SystemArtist, size: CGSize = CGSize(width: 120, height: 120)) -> UIImage? {
         systemMediaLibrary.artworkForArtist(id: artist.id, name: artist.name, size: size)
     }
@@ -1612,6 +1974,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         lastUserPlaybackInteractionAt = CFAbsoluteTimeGetCurrent()
         guard songs.indices.contains(index) else { return }
         let song = songs[index]
+        if selectedSystemSongID != song.id {
+            recordCurrentSystemSongAsSkippedIfNeeded()
+        }
         PlaybackDebugLogger.event(
             "audio.queue.request songID=\(song.id) index=\(index) title=\(song.title)"
         )
@@ -2076,6 +2441,86 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func loadTrackOverlays() {
+        let overlays = appLibraryStore.loadTrackOverlays()
+        trackOverlays = Dictionary(
+            overlays.map { ($0.trackKey, $0) },
+            uniquingKeysWith: { current, candidate in
+                current.updatedAt >= candidate.updatedAt ? current : candidate
+            }
+        )
+    }
+
+    private func loadOngakuPlaylists() {
+        ongakuPlaylists = appLibraryStore.loadOngakuPlaylists()
+    }
+
+    private func updateOverlay(
+        for song: SystemSong,
+        change: (inout LibraryTrackOverlay) -> Void
+    ) {
+        var overlay = trackOverlays[song.overlayKey] ?? .empty(for: song)
+        change(&overlay)
+        overlay.normalize()
+        overlay.updatedAt = .now
+        trackOverlays[song.overlayKey] = overlay
+        persistTrackOverlays()
+    }
+
+    private func persistTrackOverlays() {
+        let snapshot = trackOverlays.values.sorted { $0.trackKey < $1.trackKey }
+        statePersistenceQueue.async { [appLibraryStore, weak self] in
+            do {
+                try appLibraryStore.saveTrackOverlays(snapshot)
+            } catch {
+                DispatchQueue.main.async {
+                    self?.errorMessage = L10n.tr("error.library_save_failed", error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func persistOngakuPlaylists() {
+        let snapshot = ongakuPlaylists
+        statePersistenceQueue.async { [appLibraryStore, weak self] in
+            do {
+                try appLibraryStore.saveOngakuPlaylists(snapshot)
+            } catch {
+                DispatchQueue.main.async {
+                    self?.errorMessage = L10n.tr("error.library_save_failed", error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func recordCurrentSystemSongAsCompleted() {
+        guard let song = currentPlaybackSong,
+              song.source == .systemMusic else { return }
+        recordSystemSongAsCompleted(song)
+    }
+
+    private func recordSystemSongAsCompleted(_ song: SystemSong) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard lastOverlayCompletionKey != song.overlayKey
+                || now - lastOverlayCompletionAt > 2 else { return }
+        lastOverlayCompletionKey = song.overlayKey
+        lastOverlayCompletionAt = now
+        updateOverlay(for: song) { overlay in
+            overlay.playCount += 1
+            overlay.lastPlayedAt = .now
+        }
+    }
+
+    private func recordCurrentSystemSongAsSkippedIfNeeded() {
+        guard isPlaying,
+              progress < 0.9,
+              let song = currentPlaybackSong,
+              song.source == .systemMusic else { return }
+        updateOverlay(for: song) { overlay in
+            overlay.skipCount += 1
+        }
+    }
+
     private func refreshPlaybackState() {
         let oldIsPlaying = isPlaying
         
@@ -2261,7 +2706,20 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             return
         }
 
-        selectedSystemSongID = UInt64(item.persistentID)
+        let observedSongID = UInt64(item.persistentID)
+        if let previousSongID = lastObservedSystemPlaybackSongID,
+           previousSongID != observedSongID,
+           lastObservedSystemPlaybackProgress >= 0.9,
+           let completedSong = systemSongs.first(where: { $0.id == previousSongID }),
+           completedSong.source == .systemMusic {
+            recordSystemSongAsCompleted(completedSong)
+        }
+        if lastObservedSystemPlaybackSongID != observedSongID {
+            lastObservedSystemPlaybackSongID = observedSongID
+            lastObservedSystemPlaybackProgress = 0
+        }
+
+        selectedSystemSongID = observedSongID
         if let matchedIndex = systemQueue.firstIndex(where: { $0.id == selectedSystemSongID }) {
             systemQueueIndex = matchedIndex
         }
@@ -2274,6 +2732,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         let duration = item.playbackDuration
         let current = systemPlayer.currentPlaybackTime
         progress = duration > 0 ? current / duration : 0
+        lastObservedSystemPlaybackProgress = max(lastObservedSystemPlaybackProgress, progress)
         currentTimeText = formatTime(current)
         durationText = formatTime(duration)
         nowPlayingArtwork = item.artwork?.image(at: CGSize(width: 600, height: 600))
@@ -3094,6 +3553,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             return
         }
 
+        recordCurrentSystemSongAsCompleted()
+
         if repeatMode == .singleTrack {
             do {
                 try hiResPlaybackEngine.seek(to: 0)
@@ -3138,6 +3599,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func handleSystemPlaybackEnded() {
         guard !shouldIgnoreDuplicateTrackEndEvent() else { return }
+
+        recordCurrentSystemSongAsCompleted()
 
         if repeatMode == .singleTrack,
            let currentIndex = systemQueueIndex,

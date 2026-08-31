@@ -34,11 +34,95 @@ nonisolated struct DeviceStorageInfo: Codable, Equatable, Sendable {
     var availableBytes: Int64
 }
 
+nonisolated struct DeviceSyncTrackOverlay: Codable, Equatable, Hashable, Sendable {
+    var sourceKey: String
+    var title: String
+    var artist: String
+    var album: String
+    var duration: TimeInterval
+    var isFavorite: Bool
+    var rating: Int
+    var playCount: Int
+    var skipCount: Int
+    var lastPlayedAt: Date?
+    var displayTags: [String]? = nil
+    var updatedAt: Date
+
+    func matches(_ song: SystemSong) -> Bool {
+        Self.normalized(title) == Self.normalized(song.title)
+            && Self.normalized(artist) == Self.normalized(song.artist)
+            && Self.normalized(album) == Self.normalized(song.album)
+            && abs(duration - song.duration) <= 3
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+nonisolated struct DeviceSyncTrackReference: Codable, Equatable, Hashable, Sendable {
+    var sourceKey: String
+    var title: String
+    var artist: String
+    var album: String
+    var duration: TimeInterval
+
+    func matches(_ song: SystemSong) -> Bool {
+        DeviceSyncTrackOverlay(
+            sourceKey: sourceKey,
+            title: title,
+            artist: artist,
+            album: album,
+            duration: duration,
+            isFavorite: false,
+            rating: 0,
+            playCount: 0,
+            skipCount: 0,
+            lastPlayedAt: nil,
+            updatedAt: .distantPast
+        ).matches(song)
+    }
+}
+
+nonisolated struct DeviceSyncPlaylistOverlay: Identifiable, Codable, Equatable, Sendable {
+    var id: UUID
+    var name: String
+    var tracks: [DeviceSyncTrackReference]
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+nonisolated enum DeviceSyncOverlayField: String, Codable, CaseIterable, Hashable, Sendable {
+    case favorite
+    case rating
+    case playCount
+    case skipCount
+    case lastPlayedAt
+    case displayTags
+}
+
+nonisolated struct DeviceSyncOverlayReceiptItem: Codable, Equatable, Sendable {
+    var sourceKey: String
+    var fields: [DeviceSyncOverlayField]
+}
+
+nonisolated struct DeviceSyncOverlayReceipt: Identifiable, Codable, Equatable, Sendable {
+    var id: UUID
+    var appliedAt: Date
+    var items: [DeviceSyncOverlayReceiptItem]
+    var ignoredCount: Int
+
+    var appliedFieldCount: Int { items.reduce(0) { $0 + $1.fields.count } }
+}
+
 nonisolated struct DeviceSyncManifest: Codable, Equatable, Sendable {
     var deviceName: String
     var generatedAt: Date
     var items: [DeviceSyncItem]
     var storage: DeviceStorageInfo? = nil
+    var overlays: [DeviceSyncTrackOverlay]? = nil
+    var playlistOverlays: [DeviceSyncPlaylistOverlay]? = nil
 }
 
 nonisolated struct DeviceSyncResourceAnnouncement: Codable, Sendable {
@@ -66,6 +150,7 @@ nonisolated enum DeviceSyncMessage: Codable, Sendable {
     case manifest(DeviceSyncManifest)
     case requestItem(UUID)
     case resource(DeviceSyncResourceAnnouncement)
+    case overlayReceipt(DeviceSyncOverlayReceipt)
     case error(String)
 
     private enum CodingKeys: String, CodingKey {
@@ -73,6 +158,7 @@ nonisolated enum DeviceSyncMessage: Codable, Sendable {
         case manifest
         case itemID
         case resource
+        case overlayReceipt
         case message
     }
 
@@ -80,6 +166,7 @@ nonisolated enum DeviceSyncMessage: Codable, Sendable {
         case manifest
         case requestItem
         case resource
+        case overlayReceipt
         case error
     }
 
@@ -92,6 +179,10 @@ nonisolated enum DeviceSyncMessage: Codable, Sendable {
             self = .requestItem(try container.decode(UUID.self, forKey: .itemID))
         case .resource:
             self = .resource(try container.decode(DeviceSyncResourceAnnouncement.self, forKey: .resource))
+        case .overlayReceipt:
+            self = .overlayReceipt(
+                try container.decode(DeviceSyncOverlayReceipt.self, forKey: .overlayReceipt)
+            )
         case .error:
             self = .error(try container.decode(String.self, forKey: .message))
         }
@@ -109,6 +200,9 @@ nonisolated enum DeviceSyncMessage: Codable, Sendable {
         case .resource(let resource):
             try container.encode(Kind.resource, forKey: .kind)
             try container.encode(resource, forKey: .resource)
+        case .overlayReceipt(let receipt):
+            try container.encode(Kind.overlayReceipt, forKey: .kind)
+            try container.encode(receipt, forKey: .overlayReceipt)
         case .error(let message):
             try container.encode(Kind.error, forKey: .kind)
             try container.encode(message, forKey: .message)

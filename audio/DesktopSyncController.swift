@@ -15,14 +15,21 @@ nonisolated enum DiscoveryRetryFeedback: Equatable, Sendable {
 }
 
 final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendable {
+    nonisolated static let overlayReceiptHistoryDefaultsKey = "sync.overlayReceiptHistory.v1"
     @Published private(set) var connectionState: DeviceSyncConnectionState = .disconnected
     @Published private(set) var localItems: [DeviceSyncItem] = []
     @Published private(set) var remoteItems: [DeviceSyncItem] = []
     @Published private(set) var transfers: [DeviceTransferState] = []
     @Published private(set) var discoveryRetryFeedback: DiscoveryRetryFeedback?
+    @Published private(set) var latestOverlayReceipt: DeviceSyncOverlayReceipt?
+    @Published private(set) var overlayReceiptHistory: [DeviceSyncOverlayReceipt] = []
     @Published var pairingRequest: DesktopPairingRequest?
 
     var onLibraryChanged: (() -> Void)?
+    var overlayProvider: (() -> [DeviceSyncTrackOverlay])?
+    var playlistOverlayProvider: (() -> [DeviceSyncPlaylistOverlay])?
+    var onReceivedOverlays: (([DeviceSyncTrackOverlay]) -> Void)?
+    var onReceivedPlaylistOverlays: (([DeviceSyncPlaylistOverlay]) -> Void)?
     let pairingCode = String(format: "%06d", Int.random(in: 0 ... 999_999))
 
     private let peerID = MCPeerID(displayName: UIDevice.current.name)
@@ -52,6 +59,11 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
         super.init()
         session.delegate = self
         advertiser.delegate = self
+        if let data = UserDefaults.standard.data(forKey: Self.overlayReceiptHistoryDefaultsKey),
+           let history = try? decoder.decode([DeviceSyncOverlayReceipt].self, from: data) {
+            overlayReceiptHistory = history
+            latestOverlayReceipt = history.first
+        }
     }
 
     deinit {
@@ -112,6 +124,20 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
         remoteItems = []
         connectionState = isStarted ? .searching : .disconnected
         if isStarted { beginAdvertising() }
+    }
+
+    func sendOverlayReceipt(_ receipt: DeviceSyncOverlayReceipt) {
+        storeOverlayReceipt(receipt)
+        send(.overlayReceipt(receipt))
+    }
+
+    private func storeOverlayReceipt(_ receipt: DeviceSyncOverlayReceipt) {
+        latestOverlayReceipt = receipt
+        overlayReceiptHistory.removeAll { $0.id == receipt.id }
+        overlayReceiptHistory.insert(receipt, at: 0)
+        overlayReceiptHistory = Array(overlayReceiptHistory.prefix(50))
+        guard let data = try? encoder.encode(overlayReceiptHistory) else { return }
+        UserDefaults.standard.set(data, forKey: Self.overlayReceiptHistoryDefaultsKey)
     }
 
     func resumeDiscovery() {
@@ -202,7 +228,9 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
             deviceName: peerID.displayName,
             generatedAt: .now,
             items: localItems,
-            storage: Self.deviceStorageInfo()
+            storage: Self.deviceStorageInfo(),
+            overlays: overlayProvider?(),
+            playlistOverlays: playlistOverlayProvider?()
         )))
     }
 
@@ -263,6 +291,12 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
         case .manifest(let manifest):
             DispatchQueue.main.async { [weak self] in
                 self?.remoteItems = manifest.items
+                if let overlays = manifest.overlays, !overlays.isEmpty {
+                    self?.onReceivedOverlays?(overlays)
+                }
+                if let playlists = manifest.playlistOverlays, !playlists.isEmpty {
+                    self?.onReceivedPlaylistOverlays?(playlists)
+                }
             }
         case .requestItem(let id):
             sendLocalItem(id, direction: .phoneToMac)
@@ -274,6 +308,10 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
                 direction: announcement.direction,
                 phase: .transferring
             ))
+        case .overlayReceipt(let receipt):
+            DispatchQueue.main.async { [weak self] in
+                self?.storeOverlayReceipt(receipt)
+            }
         case .error(let message):
             publishFailure(message)
         }

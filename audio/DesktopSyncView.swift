@@ -9,6 +9,7 @@ struct DesktopSyncView: View {
         NavigationStack {
             List {
                 connectionSection
+                overlayReceiptSection
                 phoneLibrarySection
                 macLibrarySection
                 transferSection
@@ -29,6 +30,37 @@ struct DesktopSyncView: View {
         }
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
+    }
+
+    @ViewBuilder
+    private var overlayReceiptSection: some View {
+        if !sync.overlayReceiptHistory.isEmpty {
+            Section(L10n.tr("sync.overlay.receipt.title")) {
+                ForEach(sync.overlayReceiptHistory.prefix(5)) { receipt in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.tr(
+                                "sync.overlay.receipt.summary",
+                                receipt.items.count,
+                                receipt.appliedFieldCount,
+                                receipt.ignoredCount
+                            ))
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(receipt.appliedAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textSecondary.opacity(0.8))
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .listRowBackground(Theme.secondaryBackground)
+        }
     }
 
     private var connectionSection: some View {
