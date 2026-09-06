@@ -25,7 +25,8 @@ protocol AudioEffectNode: AnyObject {
     /// 次段のエフェクトやミキサーへ信号を送るノード
     var outputNode: AVAudioNode { get }
     
-    /// エフェクトがシステムに適用された時点での予測音量ブースト（dB）
+    /// 音楽信号に対する予測音量ブースト（dB）。周波数や残響で変化する
+    /// 参考値であり、ピーク上限の保証ではない。最終段の実信号で保護する。
     /// - 0未満: 音量が減衰する
     /// - 0を超える: 音量が増幅する
     var estimatedGainBoostDB: Double { get }
@@ -55,4 +56,29 @@ protocol AudioEffectNode: AnyObject {
 
 extension AudioEffectNode {
     var estimatedLatencyFrames: AVAudioFramePosition { 0 }
+}
+
+/// Shared with Ongaku desktop: Apple dynamics parameters use seconds and stable
+/// numeric IDs. Display names are localized, and "threshold" also matches the
+/// unrelated expansion threshold.
+enum EffectDynamicsParameters {
+    static func apply(to unit: AVAudioUnitEffect, thresholdDB: Float,
+                      headroomDB: Float, attackMs: Float, releaseMs: Float,
+                      masterGainDB: Float) {
+        guard unit.audioComponentDescription.componentSubType == kAudioUnitSubType_DynamicsProcessor,
+              let tree = unit.auAudioUnit.parameterTree else { return }
+        let values: [(AudioUnitParameterID, Float)] = [
+            (kDynamicsProcessorParam_Threshold, thresholdDB),
+            (kDynamicsProcessorParam_HeadRoom, headroomDB),
+            (kDynamicsProcessorParam_AttackTime, attackMs / 1000),
+            (kDynamicsProcessorParam_ReleaseTime, releaseMs / 1000),
+            (kDynamicsProcessorParam_OverallGain, masterGainDB),
+            (kDynamicsProcessorParam_ExpansionRatio, 1)
+        ]
+        for (id, value) in values {
+            if let parameter = tree.parameter(withAddress: AUParameterAddress(id)) {
+                parameter.value = min(parameter.maxValue, max(parameter.minValue, value))
+            }
+        }
+    }
 }

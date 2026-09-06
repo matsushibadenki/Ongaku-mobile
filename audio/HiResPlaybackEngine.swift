@@ -514,6 +514,7 @@ final class HiResPlaybackEngine {
     
     private let outputSafetyEQ = AVAudioUnitEQ(numberOfBands: 1)
     private let outputLimiter: AVAudioUnit?
+    private let outputCeilingEQ = AVAudioUnitEQ(numberOfBands: 0)
 
     private(set) var currentAudioFile: AVAudioFile?
     private(set) var currentAudioURL: URL?
@@ -579,12 +580,15 @@ final class HiResPlaybackEngine {
     private var plannedOutputTrimDB: Float = 0
     private var lastAnyEffectEnabled: Bool = false
     private var declickToken: UInt64 = 0
+    private var pendingDeclickEffectSettings: [RealtimeAudioEffectSetting]?
+    private var effectDeclickRestoreVolume: Float?
     private var headphoneSpatialSettings = HeadphoneSpatialSettings.default
     private var memorySafetyMode = AudioMemorySafetyMode.deviceDefault
     private var currentUpsamplingMode: UpsamplingMode = .avAudioConverter
     private var headphoneSpatialUpdateToken: UInt64 = 0
     private var lastGainStagingDate = Date()
     private var lastAppliedEffectSettings: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
+    private var needsEffectReapplication = true
     private var automaticDSPProfile = AutomaticDSPProfile.neutral
     private var automaticDSPStrength: Float = 1.0
     private var automaticDSPVoicing: AutomaticDSPVoicing = .natural
@@ -904,6 +908,8 @@ final class HiResPlaybackEngine {
         lastAnyEffectEnabled = false
         lastAppliedEffectSettings.removeAll(keepingCapacity: true)
         declickToken &+= 1
+        pendingDeclickEffectSettings = nil
+        effectDeclickRestoreVolume = nil
     }
 
     func releasePreloadedResources() {
@@ -1319,6 +1325,8 @@ final class HiResPlaybackEngine {
     }
 
     func fadeOutOutput(duration: TimeInterval) async {
+        applyPendingEffectSettings()
+        effectDeclickRestoreVolume = nil
         declickToken &+= 1
         let token = declickToken
         await withCheckedContinuation { continuation in
@@ -1329,6 +1337,8 @@ final class HiResPlaybackEngine {
     }
 
     func fadeInOutput(duration: TimeInterval) async {
+        applyPendingEffectSettings()
+        effectDeclickRestoreVolume = nil
         declickToken &+= 1
         let token = declickToken
         await withCheckedContinuation { continuation in
@@ -1346,6 +1356,13 @@ final class HiResPlaybackEngine {
         let shouldDeclick = activePlayerNode.isPlaying && !lastAnyEffectEnabled && anyEnabledNow
         lastAnyEffectEnabled = anyEnabledNow
 
+        // Coalesce updates during the fade-out. Otherwise the captured initial
+        // ON setting can resurrect an effect that the user has already disabled.
+        if pendingDeclickEffectSettings != nil {
+            pendingDeclickEffectSettings = safeEffectSettings
+            return
+        }
+
         if shouldDeclick {
             applyWithDeclick(effectSettings: safeEffectSettings)
             return
@@ -1356,36 +1373,26 @@ final class HiResPlaybackEngine {
 
     private func applyImmediate(effectSettings: [RealtimeAudioEffectSetting]) {
         var anyChanged = false
-        var seenKinds: Set<RealtimeAudioEffectKind> = []
-
+        var requested: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
         for setting in effectSettings {
-            seenKinds.insert(setting.kind)
-            if lastAppliedEffectSettings[setting.kind] == setting {
+            requested[setting.kind] = setting
+        }
+        for effect in effectPipeline {
+            // Omitted modules must also be disabled after a graph rebuild.
+            let setting = requested[effect.kind] ?? RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: false)
+            if !needsEffectReapplication && lastAppliedEffectSettings[effect.kind] == setting {
                 continue
             }
-            if let effect = effectPipeline.first(where: { $0.kind == setting.kind }) {
-                effect.apply(setting: setting)
-                anyChanged = true
-            }
-            lastAppliedEffectSettings[setting.kind] = setting
+            effect.apply(setting: setting)
+            anyChanged = true
+            lastAppliedEffectSettings[effect.kind] = setting
         }
-
-        if !lastAppliedEffectSettings.isEmpty {
-            let staleKinds = Set(lastAppliedEffectSettings.keys).subtracting(seenKinds)
-            if !staleKinds.isEmpty {
-                for staleKind in staleKinds {
-                    if let effect = effectPipeline.first(where: { $0.kind == staleKind }) {
-                        effect.apply(setting: RealtimeAudioEffectSetting(kind: staleKind, isEnabled: false))
-                        anyChanged = true
-                    }
-                    lastAppliedEffectSettings.removeValue(forKey: staleKind)
-                }
-            }
-        }
+        needsEffectReapplication = false
 
         if !anyChanged {
             return
         }
+        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames }
         
         applyGainStaging(effectSettings: effectSettings)
     }
@@ -1393,27 +1400,36 @@ final class HiResPlaybackEngine {
     private func applyWithDeclick(effectSettings: [RealtimeAudioEffectSetting]) {
         declickToken &+= 1
         let token = declickToken
-        let originalOutput = declickMixer.outputVolume
+        pendingDeclickEffectSettings = effectSettings
+        let originalOutput = effectDeclickRestoreVolume ?? declickMixer.outputVolume
+        effectDeclickRestoreVolume = originalOutput
         rampOutputVolume(to: 0.0, duration: 0.020, token: token) { [weak self] in
             guard let self, self.declickToken == token else { return }
 
-            self.applyImmediate(effectSettings: effectSettings)
+            self.applyPendingEffectSettings()
 
             self.declickMixer.outputVolume = 0.0
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.090) { [weak self] in
                 guard let self, self.declickToken == token else { return }
-                self.rampOutputVolume(to: max(0.0001, originalOutput), duration: 0.120, token: token, completion: nil)
+                self.rampOutputVolume(to: originalOutput, duration: 0.120, token: token) { [weak self] in
+                    guard let self, self.declickToken == token else { return }
+                    self.effectDeclickRestoreVolume = nil
+                }
             }
         }
     }
 
+    private func applyPendingEffectSettings() {
+        guard let settings = pendingDeclickEffectSettings else { return }
+        pendingDeclickEffectSettings = nil
+        applyImmediate(effectSettings: settings)
+    }
+
     private func rampOutputVolume(to target: Float, duration: TimeInterval, token: UInt64, completion: (() -> Void)?) {
         let startDeclick = declickMixer.outputVolume
-        let startMain = engine.mainMixerNode.outputVolume
         
         let minLinear: Float = 0.0001
         let startDBDeclick = 20.0 * log10(max(minLinear, startDeclick))
-        let startDBMain = 20.0 * log10(max(minLinear, startMain))
         let targetDB = 20.0 * log10(max(minLinear, target))
         
         let steps = max(8, Int(duration / 0.005))
@@ -1422,15 +1438,17 @@ final class HiResPlaybackEngine {
         for step in 1...steps {
             let t = Float(step) / Float(steps)
             let valDBDeclick = startDBDeclick + (targetDB - startDBDeclick) * t
-            let valDBMain = startDBMain + (targetDB - startDBMain) * t
             
             let valDeclick = target == 0 && step == steps ? 0 : pow(10.0, valDBDeclick / 20.0)
-            let valMain = target == 0 && step == steps ? 0 : pow(10.0, valDBMain / 20.0)
             
             DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * TimeInterval(step)) { [weak self] in
-                guard let self, self.declickToken == token else { return }
+                guard let self, self.declickToken == token else {
+                    // A superseding fade cancels gain writes, not the waiting
+                    // continuation. Effect callbacks also check their own token.
+                    if step == steps { completion?() }
+                    return
+                }
                 self.declickMixer.outputVolume = valDeclick
-                self.engine.mainMixerNode.outputVolume = valMain
                 if step == steps { completion?() }
             }
         }
@@ -1501,6 +1519,7 @@ final class HiResPlaybackEngine {
             effect.attach(to: engine)
         }
         engine.attach(outputSafetyEQ)
+        engine.attach(outputCeilingEQ)
         if let outputLimiter {
             engine.attach(outputLimiter)
         }
@@ -1522,6 +1541,8 @@ final class HiResPlaybackEngine {
     }
 
     private func connectPipeline(format: AVAudioFormat?) {
+        // Sample-rate-dependent sub-stages must be reapplied after reconnecting.
+        needsEffectReapplication = true
         engine.disconnectNodeOutput(playerNode)
         engine.disconnectNodeOutput(upgradePlayerNode)
         engine.disconnectNodeOutput(sourceMixer)
@@ -1534,6 +1555,7 @@ final class HiResPlaybackEngine {
             }
         }
         engine.disconnectNodeOutput(outputSafetyEQ)
+        engine.disconnectNodeOutput(outputCeilingEQ)
         if let outputLimiter {
             engine.disconnectNodeOutput(outputLimiter)
         }
@@ -1559,10 +1581,11 @@ final class HiResPlaybackEngine {
         engine.connect(previousNode, to: outputSafetyEQ, format: format)
         if let outputLimiter {
             engine.connect(outputSafetyEQ, to: outputLimiter, format: format)
-            engine.connect(outputLimiter, to: declickMixer, format: format)
+            engine.connect(outputLimiter, to: outputCeilingEQ, format: format)
         } else {
-            engine.connect(outputSafetyEQ, to: declickMixer, format: format)
+            engine.connect(outputSafetyEQ, to: outputCeilingEQ, format: format)
         }
+        engine.connect(outputCeilingEQ, to: declickMixer, format: format)
         engine.connect(declickMixer, to: engine.mainMixerNode, format: format)
         playerNode.volume = isUpgradePlayerNodeActive ? 0.0 : 1.0
         upgradePlayerNode.volume = isUpgradePlayerNodeActive ? 1.0 : 0.0
@@ -1735,21 +1758,9 @@ final class HiResPlaybackEngine {
     }
 
     private func configureOutputLimiter() {
+        outputCeilingEQ.globalGain = outputLimiter == nil ? 0 : EffectOutputSafety.ceilingDB
         guard let outputLimiter else { return }
-        outputLimiter.auAudioUnit.parameterTree?.allParameters.forEach { parameter in
-            let key = "\(parameter.identifier) \(parameter.displayName)".lowercased()
-            if key.contains("threshold") {
-                // Keep the final safety ceiling below 0 dBFS so intersample peaks
-                // have a small reserve before the output route.
-                parameter.value = -1.0
-            } else if key.contains("attack") {
-                parameter.value = 0.0005
-            } else if key.contains("decay") || key.contains("release") {
-                parameter.value = 0.080
-            } else if key.contains("pre") && key.contains("gain") {
-                parameter.value = 0
-            }
-        }
+        EffectOutputSafety.configure(limiter: outputLimiter)
     }
 
     private func ensureEngineRunning() throws {
@@ -1799,9 +1810,9 @@ final class HiResPlaybackEngine {
             scaledAutomaticDSP.highShelfGainDB
         )
         let loudnessBoost = estimatedLoudnessCompensationBoostDB()
-        // Estimates are available immediately, while tap measurements arrive
-        // later. Use whichever is larger so startup and parameter changes do
-        // not briefly run without the required headroom.
+        // Estimates provide an initial trim, not a guaranteed peak bound.
+        // EQ overlap and reverberation depend on the source; the final limiter
+        // and post-limiter margin protect the actual output independently.
         let effectBoost = max(measuredBoost ?? 0, estimatedEffectBoost)
             + automaticDSPBoost
             + loudnessBoost
@@ -1817,7 +1828,8 @@ final class HiResPlaybackEngine {
         let inputHeadroomDB = max(0.0, Self.floatPipelinePeakCeilingDBFS - preFXPeak)
         let estimatedPostFXPeak = preFXPeak + effectBoost + Self.intersamplePeakReserveDB
         let fxHeadroomDB = max(0.0, Self.finalOutputCeilingDBFS - estimatedPostFXPeak)
-        let outputTrimDB = min(0.0, Self.finalOutputCeilingDBFS - estimatedPostFXPeak)
+        let minimumOutputTrimDB: Float = outputLimiter == nil ? 0 : EffectOutputSafety.ceilingDB
+        let outputTrimDB = min(minimumOutputTrimDB, Self.finalOutputCeilingDBFS - estimatedPostFXPeak)
         
         // Both normal and high-quality players converge before this dedicated
         // dB gain stage. Unlike mixer volume, it supports both cuts and boosts
@@ -1842,7 +1854,9 @@ final class HiResPlaybackEngine {
     }
 
     private func applyOutputSafetyGain() {
-        outputSafetyEQ.globalGain = plannedOutputTrimDB
+        outputSafetyEQ.globalGain = EffectOutputSafety.preLimiterTrim(
+            totalTrimDB: plannedOutputTrimDB, hasLimiter: outputLimiter != nil
+        )
     }
 
     private func estimatedLoudnessCompensationBoostDB() -> Float {

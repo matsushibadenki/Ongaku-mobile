@@ -15,7 +15,10 @@ final class WarmAudioEffect: AudioEffectNode {
     let kind: RealtimeAudioEffectKind = .warm
     private(set) var isEnabled: Bool = false
 
-    // 基本構成: PreEQ -> Varispeed -> (Parallel Branches) -> Mixer
+    // Direct unity bypass avoids varispeed latency while this module is off.
+    private let inputSplitter = AVAudioMixerNode()
+    private let bypassMixer = AVAudioMixerNode()
+    // Active path: PreEQ -> Varispeed -> dry + band-limited saturation.
     private let preEQ = AVAudioUnitEQ(numberOfBands: 3)
     private let varispeed = AVAudioUnitVarispeed()
     
@@ -34,6 +37,7 @@ final class WarmAudioEffect: AudioEffectNode {
     private let highReverb = AVAudioUnitReverb()
     private let highWetMixer = AVAudioMixerNode()
     
+    private let dryMixer = AVAudioMixerNode()
     private let mainMixer = AVAudioMixerNode()
 
     private var modulationTimer: Timer?
@@ -42,6 +46,9 @@ final class WarmAudioEffect: AudioEffectNode {
 
     var nodes: [AVAudioNode] { 
         [
+            inputSplitter,
+            bypassMixer,
+            dryMixer,
             preEQ,
             varispeed,
             lowLPF,
@@ -56,10 +63,15 @@ final class WarmAudioEffect: AudioEffectNode {
             mainMixer
         ]
     }
-    var inputNode: AVAudioNode { preEQ }
+    var inputNode: AVAudioNode { inputSplitter }
     var outputNode: AVAudioNode { mainMixer }
 
     private(set) var estimatedGainBoostDB: Double = 0.0
+
+    var estimatedLatencyFrames: AVAudioFramePosition {
+        guard isEnabled else { return 0 }
+        return AVAudioFramePosition((varispeed.auAudioUnit.latency * varispeed.outputFormat(forBus: 0).sampleRate).rounded())
+    }
 
     func attach(to engine: AVAudioEngine) {
         for node in nodes {
@@ -74,9 +86,12 @@ final class WarmAudioEffect: AudioEffectNode {
         preEQ.bands[2].filterType = .highShelf
         preEQ.bands[2].frequency = 4600
         
+        for band in preEQ.bands { band.bypass = false }
+
         // Low Path: LPF for Solid State
         lowLPF.bands[0].filterType = .lowPass
         lowLPF.bands[0].frequency = 250
+        lowLPF.bands[0].bypass = false
         lowSat.loadFactoryPreset(.multiDistortedFunk)
         lowSat.preGain = -10
         lowSat.wetDryMix = 0
@@ -84,6 +99,7 @@ final class WarmAudioEffect: AudioEffectNode {
         // High Path: HPF for Tube
         highHPF.bands[0].filterType = .highPass
         highHPF.bands[0].frequency = 250
+        highHPF.bands[0].bypass = false
         highSat.loadFactoryPreset(.multiDistortedSquared)
         highSat.preGain = -10
         highSat.wetDryMix = 0
@@ -99,8 +115,10 @@ final class WarmAudioEffect: AudioEffectNode {
         highReverb.wetDryMix = 0
         highWetMixer.outputVolume = 0
 
-        lowDownsampleMixer.outputVolume = 1.0
-        highDownsampleMixer.outputVolume = 1.0
+        lowDownsampleMixer.outputVolume = 0
+        highDownsampleMixer.outputVolume = 0
+        bypassMixer.outputVolume = 1
+        dryMixer.outputVolume = 0
         varispeed.rate = 1.0
         
         // Bypass all effect units by default
@@ -112,6 +130,11 @@ final class WarmAudioEffect: AudioEffectNode {
     }
 
     func connectInternalNodes(engine: AVAudioEngine, format: AVAudioFormat?) {
+        engine.connect(inputSplitter, to: [
+            AVAudioConnectionPoint(node: bypassMixer, bus: 0),
+            AVAudioConnectionPoint(node: preEQ, bus: 0)
+        ], fromBus: 0, format: format)
+        engine.connect(bypassMixer, to: mainMixer, fromBus: 0, toBus: 4, format: format)
         // Linear part
         engine.connect(preEQ, to: varispeed, format: format)
         
@@ -119,28 +142,32 @@ final class WarmAudioEffect: AudioEffectNode {
         // EN: Use ConnectionPoints to fan out from varispeed to both Low and High paths.
         // JA: varispeedから低域パス(Low)と高域パス(High)の両方に分岐させるため、ConnectionPointを使用します。
         let connectionPoints = [
+            AVAudioConnectionPoint(node: dryMixer, bus: 0),
             AVAudioConnectionPoint(node: lowLPF, bus: 0),
             AVAudioConnectionPoint(node: highHPF, bus: 0)
         ]
         engine.connect(varispeed, to: connectionPoints, fromBus: 0, format: format)
         
+        // Preserve full-band dry audio; filtered branches add saturation only.
+        engine.connect(dryMixer, to: mainMixer, fromBus: 0, toBus: 0, format: format)
+
         // Low Path
         // Keep the realtime graph on one processing format. AVAudioEngine can reject
         // an internal sample-rate island here with kAudioUnitErr_FormatNotSupported.
         engine.connect(lowLPF, to: lowSat, format: format)
         engine.connect(lowSat, to: lowDownsampleMixer, format: format)
-        engine.connect(lowDownsampleMixer, to: mainMixer, format: format)
+        engine.connect(lowDownsampleMixer, to: mainMixer, fromBus: 0, toBus: 1, format: format)
         
         // High Path (サチュレーション -> ダブリング -> リバーブ)
         engine.connect(highHPF, to: highSat, format: format)
         engine.connect(highSat, to: highDownsampleMixer, format: format)
         engine.connect(highDownsampleMixer, to: [
-            AVAudioConnectionPoint(node: mainMixer, bus: 0),
+            AVAudioConnectionPoint(node: mainMixer, bus: 2),
             AVAudioConnectionPoint(node: highDoubler, bus: 0)
         ], fromBus: 0, format: format)
         engine.connect(highDoubler, to: highReverb, format: format)
         engine.connect(highReverb, to: highWetMixer, format: format)
-        engine.connect(highWetMixer, to: mainMixer, format: format)
+        engine.connect(highWetMixer, to: mainMixer, fromBus: 0, toBus: 3, format: format)
     }
 
     func detach(from engine: AVAudioEngine) {
@@ -171,12 +198,19 @@ final class WarmAudioEffect: AudioEffectNode {
                 if let effect = node as? AVAudioUnitEffect { effect.bypass = true }
             }
             varispeed.rate = 1.0
+            bypassMixer.outputVolume = 1
+            dryMixer.outputVolume = 0
+            mainMixer.outputVolume = 1
+            lowDownsampleMixer.outputVolume = 0
+            highDownsampleMixer.outputVolume = 0
             highWetMixer.outputVolume = 0
             estimatedGainBoostDB = 0.0
             return
         }
 
         // Enable necessary units
+        bypassMixer.outputVolume = 0
+        dryMixer.outputVolume = 1
         preEQ.bypass = false
         lowLPF.bypass = false
         lowSat.bypass = false
@@ -201,12 +235,12 @@ final class WarmAudioEffect: AudioEffectNode {
         highHPF.bands[0].frequency = xOverFreq
 
         // Low Path (Solid State)
-        lowSat.preGain = Float(-10.0 + (driveCurve * 5.0 + hybridCurve * 2.0) * 0.01)
-        lowSat.wetDryMix = Float((driveCurve * 10.0) * intensityCurve)
+        lowSat.preGain = Float(-10.0 + (driveCurve * 5.0 + hybridCurve * 2.0))
+        lowSat.wetDryMix = 100
         
         // High Path (Tube)
-        highSat.preGain = Float(-8.0 + (driveCurve * 6.0 + hybridCurve * 4.0) * 0.01)
-        highSat.wetDryMix = Float((driveCurve * 15.0 + hybridCurve * 5.0) * intensityCurve)
+        highSat.preGain = Float(-8.0 + (driveCurve * 6.0 + hybridCurve * 4.0))
+        highSat.wetDryMix = 100
 
         // --- 修正: 艶と濡れ感の付加 ---
         // コーラスの代わりにショートディレイで厚みを出し、Varispeedの揺れと混ぜてウェット感を演出
@@ -218,11 +252,11 @@ final class WarmAudioEffect: AudioEffectNode {
         highReverb.bypass = !hasWetSignal
 
         mainMixer.outputVolume = 1.0
-        lowDownsampleMixer.outputVolume = 1.0
-        highDownsampleMixer.outputVolume = 1.0
+        lowDownsampleMixer.outputVolume = Float(driveCurve * 0.10 * intensityCurve)
+        highDownsampleMixer.outputVolume = Float((driveCurve * 0.15 + hybridCurve * 0.05) * intensityCurve)
 
         // --- Wow / Flutter ---
-        flutterDepth = (0.003 + flutterCurve * 0.013) * intensityCurve
+        flutterDepth = flutterCurve * 0.016 * intensityCurve
         updateVarispeedRate()
         if flutterDepth > 0.00015 {
             startModulation()
@@ -268,8 +302,9 @@ final class WarmAudioEffect: AudioEffectNode {
         let rateOffset = yuragi * flutterDepth
         varispeed.rate = Float(1.0 + rateOffset)
         
-        let volumeOffset = yuragi * (flutterDepth * 0.3)
-        mainMixer.outputVolume = Float(1.0 + volumeOffset)
+        // Mixer volume is limited to unity; a modulation around 1 would be
+        // asymmetric. Flutter changes pitch, not the module's output gain.
+        mainMixer.outputVolume = 1
     }
 
     private func clamped(_ value: Double?, defaultValue: Double) -> Double {

@@ -14,6 +14,7 @@ struct audioApp: App {
     // recreate ContentView during scene and presentation transitions.
     @StateObject private var player = AudioPlayerViewModel()
     @StateObject private var desktopSync = DesktopSyncController()
+    @StateObject private var updateChecker = AppStoreUpdateChecker()
 
     var body: some Scene {
         WindowGroup {
@@ -39,6 +40,21 @@ struct audioApp: App {
                     desktopSync.start()
                     await desktopSync.refreshLocalLibrary()
                     player.scanLocalLibrary()
+                }
+                .task {
+                    await updateChecker.checkForUpdate()
+                }
+                .alert(
+                    L10n.tr("update.available.title"),
+                    isPresented: $updateChecker.isAlertPresented,
+                    presenting: updateChecker.availableUpdate
+                ) { _ in
+                    Button(L10n.tr("update.available.action")) {
+                        updateChecker.openAppStore()
+                    }
+                    Button(L10n.tr("update.available.later"), role: .cancel) {}
+                } message: { update in
+                    Text(L10n.tr("update.available.message", update.version))
                 }
                 .confirmationDialog(
                     L10n.tr("sync.pairing.title"),

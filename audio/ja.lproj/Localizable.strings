@@ -308,3 +308,7 @@
 "library.ongaku_playlist.remove" = "プレイリストから削除";
 "common.create" = "作成";
 "common.delete" = "削除";
+"update.available.title" = "新しいバージョンがあります";
+"update.available.message" = "バージョン%@をApp Storeで利用できます。最新の改善を利用するためにアップデートしてください。";
+"update.available.action" = "App Storeを開く";
+"update.available.later" = "あとで";
