@@ -1315,7 +1315,13 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         guard !isClearingPreparedAudioCache else { return }
         cacheMaintenanceTask?.cancel()
         cacheMaintenanceTask = Task { @MainActor [weak self] in
-            let statistics = await HiResPlaybackEngine.preparedAudioCacheStatistics()
+            async let prepared = HiResPlaybackEngine.preparedAudioCacheStatistics()
+            async let remote = RemoteAudioCache.shared.statistics()
+            let (preparedStatistics, remoteStatistics) = await (prepared, remote)
+            let statistics = Self.combinedCacheStatistics(
+                prepared: preparedStatistics,
+                remote: remoteStatistics
+            )
             guard let self, !Task.isCancelled else { return }
             self.preparedAudioCacheStatistics = statistics
             self.cacheMaintenanceTask = nil
@@ -1330,9 +1336,17 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             hiResPlaybackEngine.releasePreloadedResources()
         }
         cacheMaintenanceTask = Task { @MainActor [weak self] in
-            await HiResPlaybackEngine.clearPreparedAudioDiskCache()
+            async let clearPrepared: Void = HiResPlaybackEngine.clearPreparedAudioDiskCache()
+            async let clearRemote: Void = RemoteAudioCache.shared.clear()
+            _ = await (clearPrepared, clearRemote)
             guard let self, !Task.isCancelled else { return }
-            self.preparedAudioCacheStatistics = await HiResPlaybackEngine.preparedAudioCacheStatistics()
+            async let prepared = HiResPlaybackEngine.preparedAudioCacheStatistics()
+            async let remote = RemoteAudioCache.shared.statistics()
+            let (preparedStatistics, remoteStatistics) = await (prepared, remote)
+            self.preparedAudioCacheStatistics = Self.combinedCacheStatistics(
+                prepared: preparedStatistics,
+                remote: remoteStatistics
+            )
             self.isClearingPreparedAudioCache = false
             self.cacheMaintenanceTask = nil
         }
@@ -1342,6 +1356,17 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         ByteCountFormatter.string(
             fromByteCount: Int64(min(byteCount, UInt64(Int64.max))),
             countStyle: .file
+        )
+    }
+
+    nonisolated private static func combinedCacheStatistics(
+        prepared: PreparedAudioCacheStatistics,
+        remote: RemoteAudioCacheStatistics
+    ) -> PreparedAudioCacheStatistics {
+        PreparedAudioCacheStatistics(
+            byteCount: prepared.byteCount + remote.byteCount,
+            entryCount: prepared.entryCount + remote.entryCount,
+            maximumByteCount: prepared.maximumByteCount + remote.maximumByteCount
         )
     }
 
@@ -4349,27 +4374,46 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         let preparationToken = playbackPreparationToken
         localPlaybackLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            let preparedAssetURL: URL
             do {
+                preparedAssetURL = try await RemoteAudioCache.shared.playbackURL(for: assetURL)
+            } catch is CancellationError {
+                return
+            } catch {
+                self.errorMessage = L10n.tr("error.playback_prepare_failed", error.localizedDescription)
+                self.isPlaying = false
+                self.isProcessing = false
+                self.isPlaybackStarting = false
+                self.localPlaybackLoadTask = nil
+                return
+            }
+
+            do {
+                try Task.checkCancellation()
+                guard self.playbackPreparationToken == preparationToken,
+                      self.selectedSystemSongID == song.id else {
+                    throw CancellationError()
+                }
                 let preferredUpsampling = restoreUpsamplingMode
                     ?? self.memorySafetyMode.automaticUpsamplingMode
                 let requestedUpsampling = self.automaticUpsamplingMode(
-                    for: assetURL,
+                    for: preparedAssetURL,
                     preferred: preferredUpsampling
                 )
                 self.upsamplingMode = requestedUpsampling
                 if preferredUpsampling.isPrecisionSinc,
                    requestedUpsampling == .avAudioConverter,
-                   !assetURL.isFileURL,
+                   !preparedAssetURL.isFileURL,
                    self.precisionUpgradeSkippedSongID != song.id {
                     self.precisionUpgradeSkippedSongID = song.id
                     PlaybackDebugLogger.warning(
-                        "audio.quality_upgrade.skipped reason=media_library_concurrent_decode songID=\(song.id) scheme=\(assetURL.scheme ?? "unknown")"
+                        "audio.quality_upgrade.skipped reason=media_library_concurrent_decode songID=\(song.id) scheme=\(preparedAssetURL.scheme ?? "unknown")"
                     )
                 }
                 let shouldUseTwoStageLoad = restoreUpsamplingMode == nil && requestedUpsampling.isPrecisionSinc
 
                 try await self.hiResPlaybackEngine.load(
-                    url: assetURL,
+                    url: preparedAssetURL,
                     effectSettings: self.playbackEffectSettings,
                     headphoneSpatialSettings: self.playbackSpatialSettings,
                     upsamplingMode: requestedUpsampling,
@@ -4395,7 +4439,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 if shouldUseTwoStageLoad && self.isBackgroundQualityUpgradeEnabled {
                     self.startPrecisionSincUpgrade(
                         songID: song.id,
-                        assetURL: assetURL,
+                        assetURL: preparedAssetURL,
                         targetUpsampling: requestedUpsampling
                     )
                 }
@@ -4412,7 +4456,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             guard !Task.isCancelled, self.playbackPreparationToken == preparationToken else { return }
             do {
                     try await self.hiResPlaybackEngine.load(
-                        url: assetURL,
+                        url: preparedAssetURL,
                         effectSettings: self.playbackEffectSettings,
                         headphoneSpatialSettings: self.playbackSpatialSettings,
                         upsamplingMode: .avAudioConverter,
@@ -4448,7 +4492,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     )
                     do {
                         try await self.hiResPlaybackEngine.load(
-                            url: assetURL,
+                            url: preparedAssetURL,
                             effectSettings: self.playbackEffectSettings,
                             headphoneSpatialSettings: self.playbackSpatialSettings,
                             upsamplingMode: .avAudioConverter,
@@ -4858,12 +4902,6 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func scheduleNextTrackPreload(after currentIndex: Int) {
-        guard isNextTrackMemoryPreloadEnabled else {
-            PlaybackDebugLogger.event(
-                "audio.preload.skipped reason=full_track_memory_isolation"
-            )
-            return
-        }
         guard systemQueue.indices.contains(currentIndex) else { return }
         let nextIndex = currentIndex + 1
         guard systemQueue.indices.contains(nextIndex) else { return }
@@ -4872,12 +4910,45 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         guard let nextURL else { return }
 
         preloadTrackTask?.cancel()
+        let currentSongID = systemQueue[currentIndex].id
+
+        // Disk-backed remote prefetch does not retain decoded PCM and is safe
+        // even while full-track in-memory preloading remains disabled.
+        if RemoteMusicSourceStore.shared.sourceID(containing: nextURL) != nil
+            || nextURL.scheme == GoogleDriveLibraryStore.urlScheme {
+            preloadTrackTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, !Task.isCancelled,
+                      self.selectedSystemSongID == currentSongID,
+                      self.systemQueueIndex == currentIndex else { return }
+                do {
+                    _ = try await RemoteAudioCache.shared.playbackURL(for: nextURL)
+                    guard !Task.isCancelled else { return }
+                    PlaybackDebugLogger.event(
+                        "audio.remote_cache.preloaded songID=\(nextSong.id)"
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    PlaybackDebugLogger.warning(
+                        "audio.remote_cache.preload_failed songID=\(nextSong.id) error=\(error.localizedDescription)"
+                    )
+                }
+            }
+            return
+        }
+
+        guard isNextTrackMemoryPreloadEnabled else {
+            PlaybackDebugLogger.event(
+                "audio.preload.skipped reason=full_track_memory_isolation"
+            )
+            return
+        }
         let spatialSettings = playbackSpatialSettings
         let preloadMode = memorySafetyMode.automaticUpsamplingMode
         // Streaming AVAudioConverter playback already starts immediately and
         // does not benefit from retaining another full-track PCM buffer.
         guard preloadMode.isPrecisionSinc else { return }
-        let currentSongID = systemQueue[currentIndex].id
         let currentUpgradeTask = precisionUpgradeTask
         preloadTrackTask = Task { @MainActor [weak self] in
             guard let self else { return }

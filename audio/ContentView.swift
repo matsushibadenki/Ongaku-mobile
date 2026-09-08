@@ -7,6 +7,7 @@
 
 import SwiftUI
 import MusicKit
+import UniformTypeIdentifiers
 
 private enum RootTab {
     case nowPlaying, library, effects, search
@@ -1478,6 +1479,9 @@ struct SettingsView: View {
     @Binding var isShowing: Bool
     @State private var isShowingCacheDeletionConfirmation = false
     @State private var isShowingDesktopSync = false
+    @StateObject private var remoteSources = RemoteMusicSourcesViewModel()
+    @StateObject private var googleDrive = GoogleDriveConnectionController()
+    @State private var isChoosingRemoteDirectory = false
     
     var body: some View {
         NavigationStack {
@@ -1543,6 +1547,40 @@ struct SettingsView: View {
                             || player.isPlaybackStarting
                     )
 
+                    Button {
+                        isChoosingRemoteDirectory = true
+                    } label: {
+                        Label(
+                            L10n.tr("settings.remote_sources.add"),
+                            systemImage: "externaldrive.connected.to.line.below"
+                        )
+                    }
+                    .disabled(player.isPlaying || player.isPlaybackStarting)
+
+                    ForEach(remoteSources.directories) { directory in
+                        HStack(spacing: 12) {
+                            Image(systemName: "network")
+                                .foregroundStyle(player.accentColor)
+                            Text(directory.displayName)
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            Spacer()
+                            Button(role: .destructive) {
+                                if remoteSources.removeDirectory(id: directory.id) {
+                                    player.scanLocalLibrary()
+                                }
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(L10n.tr("settings.remote_sources.remove"))
+                        }
+                    }
+
+                    Text(L10n.tr("settings.remote_sources.footer"))
+                        .font(.appCaption())
+                        .foregroundStyle(Theme.textSecondary)
+
                     if let loadingMessage = player.libraryLoadingMessage {
                         HStack(spacing: 10) {
                             ProgressView()
@@ -1555,6 +1593,52 @@ struct SettingsView: View {
                         .padding(.vertical, 4)
                     }
                 }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section(L10n.tr("settings.google_drive.section")) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "externaldrive.badge.icloud")
+                            .foregroundStyle(player.accentColor)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(googleDrive.isConnected
+                                 ? L10n.tr("settings.google_drive.connected")
+                                 : L10n.tr("settings.google_drive.disconnected"))
+                                .foregroundStyle(Theme.textPrimary)
+                            if googleDrive.isConnected {
+                                Text(L10n.tr("settings.google_drive.track_count", googleDrive.trackCount))
+                                    .font(.appCaption())
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                        Spacer()
+                        if googleDrive.isWorking { ProgressView().controlSize(.small) }
+                    }
+
+                    if googleDrive.isConnected {
+                        Button(L10n.tr("settings.google_drive.refresh")) {
+                            Task {
+                                if await googleDrive.refreshLibrary() { player.scanLocalLibrary() }
+                            }
+                        }
+                        Button(L10n.tr("settings.google_drive.disconnect"), role: .destructive) {
+                            Task {
+                                if await googleDrive.disconnect() { player.scanLocalLibrary() }
+                            }
+                        }
+                    } else {
+                        Button(L10n.tr("settings.google_drive.connect")) {
+                            Task {
+                                if await googleDrive.connectAndSync() { player.scanLocalLibrary() }
+                            }
+                        }
+                    }
+
+                    Text(L10n.tr("settings.google_drive.footer"))
+                        .font(.appCaption())
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .disabled(googleDrive.isWorking || player.isPlaying || player.isPlaybackStarting)
                 .listRowBackground(Theme.secondaryBackground)
 
                 Section(L10n.tr("settings.section.audio")) {
@@ -1612,6 +1696,39 @@ struct SettingsView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("common.close")) { isShowing = false } } }
             .onAppear {
                 player.refreshPreparedAudioCacheStatistics()
+                remoteSources.reload()
+                Task { await googleDrive.refreshConnectionState() }
+            }
+            .fileImporter(
+                isPresented: $isChoosingRemoteDirectory,
+                allowedContentTypes: [.folder]
+            ) { result in
+                guard case .success(let url) = result else { return }
+                if remoteSources.addDirectory(url) {
+                    player.scanLocalLibrary()
+                }
+            }
+            .alert(
+                L10n.tr("settings.remote_sources.error.title"),
+                isPresented: Binding(
+                    get: { remoteSources.errorMessage != nil },
+                    set: { if !$0 { remoteSources.errorMessage = nil } }
+                )
+            ) {
+                Button(L10n.tr("common.close"), role: .cancel) {}
+            } message: {
+                Text(remoteSources.errorMessage ?? "")
+            }
+            .alert(
+                L10n.tr("settings.google_drive.error.title"),
+                isPresented: Binding(
+                    get: { googleDrive.errorMessage != nil },
+                    set: { if !$0 { googleDrive.errorMessage = nil } }
+                )
+            ) {
+                Button(L10n.tr("common.close"), role: .cancel) {}
+            } message: {
+                Text(googleDrive.errorMessage ?? "")
             }
             .sheet(isPresented: $isShowingDesktopSync) {
                 DesktopSyncView()

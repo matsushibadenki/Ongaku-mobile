@@ -20,7 +20,7 @@ struct LocalTrackMetadata: Sendable {
 
 final class LocalMediaManager: @unchecked Sendable {
     static let shared = LocalMediaManager()
-    static let supportedAudioExtensions: Set<String> = [
+    nonisolated static let supportedAudioExtensions: Set<String> = [
         "aac", "aif", "aiff", "alac", "caf", "flac", "m4a", "mp3", "wav",
     ]
     private let fileManager = FileManager.default
@@ -99,36 +99,42 @@ final class LocalMediaManager: @unchecked Sendable {
             .contentModificationDateKey,
         ]
         
-        guard let enumerator = fileManager.enumerator(
-            at: ongakuDirectory,
-            includingPropertiesForKeys: Array(resourceKeys),
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        
-        while let fileURL = enumerator.nextObject() as? URL {
-            guard !Task.isCancelled else { return [] }
-            let ext = fileURL.pathExtension.lowercased()
-            guard Self.supportedAudioExtensions.contains(ext),
-                  let values = try? fileURL.resourceValues(forKeys: resourceKeys),
-                  values.isRegularFile == true else { continue }
+        let roots = [(id: "managed", url: ongakuDirectory)] +
+            RemoteMusicSourceStore.shared.resolvedDirectories().map { (id: $0.id.uuidString, url: $0.url) }
 
-            let relativePath = fileURL.path.replacingOccurrences(
-                of: ongakuDirectory.path + "/",
-                with: "",
-                options: [.anchored]
-            )
-            candidates.append(LocalFileCandidate(
-                index: candidates.count,
-                url: fileURL,
-                relativePath: relativePath,
-                fileSize: Int64(values.fileSize ?? -1),
-                modificationTimestamp: values.contentModificationDate?.timeIntervalSinceReferenceDate ?? -1
-            ))
+        for root in roots {
+            guard !Task.isCancelled else { return [] }
+            guard let enumerator = fileManager.enumerator(
+                at: root.url,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+
+            while let fileURL = enumerator.nextObject() as? URL {
+                guard !Task.isCancelled else { return [] }
+                let ext = fileURL.pathExtension.lowercased()
+                guard Self.supportedAudioExtensions.contains(ext),
+                      let values = try? fileURL.resourceValues(forKeys: resourceKeys),
+                      values.isRegularFile == true else { continue }
+
+                let childPath = fileURL.path.replacingOccurrences(
+                    of: root.url.path + "/",
+                    with: "",
+                    options: [.anchored]
+                )
+                candidates.append(LocalFileCandidate(
+                    index: candidates.count,
+                    url: fileURL,
+                    relativePath: root.id + "/" + childPath,
+                    fileSize: Int64(values.fileSize ?? -1),
+                    modificationTimestamp: values.contentModificationDate?.timeIntervalSinceReferenceDate ?? -1
+                ))
+            }
         }
 
         guard !candidates.isEmpty else {
             saveMetadataCache([])
-            return []
+            return GoogleDriveLibraryStore.shared.localTracks()
         }
 
         let cachedByPath = Dictionary(
@@ -199,7 +205,7 @@ final class LocalMediaManager: @unchecked Sendable {
             )
         }
         saveMetadataCache(refreshedCache)
-        return sortedResults.map(\.1)
+        return sortedResults.map(\.1) + GoogleDriveLibraryStore.shared.localTracks()
     }
 
     private func loadMetadataCache() -> [CachedLocalTrack] {
@@ -207,7 +213,7 @@ final class LocalMediaManager: @unchecked Sendable {
         defer { metadataCacheLock.unlock() }
         guard let data = try? Data(contentsOf: metadataCacheURL),
               let cache = try? JSONDecoder().decode(MetadataCache.self, from: data),
-              cache.version == 1 else { return [] }
+              cache.version == 2 else { return [] }
         return cache.tracks
     }
 
@@ -217,7 +223,7 @@ final class LocalMediaManager: @unchecked Sendable {
         do {
             let directory = metadataCacheURL.deletingLastPathComponent()
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(MetadataCache(version: 1, tracks: tracks))
+            let data = try JSONEncoder().encode(MetadataCache(version: 2, tracks: tracks))
             try data.write(to: metadataCacheURL, options: .atomic)
         } catch {
             print("[LocalMediaManager] Failed to save metadata cache: \(error)")
