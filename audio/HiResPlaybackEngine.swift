@@ -434,6 +434,14 @@ private enum HiResEngineError: LocalizedError, Sendable {
 
 @MainActor
 final class HiResPlaybackEngine {
+    /// A scoped read-only handoff, not blanket Sendable conformance for AVAudioPCMBuffer.
+    /// Published base samples are never mutated. Spatial DSP always clones first;
+    /// keeping this owner alive also protects reads during memory-pressure release.
+    nonisolated private struct ImmutablePlaybackPCM: @unchecked Sendable {
+        let buffer: AVAudioPCMBuffer
+        init(_ buffer: AVAudioPCMBuffer) { self.buffer = buffer }
+    }
+
     nonisolated private struct PreparedPlaybackData {
         let url: URL
         let audioFile: AVAudioFile
@@ -503,6 +511,8 @@ final class HiResPlaybackEngine {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let upgradePlayerNode = AVAudioPlayerNode()
+    // Keep the experimental custom AU out of the device playback path until
+    // real-time iPhone validation is complete. Offline AU tests are insufficient.
     private let sourceMixer = AVAudioMixerNode()
     private let declickMixer = AVAudioMixerNode()
     private let headphoneSpatialProcessingQueue = DispatchQueue(label: "audio.hires.headphoneSpatial", qos: .userInitiated)
@@ -529,6 +539,15 @@ final class HiResPlaybackEngine {
     private var isFastFilePlayback = false
     private var configuredProcessingFormat: AVAudioFormat?
     private var isUpgradePlayerNodeActive = false
+
+    private struct PendingHandoff {
+        let oldNode: AVAudioPlayerNode
+        let oldOffset: TimeInterval
+        let generation: UInt64
+        let startHostTime: UInt64
+    }
+    private var pendingHandoff: PendingHandoff?
+    private var handoffScheduleToken: UInt64 = 0
 
     private var activePlayerNode: AVAudioPlayerNode {
         isUpgradePlayerNodeActive ? upgradePlayerNode : playerNode
@@ -609,7 +628,7 @@ final class HiResPlaybackEngine {
     }
 
     var isPlaying: Bool {
-        activePlayerNode.isPlaying
+        activePlayerNode.isPlaying && engine.isRunning
     }
 
     var isEngineRunning: Bool {
@@ -766,6 +785,8 @@ final class HiResPlaybackEngine {
         let safeEffectSettings = memorySafetyMode.safeEffectSettings(effectSettings)
 
         if strategy == .immediateStreaming {
+            try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate)
+            guard preparationGeneration == generation else { throw CancellationError() }
             try loadFastFile(
                 url: url,
                 effectSettings: safeEffectSettings,
@@ -789,6 +810,8 @@ final class HiResPlaybackEngine {
             guard Self.preparedPlaybackData(prepared, matches: url) else {
                 throw HiResEngineError.upconvertFailed
             }
+            try await configureAudioSession(preferredSampleRate: prepared.targetFormat.sampleRate)
+            guard preparationGeneration == generation else { throw CancellationError() }
             try applyPreparedPlaybackData(prepared, effectSettings: safeEffectSettings)
         } else {
             let prepared = try await Self.preparePlaybackDataInWorker(
@@ -803,6 +826,8 @@ final class HiResPlaybackEngine {
             guard Self.preparedPlaybackData(prepared, matches: url) else {
                 throw HiResEngineError.upconvertFailed
             }
+            try await configureAudioSession(preferredSampleRate: prepared.targetFormat.sampleRate)
+            guard preparationGeneration == generation else { throw CancellationError() }
             try applyPreparedPlaybackData(prepared, effectSettings: safeEffectSettings)
         }
     }
@@ -847,7 +872,6 @@ final class HiResPlaybackEngine {
         automaticDSPProfile = .neutral
         currentUpsamplingMode = .avAudioConverter
 
-        try configureAudioSession(preferredSampleRate: processingFormat.sampleRate)
         configureProcessingFormat(processingFormat)
         assert(abs((currentFormat?.sampleRate ?? 0) - processingFormat.sampleRate) < 0.1)
         apply(effectSettings: effectSettings)
@@ -866,7 +890,10 @@ final class HiResPlaybackEngine {
         playbackStartedAt = nil
         playbackGeneration &+= 1
         renderHealthMonitor.endMonitoring()
-        activePlayerNode.pause()
+        // play() always reschedules from playbackOffset. Stop BOTH schedules,
+        // including a replacement whose future host-time start has not arrived.
+        cancelPendingHandoff()
+        activePlayerNode.stop()
         engine.pause()
     }
 
@@ -875,12 +902,13 @@ final class HiResPlaybackEngine {
         playbackGeneration &+= 1
         headphoneSpatialUpdateToken &+= 1
         renderHealthMonitor.endMonitoring()
+        pendingHandoff = nil
         playerNode.stop()
         upgradePlayerNode.stop()
         spectrumAnalyzer.reset()
         playerNode.volume = 1.0
         upgradePlayerNode.volume = 0.0
-        sourceMixer.outputVolume = 1.0
+        sourceMixer.outputVolume = 1
         inputGainEQ.globalGain = 0
         isUpgradePlayerNodeActive = false
         currentAudioFile = nil
@@ -976,19 +1004,20 @@ final class HiResPlaybackEngine {
 
         headphoneSpatialUpdateToken &+= 1
         let token = headphoneSpatialUpdateToken
-        let baseBuffer = baseConvertedBuffer
+        let baseBuffer = ImmutablePlaybackPCM(baseConvertedBuffer)
         let cachedURL = currentAudioURL
         let cachedUpsamplingMode = currentUpsamplingMode
         let needsSpatialProcessingCopy = safeSettings.isEnabled
             && Self.shouldApplyHeadphoneVirtualization
             && convertedFormat.channelCount >= 2
-        guard !needsSpatialProcessingCopy || Self.canAllocatePlaybackCopy(of: baseBuffer) else {
+        guard !needsSpatialProcessingCopy || Self.canAllocatePlaybackCopy(of: baseBuffer.buffer) else {
             completion(HiResEngineError.offlineBufferTooLarge)
             return
         }
 
         headphoneSpatialProcessingQueue.async { [weak self] in
             guard let self else { return }
+            let baseBuffer = baseBuffer.buffer
             
             do {
                 let rebuiltBuffer: AVAudioPCMBuffer
@@ -1090,14 +1119,14 @@ final class HiResPlaybackEngine {
             throw HiResEngineError.upconvertFailed
         }
 
-        try await MainActor.run {
-            try self.applyPreparedPlaybackData(prepared, effectSettings: effectSettings)
-            if resumeTime > 0 {
-                try self.seek(to: resumeTime)
-            }
-            if shouldResume {
-                try self.play()
-            }
+        try await configureAudioSession(preferredSampleRate: prepared.targetFormat.sampleRate)
+        guard preparationGeneration == generation else { throw CancellationError() }
+        try applyPreparedPlaybackData(prepared, effectSettings: effectSettings)
+        if resumeTime > 0 {
+            try seek(to: resumeTime)
+        }
+        if shouldResume {
+            try play()
         }
         
         try? await Task.sleep(nanoseconds: 50 * 1_000_000)
@@ -1160,37 +1189,20 @@ final class HiResPlaybackEngine {
             throw HiResEngineError.upconvertFailed
         }
 
-        // Preparation succeeded. Only now is it valid to tell the UI that the
-        // audible handoff is about to begin. If preparation throws above, the
-        // current normal stream remains untouched.
-        onHandoffReady?()
-
-        // Sample the position while the normal file is still playing. Do not
-        // fade to silence here: the old implementation intentionally muted
-        // the output during engine reconfiguration, which sounded like a stop
-        // before the high-quality buffer resumed.
-        let exactResumeTime = currentTime()
-        let evaluationTime = Date()
         // Respect a pause performed while the background conversion was in
         // progress. A completed quality upgrade must never restart playback
         // against the user's latest transport intent.
         let shouldResumeAtHandoff = shouldResume && isPlaying
-        
-        do {
-            try Task.checkCancellation()
-
-            try await MainActor.run {
-                try self.crossfadeToPreparedPlaybackData(
-                    prepared,
-                    effectSettings: effectSettings,
-                    resumeTime: exactResumeTime,
-                    evaluationTime: evaluationTime,
-                    shouldResume: shouldResumeAtHandoff
-                )
-            }
-        } catch {
-            throw error
-        }
+        // Already on MainActor: do not yield between checking transport intent
+        // and committing the handoff (a pause/seek can otherwise slip between).
+        try crossfadeToPreparedPlaybackData(
+            prepared,
+            effectSettings: effectSettings,
+            shouldResume: shouldResumeAtHandoff
+        )
+        // A completed conversion alone is not a handoff: a missing clock or
+        // late scheduling deadline can still defer it. Notify only on commit.
+        onHandoffReady?()
     }
 
     func preloadTrack(
@@ -1270,16 +1282,31 @@ final class HiResPlaybackEngine {
 
     func currentTime() -> TimeInterval {
         guard currentAudioFile != nil else { return 0 }
-        let node = activePlayerNode
-        guard node.isPlaying,
-              let lastRenderTime = node.lastRenderTime,
-              let playerTime = node.playerTime(forNodeTime: lastRenderTime) else {
+        // The replacement can be scheduled but not yet rendering. Until its
+        // first frame, keep reporting the old, still-audible source position.
+        let position: TimeInterval?
+        if let handoff = pendingHandoff, !handoffHasRendered(handoff) {
+            position = renderedPosition(on: handoff.oldNode, offset: handoff.oldOffset)
+        } else {
+            position = renderedPosition(on: activePlayerNode, offset: playbackOffset)
+                ?? pendingHandoff.flatMap { renderedPosition(on: $0.oldNode, offset: $0.oldOffset) }
+        }
+        guard let position else {
+            if pendingHandoff != nil { return min(duration, max(0, lastKnownPlaybackTime)) }
             return min(duration, max(playbackOffset, lastKnownPlaybackTime))
         }
-        let elapsed = Double(playerTime.sampleTime) / playerTime.sampleRate
-        let resolvedTime = min(duration, playbackOffset + elapsed)
+        let resolvedTime = min(duration, max(0, position))
         lastKnownPlaybackTime = resolvedTime
         return resolvedTime
+    }
+
+    private func renderedPosition(on node: AVAudioPlayerNode, offset: TimeInterval) -> TimeInterval? {
+        guard node.isPlaying,
+              let lastRenderTime = node.lastRenderTime,
+              let playerTime = node.playerTime(forNodeTime: lastRenderTime),
+              playerTime.isSampleTimeValid, playerTime.sampleTime >= 0,
+              playerTime.sampleRate > 0 else { return nil }
+        return offset + Double(playerTime.sampleTime) / playerTime.sampleRate
     }
 
     func refreshEffectLevelAudits() -> [EffectLevelAudit] {
@@ -1456,12 +1483,8 @@ final class HiResPlaybackEngine {
 
     // MARK: - Private: Audio Session
 
-    private func configureAudioSession(preferredSampleRate: Double) throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [])
-        try session.setPreferredSampleRate(preferredSampleRate)
-        try session.setPreferredIOBufferDuration(0.01)
-        try session.setActive(true)
+    private func configureAudioSession(preferredSampleRate: Double) async throws {
+        try await PlaybackAudioSession.shared.activate(preferredSampleRate: preferredSampleRate)
     }
 
     nonisolated static func resolvedProcessingSampleRate(for sourceSampleRate: Double) -> Double {
@@ -1507,6 +1530,7 @@ final class HiResPlaybackEngine {
     // MARK: - Private: Engine Configuration
 
     private func configureAudioEngine() {
+        PlaybackDebugLogger.event("audio.pipeline.source_mixer=system")
         engine.attach(playerNode)
         engine.attach(upgradePlayerNode)
         engine.attach(sourceMixer)
@@ -2828,6 +2852,7 @@ final class HiResPlaybackEngine {
     }
 
     private func scheduleBuffer(from time: TimeInterval, autoplay: Bool) {
+        cancelPendingHandoff()
         guard let sourceBuffer = convertedBuffer, let playbackFormat = convertedFormat else {
             scheduleFastFile(from: time, autoplay: autoplay)
             return
@@ -2858,6 +2883,7 @@ final class HiResPlaybackEngine {
         ) else { return }
 
         playbackOffset = Double(startFrame) / sampleRate
+        lastKnownPlaybackTime = playbackOffset
         node.scheduleBuffer(
             playbackBuffer,
             at: nil,
@@ -2883,6 +2909,8 @@ final class HiResPlaybackEngine {
     private func scheduleFastFile(from time: TimeInterval, autoplay: Bool) {
         guard isFastFilePlayback, let audioFile = currentAudioFile else { return }
 
+        cancelPendingHandoff()
+
         playbackGeneration &+= 1
         let generation = playbackGeneration
         let node = activePlayerNode
@@ -2905,7 +2933,8 @@ final class HiResPlaybackEngine {
         let remainingFrames = audioFile.length - startFrame
         guard remainingFrames > 0,
               remainingFrames <= AVAudioFramePosition(UInt32.max) else { return }
-        playbackOffset = clampedTime
+        playbackOffset = Double(startFrame) / audioFile.processingFormat.sampleRate
+        lastKnownPlaybackTime = playbackOffset
         node.scheduleSegment(
             audioFile,
             startingFrame: startFrame,
@@ -3525,10 +3554,6 @@ final class HiResPlaybackEngine {
         currentAudioFile = prepared.audioFile
         currentAudioURL = prepared.url
         playbackOffset = 0
-        let currentSession = AVAudioSession.sharedInstance()
-        if abs(currentSession.sampleRate - prepared.targetFormat.sampleRate) > 0.1 || currentSession.category != .playback {
-            try configureAudioSession(preferredSampleRate: prepared.targetFormat.sampleRate)
-        }
         
         baseConvertedBuffer = prepared.baseBuffer
         convertedBuffer = prepared.playbackBuffer
@@ -3550,24 +3575,103 @@ final class HiResPlaybackEngine {
     private func crossfadeToPreparedPlaybackData(
         _ prepared: PreparedPlaybackData,
         effectSettings: [RealtimeAudioEffectSetting],
-        resumeTime: TimeInterval,
-        evaluationTime: Date? = nil,
         shouldResume: Bool
     ) throws {
+        guard pendingHandoff == nil,
+              currentAudioURL == prepared.url,
+              let graphFormat = configuredProcessingFormat,
+              graphFormat == prepared.targetFormat else {
+            throw CancellationError()
+        }
         let oldNode = activePlayerNode
         let newNode = isUpgradePlayerNodeActive ? playerNode : upgradePlayerNode
-        let wasPlaying = oldNode.isPlaying
+        let oldOffset = playbackOffset
 
-        // The user instructed: "通常音質プレーヤーと高音質プレーヤーは、最初の通常音質再生時には両方用意しておいてください。
-        // 高音質のデータが整い次第、再生中の場所からフェードインするだけです。"
-        // Since loadFastFile already configures the engine to the highest required processing format,
-        // we DO NOT need to call configureAudioSession or configureProcessingFormat here.
-        // Calling them mid-playback causes severe audio interruption/silence when hardware rejects the sample rate.
+        if !shouldResume {
+            // A caller's earlier paused intent must not stop playback that the
+            // user started while preparation was in flight.
+            guard !isPlaying else { throw CancellationError() }
+            let position = currentTime()
+            // Never restart a stopped engine just to install a prepared buffer.
+            playbackGeneration &+= 1
+            oldNode.stop()
+            newNode.stop()
+            adoptPreparedPlaybackMetadata(prepared, effectSettings: effectSettings)
+            scheduleBuffer(from: position, autoplay: false)
+            return
+        }
+
+        guard engine.isRunning, oldNode.isPlaying,
+              let renderTime = oldNode.lastRenderTime, renderTime.isHostTimeValid, renderTime.isSampleTimeValid,
+              let playerTime = oldNode.playerTime(forNodeTime: renderTime),
+              playerTime.isSampleTimeValid else {
+            // Without a valid render anchor, retain the original stream.
+            PlaybackDebugLogger.event("audio.handoff.deferred reason=no_render_clock")
+            throw CancellationError()
+        }
+
+        // Both nodes feed the same 96 kHz graph. Anchor the new PCM frame to
+        // the OLD node's render timestamp and start on that shared host clock.
+        // No Date-based estimates and no immediate play() call at the handoff.
+        let schedulingLead = max(0.080, AVAudioSession.sharedInstance().ioBufferDuration * 4)
+        let earliestHost = max(mach_absolute_time(), renderTime.hostTime)
+            + AVAudioTime.hostTime(forSeconds: schedulingLead)
+        let lead = AVAudioTime.seconds(forHostTime: earliestHost - renderTime.hostTime)
+        guard let plan = PlaybackHandoffClock.plan(
+            sourceOffset: oldOffset,
+            renderedFrames: playerTime.sampleTime,
+            sourceSampleRate: playerTime.sampleRate,
+            leadFromRenderTime: lead,
+            targetSampleRate: prepared.playbackBuffer.format.sampleRate,
+            targetFrameCount: Int64(prepared.playbackBuffer.frameLength)
+        ) else {
+            PlaybackDebugLogger.event("audio.handoff.deferred reason=invalid_timeline_or_tail")
+            throw CancellationError()
+        }
+        let startHost = renderTime.hostTime + AVAudioTime.hostTime(forSeconds: plan.delayFromRenderTime)
+        let nextGeneration = playbackGeneration &+ 1
+        handoffScheduleToken &+= 1
+        newNode.volume = 0
+        try schedulePreparedBuffer(prepared.playbackBuffer, startingFrame: plan.startFrame,
+                                   on: newNode, generation: nextGeneration)
+
+        // Buffer scheduling can take time under load. Do not commit a late
+        // start, or invalidate the old source's end callback, on that path.
+        let minimumLead = AVAudioTime.hostTime(forSeconds: max(0.020, AVAudioSession.sharedInstance().ioBufferDuration * 2))
+        guard mach_absolute_time() + minimumLead < startHost else {
+            // A later ordinary schedule can reuse nextGeneration. Invalidate
+            // this attempt separately so its stop callback cannot end that song.
+            handoffScheduleToken &+= 1
+            newNode.stop()
+            newNode.reset()
+            PlaybackDebugLogger.event("audio.handoff.deferred reason=scheduling_deadline")
+            throw CancellationError()
+        }
+        playbackGeneration = nextGeneration
+        lastKnownPlaybackTime = currentTime()
+        pendingHandoff = PendingHandoff(oldNode: oldNode, oldOffset: oldOffset,
+                                        generation: nextGeneration, startHostTime: startHost)
+        oldNode.volume = 1
+        newNode.play(at: AVAudioTime(hostTime: startHost))
+        isUpgradePlayerNodeActive.toggle()
+        playbackOffset = plan.startSeconds
+        adoptPreparedPlaybackMetadata(prepared, effectSettings: effectSettings)
+        PlaybackDebugLogger.event("audio.handoff.scheduled frame=\(plan.startFrame) rate=\(prepared.targetFormat.sampleRate)")
+        updateHandoffFade(generation: nextGeneration)
+    }
+
+    private func adoptPreparedPlaybackMetadata(
+        _ prepared: PreparedPlaybackData,
+        effectSettings: [RealtimeAudioEffectSetting]
+    ) {
+        // Keep the live graph/session intact; reconnecting either would interrupt
+        // both streams. This method is called only after a handoff is committed.
         currentAudioFile = prepared.audioFile
         currentAudioURL = prepared.url
         baseConvertedBuffer = prepared.baseBuffer
         convertedBuffer = prepared.playbackBuffer
         convertedFormat = prepared.targetFormat
+        isFastFilePlayback = false
         signalDiagnostics = prepared.diagnostics
         automaticDSPProfile = prepared.automaticDSPProfile
         lastAutomaticDSPCacheHit = prepared.analysisCacheHit
@@ -3577,75 +3681,66 @@ final class HiResPlaybackEngine {
         estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames }
         currentFormat = prepared.formatDescription
         apply(effectSettings: effectSettings)
+    }
 
-        let adjustedResumeTime: TimeInterval
-        if let evalTime = evaluationTime, wasPlaying {
-            // Engine did NOT stop. Audio kept advancing. Add elapsed time to stay perfectly synced!
-            let elapsed = Date().timeIntervalSince(evalTime)
-            adjustedResumeTime = resumeTime + elapsed
-        } else {
-            adjustedResumeTime = resumeTime
+    private func updateHandoffFade(generation: UInt64) {
+        guard playbackGeneration == generation,
+              let handoff = pendingHandoff, handoff.generation == generation else { return }
+        let newNode = activePlayerNode
+        guard engine.isRunning, newNode.isPlaying else {
+            cancelPendingHandoff()
+            return
         }
-
-        oldNode.volume = 1.0
-        newNode.volume = 0.0
-        try schedulePreparedBuffer(prepared.playbackBuffer, from: adjustedResumeTime, on: newNode)
-        let crossfadeGeneration = playbackGeneration
-        try ensureEngineRunning()
-        if shouldResume {
-            newNode.play()
-        }
-
-        // The replacement is already running before the old node is stopped.
-        // A short gain crossfade prevents a click without creating silence.
-        let steps = 16
-        for step in 1...steps {
-            let progress = Float(step) / Float(steps)
-            let oldGain = 1.0 - progress
-            let newGain = progress
-            let delay = 0.004 * Double(step)
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak oldNode, weak newNode] in
-                guard let self,
-                      self.playbackGeneration == crossfadeGeneration,
-                      let oldNode,
-                      let newNode else { return }
-                oldNode.volume = oldGain
-                newNode.volume = newGain
+        if handoffHasRendered(handoff),
+           let stamp = newNode.lastRenderTime,
+           let time = newNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid, time.sampleRate > 0 {
+            let progress = Float(min(1, max(0, Double(time.sampleTime) / time.sampleRate / PlaybackHandoffClock.fadeDuration)))
+            handoff.oldNode.volume = 1 - progress
+            newNode.volume = progress
+            if progress >= 1 {
+                cancelPendingHandoff()
+                PlaybackDebugLogger.event("audio.handoff.completed")
+                return
             }
         }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.064) { [weak self, weak oldNode] in
-            guard let self,
-                  self.playbackGeneration == crossfadeGeneration,
-                  let oldNode else { return }
-            oldNode.stop()
-            oldNode.reset()
-            oldNode.volume = 1.0 // Reset volume for next use
+        // Temporary stock-mixer fallback: retain audio-clock start alignment,
+        // but do not claim a sample-accurate envelope on this control-rate path.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.004) { [weak self] in
+            self?.updateHandoffFade(generation: generation)
         }
-        isUpgradePlayerNodeActive.toggle()
-        playbackOffset = min(max(0, adjustedResumeTime), duration)
-        playbackStartedAt = shouldResume ? Date() : nil
+    }
+
+    private func handoffHasRendered(_ handoff: PendingHandoff) -> Bool {
+        guard let stamp = activePlayerNode.lastRenderTime, stamp.isHostTimeValid else { return false }
+        return stamp.hostTime >= handoff.startHostTime
+    }
+
+    private func cancelPendingHandoff() {
+        pendingHandoff = nil
+        let inactiveNode = isUpgradePlayerNodeActive ? playerNode : upgradePlayerNode
+        inactiveNode.stop()
+        inactiveNode.reset()
+        inactiveNode.volume = 0
+        activePlayerNode.volume = 1
     }
 
     private func schedulePreparedBuffer(
         _ sourceBuffer: AVAudioPCMBuffer,
-        from time: TimeInterval,
-        on node: AVAudioPlayerNode
+        startingFrame startFrame: AVAudioFramePosition,
+        on node: AVAudioPlayerNode,
+        generation: UInt64
     ) throws {
-        let sampleRate = sourceBuffer.format.sampleRate
-        let startFrame = AVAudioFramePosition(max(0, min(time * sampleRate, Double(sourceBuffer.frameLength))))
         let remainingFrames = max(AVAudioFramePosition(0), AVAudioFramePosition(sourceBuffer.frameLength) - startFrame)
-        guard remainingFrames > 0 else { return }
+        guard startFrame >= 0, remainingFrames > 0 else { throw HiResEngineError.upconvertBufferFailed }
         guard let buffer = Self.playbackSlice(
             from: sourceBuffer,
             startingFrame: startFrame,
             frameCount: AVAudioFrameCount(remainingFrames)
         ) else { throw HiResEngineError.upconvertBufferFailed }
 
-        playbackGeneration &+= 1
-        let generation = playbackGeneration
         node.stop()
         node.reset()
+        let scheduleToken = handoffScheduleToken
         node.scheduleBuffer(
             buffer,
             at: nil,
@@ -3653,7 +3748,8 @@ final class HiResPlaybackEngine {
             completionCallbackType: .dataPlayedBack
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, self.playbackGeneration == generation else { return }
+                guard let self, self.playbackGeneration == generation,
+                      self.handoffScheduleToken == scheduleToken else { return }
                 self.playbackStartedAt = nil
                 self.playbackOffset = self.duration
                 self.onPlaybackEnded?()

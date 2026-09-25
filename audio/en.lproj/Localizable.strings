@@ -118,6 +118,7 @@
 "error.queue_not_found" = "This queue could not be loaded from the library.";
 "error.playback_start_failed" = "Failed to start playback: %@";
 "error.apple_music_access_required" = "Playing protected tracks requires access to Media & Apple Music. Please confirm the permission in Settings.";
+"error.system_playback_timeout" = "Music did not confirm playback. Check that this track plays in the Music app, then select it again.";
 "error.seek_failed" = "Seek failed: %@";
 "error.skip_failed" = "Skip failed: %@";
 "error.library_save_failed" = "Failed to save library state: %@";
@@ -342,3 +343,11 @@
 "error.google_oauth.missing_refresh_token" = "Google did not return a refresh token. Revoke Ongaku access in your Google Account, then connect again.";
 "error.google_oauth.not_connected" = "Google Drive is not connected.";
 "error.google_oauth.keychain" = "The Google credential could not be stored securely (Keychain %d).";
+"settings.library_feedback.system_detail" = "Refresh songs, artists, and albums from the Music app.";
+"settings.library_feedback.local_detail" = "Scan imported music and registered folders; also include the synced Google Drive list.";
+"settings.library_feedback.completed" = "Completed · %d songs found";
+"settings.library_feedback.playback" = "Pause playback and wait for preparation to finish, then try again.";
+"settings.library_feedback.busy" = "Another library operation is in progress. Please wait, then try again.";
+"settings.library_feedback.resident" = "The current track is still loaded. To protect playback, this reload is unavailable even while paused. Restart Ongaku and reload before playing.";
+"settings.library_feedback.permission" = "Allow Music access in iPhone Settings, then try again.";
+"settings.library_feedback.interrupted" = "The operation was interrupted. Please try again when playback is idle.";

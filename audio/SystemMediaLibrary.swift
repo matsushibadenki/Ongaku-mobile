@@ -66,85 +66,13 @@ struct SystemMediaLibrary {
                 title: item.title ?? L10n.unknownTitle(),
                 artist: item.artist ?? L10n.unknownArtist(),
                 album: item.albumTitle ?? L10n.unknownAlbum(),
-                artistID: item.albumArtistPersistentID == 0 ? nil : UInt64(item.albumArtistPersistentID),
+                artistID: item.artistPersistentID == 0 ? nil : UInt64(item.artistPersistentID),
                 albumID: item.albumPersistentID == 0 ? nil : UInt64(item.albumPersistentID),
                 discNumber: item.discNumber > 0 ? item.discNumber : nil,
                 trackNumber: item.albumTrackNumber > 0 ? item.albumTrackNumber : nil,
                 duration: item.playbackDuration,
-                url: nil
-            )
-        }
-    }
-
-    nonisolated func fetchArtists() -> [SystemArtist] {
-        let query = MPMediaQuery.artists()
-        let collections = query.collections ?? []
-        struct ArtistAccumulator {
-            var id: UInt64
-            var name: String
-            var albumIDs: Set<UInt64>
-            var songCount: Int
-        }
-
-        var groupedArtists: [String: ArtistAccumulator] = [:]
-        var orderedKeys: [String] = []
-
-        for collection in collections {
-            guard !Task.isCancelled else { break }
-            guard let representative = collection.representativeItem else { continue }
-
-            let artistName = representative.albumArtist ?? representative.artist ?? L10n.unknownArtist()
-            let artistID = representative.albumArtistPersistentID != 0
-                ? UInt64(representative.albumArtistPersistentID)
-                : UInt64(representative.artistPersistentID)
-            let groupingKey = artistID == 0
-                ? "name:\(artistName.lowercased())"
-                : "id:\(artistID)"
-            let albumIDs = Set(
-                collection.items.compactMap { item in
-                    item.albumPersistentID == 0 ? nil : UInt64(item.albumPersistentID)
-                }
-            )
-
-            if var existing = groupedArtists[groupingKey] {
-                existing.albumIDs.formUnion(albumIDs)
-                existing.songCount += collection.count
-                groupedArtists[groupingKey] = existing
-            } else {
-                orderedKeys.append(groupingKey)
-                groupedArtists[groupingKey] = ArtistAccumulator(
-                    id: artistID == 0 ? UInt64(bitPattern: Int64(artistName.hashValue)) : artistID,
-                    name: artistName,
-                    albumIDs: albumIDs,
-                    songCount: collection.count
-                )
-            }
-        }
-
-        return orderedKeys.compactMap { key in
-            guard !Task.isCancelled else { return nil }
-            guard let artist = groupedArtists[key] else { return nil }
-            return SystemArtist(
-                id: artist.id,
-                name: artist.name,
-                albumCount: artist.albumIDs.count,
-                songCount: artist.songCount
-            )
-        }
-    }
-
-    nonisolated func fetchAlbums() -> [SystemAlbum] {
-        let query = MPMediaQuery.albums()
-        let collections = query.collections ?? []
-
-        return collections.compactMap { collection in
-            guard !Task.isCancelled else { return nil }
-            guard let representative = collection.representativeItem else { return nil }
-            return SystemAlbum(
-                id: UInt64(representative.albumPersistentID),
-                title: representative.albumTitle ?? L10n.unknownAlbum(),
-                artist: representative.albumArtist ?? representative.artist ?? L10n.unknownArtist(),
-                songCount: collection.count
+                url: nil,
+                albumArtist: item.albumArtist
             )
         }
     }
@@ -178,12 +106,13 @@ struct SystemMediaLibrary {
                 title: item.title ?? L10n.unknownTitle(),
                 artist: item.artist ?? L10n.unknownArtist(),
                 album: item.albumTitle ?? L10n.unknownAlbum(),
-                artistID: item.albumArtistPersistentID == 0 ? nil : UInt64(item.albumArtistPersistentID),
+                artistID: item.artistPersistentID == 0 ? nil : UInt64(item.artistPersistentID),
                 albumID: item.albumPersistentID == 0 ? nil : UInt64(item.albumPersistentID),
                 discNumber: item.discNumber > 0 ? item.discNumber : nil,
                 trackNumber: item.albumTrackNumber > 0 ? item.albumTrackNumber : nil,
                 duration: item.playbackDuration,
-                url: nil
+                url: nil,
+                albumArtist: item.albumArtist
             )
         }
     }
@@ -199,7 +128,15 @@ struct SystemMediaLibrary {
     }
 
     func mediaItems(for songIDs: [UInt64]) -> [MPMediaItem] {
-        songIDs.compactMap { mediaItem(for: $0) }
+        guard !songIDs.isEmpty else { return [] }
+        // One library query, not one synchronous daemon round-trip per song.
+        let requested = Set(songIDs)
+        let items = MPMediaQuery.songs().items ?? []
+        var byID: [UInt64: MPMediaItem] = [:]
+        for item in items where requested.contains(UInt64(item.persistentID)) {
+            byID[UInt64(item.persistentID)] = item
+        }
+        return songIDs.compactMap { byID[$0] }
     }
 
     func artwork(for album: SystemAlbum, size: CGSize) -> UIImage? {
@@ -225,7 +162,7 @@ struct SystemMediaLibrary {
         let query = MPMediaQuery.artists()
         query.addFilterPredicate(idPredicate)
         
-        if let item = query.items?.first, let artwork = item.artwork {
+        if let item = query.items?.first, item.artist == name, let artwork = item.artwork {
             return artwork.image(at: size)
         }
         

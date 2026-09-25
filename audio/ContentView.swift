@@ -1516,36 +1516,28 @@ struct SettingsView: View {
                     Button {
                         player.reloadSystemLibrary()
                     } label: {
-                        LoadingButtonLabel(
+                        LibraryActionLabel(
                             title: L10n.tr("settings.reload_library"),
-                            isLoading: player.isRequestingSystemLibraryAccess || player.isLibraryBootstrapInProgress,
+                            detail: L10n.tr("settings.library_feedback.system_detail"),
+                            workingTitle: L10n.tr("settings.system_library_loading"),
+                            feedback: player.systemLibraryFeedback,
                             accentColor: player.accentColor
                         )
                     }
-                    .disabled(
-                        player.isRequestingSystemLibraryAccess
-                            || player.isLibraryBootstrapInProgress
-                            || player.isScanningLocalLibrary
-                            || player.isPlaying
-                            || player.isPlaybackStarting
-                    )
+                    .disabled(player.systemLibraryFeedback == .working)
 
                     Button {
-                        player.scanLocalLibrary()
+                        player.scanLocalLibraryFromSettings()
                     } label: {
-                        LoadingButtonLabel(
+                        LibraryActionLabel(
                             title: L10n.tr("settings.scan_local_library"),
-                            isLoading: player.isScanningLocalLibrary,
+                            detail: L10n.tr("settings.library_feedback.local_detail"),
+                            workingTitle: L10n.tr("settings.local_library_scanning"),
+                            feedback: player.localLibraryFeedback,
                             accentColor: player.accentColor
                         )
                     }
-                    .disabled(
-                        player.isScanningLocalLibrary
-                            || player.isLibraryBootstrapInProgress
-                            || player.isRequestingSystemLibraryAccess
-                            || player.isPlaying
-                            || player.isPlaybackStarting
-                    )
+                    .disabled(player.localLibraryFeedback == .working)
 
                     Button {
                         isChoosingRemoteDirectory = true
@@ -1750,6 +1742,64 @@ struct SettingsView: View {
     }
 }
 
+private struct LibraryActionLabel: View {
+    let title: String
+    let detail: String
+    let workingTitle: String
+    let feedback: LibraryActionFeedback
+    let accentColor: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Group {
+                switch feedback {
+                case .working:
+                    ProgressView().tint(accentColor)
+                case .completed:
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                case .notice:
+                    Image(systemName: "info.circle.fill").foregroundStyle(.orange)
+                case .idle:
+                    Image(systemName: "arrow.clockwise.circle").foregroundStyle(accentColor)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(feedback == .working ? workingTitle : title)
+                    .foregroundStyle(Theme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(detail)
+                    .font(.appCaption())
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                switch feedback {
+                case .completed(let count):
+                    Text(L10n.tr("settings.library_feedback.completed", count))
+                        .font(.appCaption())
+                        .foregroundStyle(.green)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .notice(let message):
+                    Text(message)
+                        .font(.appCaption())
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                default:
+                    EmptyView()
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .sensoryFeedback(.success, trigger: feedback) { _, value in
+            if case .completed = value { return true }
+            return false
+        }
+    }
+}
+
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
@@ -1790,7 +1840,6 @@ private struct CustomTabBar: View {
                 if let url = URL(string: "music://") { openURL(url) }
             }
             
-            Spacer()
             
             // Library
             TabBarButton(
@@ -1800,51 +1849,14 @@ private struct CustomTabBar: View {
                 accentColor: accentColor
             ) { selectedTab = .library }
             
-            Spacer()
             
-            // Now Playing — ラジオアイコン (中央・大きめ)
-            Button {
-                selectedTab = .nowPlaying
-            } label: {
-                VStack(spacing: 4) {
-                    ZStack {
-                        Circle()
-                            .fill(selectedTab == .nowPlaying
-                                  ? accentColor.opacity(0.15)
-                                  : Color.white.opacity(0.08))
-                            .frame(width: 44, height: 44)
-                            .overlay(
-                                Circle()
-                                    .stroke(
-                                        selectedTab == .nowPlaying
-                                        ? accentColor.opacity(0.4)
-                                        : Color.white.opacity(0.12),
-                                        lineWidth: 1
-                                    )
-                            )
-                        
-                        Image(systemName: "radio.fill")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(
-                                selectedTab == .nowPlaying
-                                ? accentColor
-                                : Theme.textSecondary
-                            )
-                    }
-                    
-                    Text(L10n.tr("tab.now_playing"))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(
-                            selectedTab == .nowPlaying
-                            ? accentColor
-                            : Theme.textSecondary
-                        )
-                }
-                .frame(width: 60)
-            }
-            .buttonStyle(.plain)
-            
-            Spacer()
+            TabBarButton(
+                icon: "radio.fill",
+                title: L10n.tr("tab.now_playing"),
+                isActive: selectedTab == .nowPlaying,
+                accentColor: accentColor
+            ) { selectedTab = .nowPlaying }
+
             
             // Effects
             TabBarButton(
@@ -1854,7 +1866,6 @@ private struct CustomTabBar: View {
                 accentColor: accentColor
             ) { selectedTab = .effects }
             
-            Spacer()
             
             // Search
             TabBarButton(
@@ -1865,16 +1876,19 @@ private struct CustomTabBar: View {
             ) { selectedTab = .search }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-        .background(
-            GlassFallbackShape(
-                shape: RoundedRectangle(cornerRadius: 22, style: .continuous),
-                fallbackFill: Theme.secondaryBackground.opacity(0.86),
-                cornerRadius: 22
-            )
-        )
-        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            if #available(iOS 26.0, *) {
+                Capsule(style: .circular)
+                    .fill(.clear)
+                    .glassEffect(.regular, in: Capsule(style: .circular))
+            } else {
+                Capsule(style: .circular)
+                    .fill(Theme.secondaryBackground.opacity(0.86))
+                    .background(.ultraThinMaterial, in: Capsule(style: .circular))
+            }
+        }
+        .padding(.horizontal, 16)
         .padding(.bottom, 4)
     }
 }
@@ -1890,17 +1904,39 @@ private struct TabBarButton: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 20))
+                    .resizable()
+                    .scaledToFit()
                     .symbolRenderingMode(.hierarchical)
-                    .frame(height: 44) // 固定の高さを設けてアイコン自体の位置を揃える
+                    .frame(width: 20, height: 20)
                 
                 Text(title)
                     .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(isActive ? accentColor : Theme.textSecondary.opacity(0.7))
-            .frame(width: 60)
+            .frame(minHeight: 44)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct CustomTabBar_Previews: PreviewProvider {
+    static var previews: some View {
+        Group {
+            preview.previewDevice("iPhone SE (3rd generation)")
+            preview.previewDevice("iPhone 16 Pro Max")
+        }
+    }
+
+    private static var preview: some View {
+        Color.black
+            .safeAreaInset(edge: .bottom) {
+                CustomTabBar(selectedTab: .constant(.nowPlaying), accentColor: .orange)
+            }
+            .preferredColorScheme(.dark)
     }
 }

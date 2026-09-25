@@ -118,6 +118,7 @@
 "error.queue_not_found" = "このキューをライブラリから取得できませんでした。";
 "error.playback_start_failed" = "再生開始に失敗しました: %@";
 "error.apple_music_access_required" = "DRM曲の再生には「メディアとApple Music」へのアクセス許可が必要です。設定アプリで許可を確認してください。";
+"error.system_playback_timeout" = "ミュージックから再生開始を確認できませんでした。ミュージックアプリでこの曲を再生できるか確認し、もう一度選曲してください。";
 "error.seek_failed" = "シークに失敗しました: %@";
 "error.skip_failed" = "移動に失敗しました: %@";
 "error.library_save_failed" = "ライブラリ保存に失敗しました: %@";
@@ -342,3 +343,11 @@
 "error.google_oauth.missing_refresh_token" = "Googleから更新トークンを受信できませんでした。GoogleアカウントでOngakuのアクセス権を取り消してから、再接続してください。";
 "error.google_oauth.not_connected" = "Google Driveに接続されていません。";
 "error.google_oauth.keychain" = "Googleの認証情報を安全に保存できませんでした（Keychain %d）。";
+"settings.library_feedback.system_detail" = "ミュージックアプリの楽曲・アーティスト・アルバムを更新します。";
+"settings.library_feedback.local_detail" = "取り込んだ音楽と登録フォルダを確認します。同期済みのGoogle Drive一覧も含みます。";
+"settings.library_feedback.completed" = "完了しました · %d曲を確認";
+"settings.library_feedback.playback" = "再生を一時停止し、準備が終わってから、もう一度お試しください。";
+"settings.library_feedback.busy" = "別のライブラリ処理が進行中です。完了してから、もう一度お試しください。";
+"settings.library_feedback.resident" = "現在の曲を読み込み済みのため、再生を保護する目的で、一時停止中も再読込を制限しています。アプリを再起動し、再生前にお試しください。";
+"settings.library_feedback.permission" = "iPhoneの設定でミュージックへのアクセスを許可してから、もう一度お試しください。";
+"settings.library_feedback.interrupted" = "処理が中断されました。再生していない状態で、もう一度お試しください。";

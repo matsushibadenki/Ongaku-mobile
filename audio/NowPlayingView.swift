@@ -264,7 +264,7 @@ private struct PlaybackModeButtonsView: View {
                 }
 
                 ModeIconButton(
-                    iconName: "shuffle.circle",
+                    iconName: "shuffle",
                     isActive: player.isLibraryShuffleEnabled,
                     isDisabled: !player.canUseLibraryShuffle,
                     accentColor: player.accentColor
@@ -287,27 +287,16 @@ private struct ModeIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Circle()
-                    .stroke(
-                        isActive ? accentColor.opacity(0.55) : Theme.border,
-                        lineWidth: 1
-                    )
-                    .background(
-                        Circle()
-                            .fill(isActive ? accentColor.opacity(0.16) : Color.clear)
-                    )
-                    .frame(width: 34, height: 34)
-
-                Image(systemName: iconName)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(
-                        isDisabled
-                            ? Theme.textSecondary.opacity(0.5)
-                            : (isActive ? accentColor : Theme.textSecondary)
-                    )
-            }
-            .opacity(isDisabled ? 0.35 : 1.0)
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(
+                    isDisabled
+                        ? Theme.textSecondary.opacity(0.5)
+                        : (isActive ? accentColor : Theme.textSecondary)
+                )
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .opacity(isDisabled ? 0.35 : 1.0)
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)

@@ -379,6 +379,7 @@ nonisolated struct SystemSong: Identifiable, Hashable, Codable, Sendable {
     let duration: TimeInterval
     let url: URL? // ローカルファイルの場合にパスを保持
     var normalizedSearchTerms: [String] = []
+    var albumArtist: String? = nil
     nonisolated func getNormalizedSearchTerms() -> [String] { normalizedSearchTerms }
 
     var source: LibraryTrackSource {

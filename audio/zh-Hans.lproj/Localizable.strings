@@ -118,6 +118,7 @@
 "error.queue_not_found" = "无法从资料库中加载此队列。";
 "error.playback_start_failed" = "开始播放失败: %@";
 "error.apple_music_access_required" = "播放受保护曲目需要“媒体与 Apple Music”访问权限。请在“设置”中确认已允许。";
+"error.system_playback_timeout" = "未能确认“音乐”已开始播放。请先确认此曲目能在“音乐”App 中播放，然后重新选择。";
 "error.seek_failed" = "跳转失败: %@";
 "error.skip_failed" = "移动失败: %@";
 "error.library_save_failed" = "保存资料库状态失败: %@";
@@ -342,3 +343,11 @@
 "error.google_oauth.missing_refresh_token" = "Google 未返回刷新令牌。请先在 Google 帐号中撤销 Ongaku 的访问权限，然后重新连接。";
 "error.google_oauth.not_connected" = "尚未连接 Google Drive。";
 "error.google_oauth.keychain" = "无法安全保存 Google 凭据（Keychain %d）。";
+"settings.library_feedback.system_detail" = "更新“音乐”App 中的歌曲、艺人和专辑。";
+"settings.library_feedback.local_detail" = "扫描已导入的音乐和已注册的文件夹，并包含已同步的 Google Drive 列表。";
+"settings.library_feedback.completed" = "已完成 · 找到 %d 首歌曲";
+"settings.library_feedback.playback" = "请暂停播放并等待准备完成，然后重试。";
+"settings.library_feedback.busy" = "其他音乐库操作正在进行，请等待完成后重试。";
+"settings.library_feedback.resident" = "当前歌曲仍处于已加载状态。为保护播放，暂停时也无法重新加载。请重启 Ongaku，并在播放前重试。";
+"settings.library_feedback.permission" = "请在 iPhone 设置中允许访问音乐，然后重试。";
+"settings.library_feedback.interrupted" = "操作已中断。请在未播放时重试。";

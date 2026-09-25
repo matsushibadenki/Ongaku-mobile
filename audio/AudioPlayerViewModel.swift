@@ -31,12 +31,26 @@ enum ShuffleMode {
     case library
 }
 
+enum LibraryActionFeedback: Equatable {
+    case idle
+    case working
+    case completed(Int)
+    case notice(String)
+}
+
 @MainActor
 final class AudioPlayerViewModel: NSObject, ObservableObject {
     private struct SystemLibrarySnapshot {
         let songs: [SystemSong]
         let artists: [SystemArtist]
         let albums: [SystemAlbum]
+
+        nonisolated init(songs: [SystemSong]) {
+            let index = SystemLibraryIndex(songs: songs, normalize: AudioPlayerViewModel.normalizeSearchText)
+            self.songs = songs
+            artists = index.artists
+            albums = index.albums
+        }
     }
 
     @Published var isPlaying = false
@@ -94,6 +108,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     @Published private(set) var isInitialLibraryLoading = true
     @Published private(set) var isScanningLocalLibrary = false
     @Published private(set) var libraryLoadingMessage: String?
+    @Published private(set) var systemLibraryFeedback: LibraryActionFeedback = .idle
+    @Published private(set) var localLibraryFeedback: LibraryActionFeedback = .idle
     @Published private(set) var isRequestingSystemLibraryAccess = false
     @Published private(set) var isRequestingAppleMusicAccess = false
     @Published private(set) var trackOverlays: [String: LibraryTrackOverlay] = [:]
@@ -121,6 +137,12 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var pendingEffectSettings: [StoredEffectSetting] = []
     private var isSystemPlayerConfigured = false
     private var isSystemPlayerStarting = false
+    private var systemRequestedSongID: UInt64?
+    private var systemRequestedStoreID = ""
+    private enum SystemPreparationState {
+        case idle, preparing, ready, failed(String)
+    }
+    private var systemPreparationState: SystemPreparationState = .idle
     private var hasInitializedHiResPlaybackEngine = false
     private var isApplicationActive = true
     private var memorySafetyMode = AudioMemorySafetyMode.deviceDefault
@@ -145,6 +167,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var interruptedPlaybackSource: PlaybackSource?
     private var interruptionResumeTask: Task<Void, Never>?
     private var sessionActivationRetryTask: Task<Void, Never>?
+    private var systemTransportStartTask: Task<Void, Never>?
+    private var interruptionAllowsImmediateResume = false
     private var playbackStartMonitorTask: Task<Void, Never>?
     private var unexpectedPlaybackRecoveryTask: Task<Void, Never>?
     private var remoteCommandRegistrations: [(command: MPRemoteCommand, target: Any)] = []
@@ -743,6 +767,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         headphoneSpatialApplyTimer?.invalidate()
         outputVolumeObservation?.invalidate()
         interruptionResumeTask?.cancel()
+        systemTransportStartTask?.cancel()
         sessionActivationRetryTask?.cancel()
         playbackStartMonitorTask?.cancel()
         unexpectedPlaybackRecoveryTask?.cancel()
@@ -790,24 +815,21 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func configureAudioSessionObservers() {
         let session = AVAudioSession.sharedInstance()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioSessionInterruption(_:)),
-            name: AVAudioSession.interruptionNotification,
-            object: session
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleMediaServicesWereReset(_:)),
-            name: AVAudioSession.mediaServicesWereResetNotification,
-            object: session
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioRouteChange(_:)),
-            name: AVAudioSession.routeChangeNotification,
-            object: session
-        )
+        // Session mutations now run on a worker. Never read/write view-model
+        // state on a notification's arbitrary posting thread, or block that
+        // thread waiting for MainActor while the media server is handling IPC.
+        NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification, object: session)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.handleAudioSessionInterruption($0) }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: AVAudioSession.mediaServicesWereResetNotification, object: session)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.handleMediaServicesWereReset($0) }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification, object: session)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.handleAudioRouteChange($0) }
+            .store(in: &cancellables)
     }
 
     private func setupAppLifecycleObservers() {
@@ -946,7 +968,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
-    @objc private func handleAudioRouteChange(_ notification: Notification) {
+    private func handleAudioRouteChange(_ notification: Notification) {
+        resumePendingInterruptionIfNeeded()
         guard hasInitializedHiResPlaybackEngine else { return }
         hiResPlaybackEngine.refreshLoudnessCompensationRoute()
         let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
@@ -964,6 +987,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     @objc private func handleAppDidBecomeActive() {
         isApplicationActive = true
+        resumePendingInterruptionIfNeeded()
         // アプリが前面に戻った際は、システム（ウィジェット）との乖離を防ぐため強制的に同期します。
         refreshPlaybackState()
         if hasInitializedHiResPlaybackEngine {
@@ -1004,18 +1028,12 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             return
         }
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true)
-            PlaybackDebugLogger.event(
-                "app.background.enter playback=local enginePlaying=\(hiResPlaybackEngine.isPlaying) sessionActive=true \(HiResPlaybackEngine.processMemoryDiagnostic)"
-            )
-        } catch {
-            PlaybackDebugLogger.failure(
-                "app.background.session_failed error=\(error.localizedDescription)"
-            )
-        }
+        // A running local player already owns its playback session. Repeating
+        // synchronous activation on screen lock can block UI and contend with
+        // an interruption; lifecycle changes alone must not take audio back.
+        PlaybackDebugLogger.event(
+            "app.background.enter playback=local enginePlaying=\(hiResPlaybackEngine.isPlaying) sessionUnchanged=true \(HiResPlaybackEngine.processMemoryDiagnostic)"
+        )
     }
 
     @objc private func handleMemoryWarning() {
@@ -1384,16 +1402,45 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             } else {
                 isLibraryBootstrapInProgress = false
                 isInitialLibraryLoading = false
+                if systemLibraryFeedback == .working {
+                    systemLibraryFeedback = .notice(L10n.tr("settings.library_feedback.permission"))
+                }
             }
         }
     }
 
     func reloadSystemLibrary() {
+        if let reason = libraryActionUnavailableReason {
+            systemLibraryFeedback = .notice(reason)
+            return
+        }
+        if hasResidentLocalPlaybackTrack {
+            systemLibraryFeedback = .notice(L10n.tr("settings.library_feedback.resident"))
+            return
+        }
+        systemLibraryFeedback = .working
         guard mediaLibraryAccess == .authorized else {
             requestSystemLibraryAccess()
             return
         }
         refreshSystemLibrary()
+    }
+
+    func scanLocalLibraryFromSettings() {
+        if let reason = libraryActionUnavailableReason {
+            localLibraryFeedback = .notice(reason)
+            return
+        }
+        localLibraryFeedback = .working
+        scanLocalLibrary()
+    }
+
+    private var libraryActionUnavailableReason: String? {
+        if isPlaybackBusyForLibraryWork { return L10n.tr("settings.library_feedback.playback") }
+        if systemLibraryRefreshTask != nil || isScanningLocalLibrary || isRequestingSystemLibraryAccess {
+            return L10n.tr("settings.library_feedback.busy")
+        }
+        return nil
     }
 
     func requestAppleMusicAccess() {
@@ -1433,6 +1480,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         // starve the realtime renderer. Library refresh is never urgent enough
         // to compete with playback or its startup transition.
         if isPlaybackBusyForLibraryWork || isLocalPlaybackActive || hasResidentLocalPlaybackTrack || isSystemPlaybackActive {
+            if systemLibraryFeedback == .working {
+                systemLibraryFeedback = .notice(L10n.tr("settings.library_feedback.interrupted"))
+            }
             isLibraryBootstrapInProgress = false
             isInitialLibraryLoading = false
             libraryLoadingMessage = nil
@@ -1465,6 +1515,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     self.isInitialLibraryLoading = false
                     self.systemLibraryRefreshTask = nil
                     self.libraryLoadingMessage = nil
+                    if self.systemLibraryFeedback == .working {
+                        self.systemLibraryFeedback = .notice(L10n.tr("settings.library_feedback.interrupted"))
+                    }
                     // A system-only snapshot does not contain files stored in
                     // Documents/Ongaku. Always merge those files back after a
                     // reload so local songs cannot disappear from the UI.
@@ -1491,31 +1544,13 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
             self.applySystemLibrarySnapshot(fastSnapshot, restorePlayback: shouldRestorePlayback, isFinal: true)
             self.persistCachedSystemLibrarySnapshot(fastSnapshot)
-
-            // Initial restoration can create a resident audio track while the
-            // refresh task is still between phases. Do not start a second set
-            // of MPMediaQuery expansions after that boundary.
-            guard !self.isPlaybackBusyForLibraryWork,
-                  !self.hasResidentLocalPlaybackTrack else { return }
-
-            let detailedWorker = Task.detached(priority: .background) {
-                try Self.buildDetailedSystemLibrarySnapshot(using: library, songs: fastSnapshot.songs)
+            if self.systemLibraryFeedback == .working {
+                self.systemLibraryFeedback = .completed(fastSnapshot.songs.count)
             }
-            let detailedSnapshot: SystemLibrarySnapshot
-            do {
-                detailedSnapshot = try await withTaskCancellationHandler {
-                    try await detailedWorker.value
-                } onCancel: {
-                    detailedWorker.cancel()
-                }
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            guard generation == self.systemLibraryRefreshGeneration else { return }
 
-            self.applySystemLibrarySnapshot(detailedSnapshot, restorePlayback: false, isFinal: false)
-            self.persistCachedSystemLibrarySnapshot(detailedSnapshot)
+            // One song query supplies every navigation index. Independent
+            // artist/album queries can disagree during a Music library sync.
+            PlaybackDebugLogger.event("library.snapshot songs=\(fastSnapshot.songs.count) artists=\(fastSnapshot.artists.count) albums=\(fastSnapshot.albums.count)")
             self.systemLibraryRefreshTask = nil
         }
     }
@@ -1540,6 +1575,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 self.isScanningLocalLibrary = false
                 self.localLibraryScanTask = nil
                 self.libraryLoadingMessage = nil
+                if self.localLibraryFeedback == .working {
+                    self.localLibraryFeedback = .notice(L10n.tr("settings.library_feedback.interrupted"))
+                }
             }
 
             let localWorker = Task.detached(priority: .background) {
@@ -1555,13 +1593,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             self.localLibraryTracks = localTracks
 
             let baseSnapshot = SystemLibrarySnapshot(
-                songs: self.systemSongs.filter { $0.url == nil },
-                artists: self.systemArtists.filter { !$0.isLocalLibraryIdentifier },
-                albums: self.systemAlbums.filter { !$0.isLocalLibraryIdentifier }
+                songs: self.systemSongs.filter { $0.url == nil }
             )
             let mergedSnapshot = Self.mergedSystemLibrarySnapshot(base: baseSnapshot, with: localTracks)
             self.applySystemLibrarySnapshot(mergedSnapshot, restorePlayback: false, isFinal: false)
             self.persistCachedSystemLibrarySnapshot(mergedSnapshot)
+            if self.localLibraryFeedback == .working {
+                self.localLibraryFeedback = .completed(localTracks.count)
+            }
         }
     }
 
@@ -1639,6 +1678,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         [SystemPlayer][\(label)] auth=\(cloudServiceAccessStatus.rawValue) \
         playbackState=\(systemPlayer.playbackState.rawValue) \
         nowPlayingID=\(nowPlayingID) \
+        expectedID=\(selectedSystemSongID.map(String.init) ?? "nil") \
+        observedStoreID=\(systemPlayer.nowPlayingItem?.playbackStoreID ?? "nil") \
+        expectedStoreID=\(systemRequestedStoreID) \
         queueCount=\(queueItems.count) \
         queueIDs=[\(queueIDs)]
         """)
@@ -1664,21 +1706,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func songs(for artist: SystemArtist) -> [SystemSong] {
-        systemSongs.filter { song in
-            if let artistID = song.artistID {
-                return artistID == artist.id
-            }
-            return song.artist == artist.name
-        }
+        systemSongs.filter { SystemLibraryIndex.contains($0, artist: artist) }
     }
 
     func findArtist(for album: SystemAlbum) -> SystemArtist? {
-        // アルバムに紐づく曲を1つ探し、そのアーティストIDまたは名前からアーティストを特定します
+        // 曲と同じ演奏者名で、現在のアーティスト一覧へ戻します。
         let albumSongs = songs(for: album)
         if let firstSong = albumSongs.first {
-            if let artistID = firstSong.artistID {
-                return systemArtists.first(where: { $0.id == artistID })
-            }
+            return systemArtists.first(where: { $0.name == firstSong.artist })
         }
         return systemArtists.first(where: { $0.name == album.artist })
     }
@@ -1686,22 +1721,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     func albums(for artist: SystemArtist) -> [SystemAlbum] {
         let artistSongs = songs(for: artist)
         let albumIDs = Set(artistSongs.compactMap(\.albumID))
-
+        let fallbackSongs = artistSongs.filter { $0.albumID == nil }
         return systemAlbums.filter { album in
-            if !albumIDs.isEmpty {
-                return albumIDs.contains(album.id)
-            }
-            return album.artist == artist.name
+            albumIDs.contains(album.id) || fallbackSongs.contains { SystemLibraryIndex.contains($0, album: album) }
         }
     }
 
     func songs(for album: SystemAlbum) -> [SystemSong] {
-        let albumSongs = systemSongs.filter { song in
-            if let albumID = song.albumID {
-                return albumID == album.id
-            }
-            return song.album == album.title && song.artist == album.artist
-        }
+        let albumSongs = systemSongs.filter { SystemLibraryIndex.contains($0, album: album) }
 
         let hasTrackMetadata = albumSongs.contains { song in
             (song.discNumber ?? 0) > 0 || (song.trackNumber ?? 0) > 0
@@ -2014,6 +2041,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             return
         }
 
+        // Invalidate the old DRM starter/monitor BEFORE the first suspension or
+        // metadata lookup. Its late notifications must not own the new request.
+        stopCurrentPlaybackForTransition(pauseSystemPlayback: true)
+
+        errorMessage = nil
         cancelLibraryWorkForPlayback(force: true)
         // A user-selected track always wins over startup restoration. This
         // prevents a late library scan from replacing the active transition.
@@ -2038,12 +2070,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         nowPlayingArtwork = nil
         nowPlayingAlbum = systemAlbums.first(where: { $0.title == song.album && $0.artist == song.artist })
 
-        let shouldOptimisticallyShowPlaying = !isPlaying
-        if shouldOptimisticallyShowPlaying {
-            isPlaying = true
-        }
+        isPlaying = false
         playbackPreparationToken &+= 1
         let prepareToken = playbackPreparationToken
+        let preparePauseToken = userPauseIntentToken
         precisionUpgradeTask?.cancel()
         preloadTrackTask?.cancel()
         localPlaybackFormatDescription = L10n.tr("playback.preparing")
@@ -2052,6 +2082,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             // UIが現在の「isProcessing = true」を描画する猶予を作る
             try? await Task.sleep(nanoseconds: 30_000_000)
             guard prepareToken == playbackPreparationToken,
+                  preparePauseToken == userPauseIntentToken,
                   selectedSystemSongID == song.id else { return }
 
             // ローカルファイル（URL保持）またはシステムライブラリ（assetURL取得可能）の判定
@@ -2087,6 +2118,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 } else {
                     let didStart = await waitUntilLocalPlaybackStarts()
                     guard activePreparationToken == playbackPreparationToken,
+                          preparePauseToken == userPauseIntentToken,
                           selectedSystemSongID == song.id else { return }
                     isProcessing = false
                     if didStart {
@@ -2103,7 +2135,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 return
             }
 
-            guard currentItem != nil else {
+            guard let selectedItem = currentItem else {
                 isProcessing = false
                 isPlaybackStarting = false
                 isPlaying = false
@@ -2112,37 +2144,28 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             }
             let cloudServiceAuthorized = await ensureCloudServiceAuthorizationForProtectedPlayback(promptIfNeeded: true)
             guard prepareToken == playbackPreparationToken,
+                  preparePauseToken == userPauseIntentToken,
                   selectedSystemSongID == song.id else { return }
             logProtectedPlaybackDiagnostics("authorization_checked")
             guard cloudServiceAuthorized else {
                 isProcessing = false
                 isPlaybackStarting = false
-                if shouldOptimisticallyShowPlaying {
-                    isPlaying = false
-                }
+                isPlaying = false
                 errorMessage = L10n.tr("error.apple_music_access_required")
                 return
             }
 
-            stopLocalPlayback(clearTrackSelection: false)
             playbackSource = .system
             ensureSystemPlayerConfigured()
             systemPlayer.repeatMode = .none
             systemPlayer.shuffleMode = .off
 
-            let items = songs.compactMap { systemMediaLibrary.mediaItem(for: $0.id) }
-            guard !items.isEmpty, items.indices.contains(index) else {
-                isProcessing = false
-                isPlaybackStarting = false
-                if shouldOptimisticallyShowPlaying {
-                    isPlaying = false
-                }
-                errorMessage = L10n.tr("error.queue_not_found")
-                return
-            }
-
-            let targetItems = Array(items[index...])
-            startProtectedSystemPlayback(with: targetItems)
+            // Preserve Music's background queue, but fetch the remainder in one
+            // batch. Stop at an imported file so native playback cannot skip it.
+            let followingIDs = songs.dropFirst(index + 1)
+                .prefix { $0.source == .systemMusic }.map(\.id)
+            let followingItems = systemMediaLibrary.mediaItems(for: followingIDs)
+            startProtectedSystemPlayback(with: [selectedItem] + followingItems)
             // ここでは defer で isProcessing を false にせず、startProtectedSystemPlayback の非同期処理に委ねる
         }
     }
@@ -2241,106 +2264,13 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         persistLibraryState()
     }
 
-    func togglePlayback() {
-        switch playbackSource {
-        case .local:
-            // The UI still represents the preserved play intent while an
-            // unexpected-stop recovery is running. A tap during that window
-            // therefore means pause, not another restart request.
-            if unexpectedPlaybackRecoveryTask != nil {
-                recordUserPauseIntent()
-                unexpectedPlaybackRecoveryTask?.cancel()
-                unexpectedPlaybackRecoveryTask = nil
-                isPlaybackStarting = false
-                isProcessing = false
-                isPlaying = false
-                stopTimer()
-                beginForcedPausedWindow(for: .local)
-                reinforceNowPlayingTransportState()
-                persistLibraryState()
-                return
-            }
-            guard hiResPlaybackEngine.hasTrack else {
-                _ = resumePlaybackFromAnyKnownContext()
-                return
-            }
-            if hiResPlaybackEngine.isPlaying {
-                recordUserPauseIntent()
-                hiResPlaybackEngine.pause()
-                isPlaying = false
-                stopTimer()
-                beginForcedPausedWindow(for: .local)
-                forcedWriteNowPlayingPaused()
-                reinforceNowPlayingTransportState()
-            } else {
-                do {
-                    try hiResPlaybackEngine.play()
-                } catch {
-                    errorMessage = L10n.tr("error.playback_start_failed", error.localizedDescription)
-                    return
-                }
-                clearForcedPausedWindow()
-                isPlaying = true
-                startTimer()
-                resumeAutomaticQualityUpgradeIfNeeded()
-                reinforceNowPlayingTransportState()
-            }
-            persistLibraryState()
-        case .system:
-            ensureSystemPlayerConfigured()
-            if systemPlayer.playbackState == .playing {
-                recordUserPauseIntent()
-                systemPlayer.pause()
-                isPlaying = false
-                stopTimer()
-                beginForcedPausedWindow(for: .system, duration: 1.0)
-                forcedWriteNowPlayingPaused()
-                reinforceNowPlayingTransportState()
-            } else {
-                // UIへの即時フィードバック：再生開始を信じてフラグを立てる
-                isPlaying = true
-                isProcessing = true
-                clearForcedPausedWindow()
-
-                print("[SystemPlayer] togglePlayback: Triggering play()")
-                systemPlayer.play()
-                
-                // DRM曲などの再生開始遅延に対応するため非同期で監視を行う
-                Task { @MainActor in
-                    var confirmed = false
-                    // 最大8回（約2秒）ポーリングして再生開始を確認する
-                    for i in 0..<8 {
-                        try? await Task.sleep(nanoseconds: 250_000_000)
-                        if systemPlayer.playbackState == .playing {
-                            print("[SystemPlayer] togglePlayback: Playback confirmed at poll \(i)")
-                            confirmed = true
-                            break
-                        }
-                        // DRM曲の場合、セッションが不安定なら再度play()を呼ぶことで活性化することがある
-                        systemPlayer.play()
-                    }
-                    
-                    if !confirmed {
-                        // 一定時間経過しても再生されない場合は、キューの再セットを含む堅牢な再生ロジックへフォールバック
-                        print("[SystemPlayer] togglePlayback: Fallback to robust resume")
-                        _ = resumePlaybackFromAnyKnownContext()
-                        // DRMの準備が遅れているだけの場合があるため、ここで
-                        // ローディングを終了せず、実再生の確認まで監視を継続する。
-                        monitorPlaybackStart(for: .system)
-                    } else {
-                        // 正常に開始された場合は状態を同期
-                        syncSystemPlaybackState()
-                        if isPlaying {
-                            startTimer()
-                        }
-                        reinforceNowPlayingTransportState()
-                        isPlaybackStarting = false
-                        isProcessing = false
-                        errorMessage = nil
-                    }
-                }
-            }
-            persistLibraryState()
+    func togglePlayback(origin: String = "app") {
+        PlaybackDebugLogger.event("audio.transport.toggle origin=\(origin) source=\(playbackSource) playing=\(isPlaying) loading=\(isPlaybackStarting)")
+        if actualPlaybackState == .playing || isPlaybackStarting
+            || unexpectedPlaybackRecoveryTask != nil {
+            _ = handleRemotePauseCommand(origin: origin)
+        } else {
+            _ = handleRemotePlayCommand()
         }
     }
 
@@ -2402,15 +2332,13 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func loadCachedSystemLibrarySnapshotIfAvailable() async -> Bool {
-        let cached = await Task.detached(priority: .utility) {
-            AppLibraryStore().loadCachedSystemLibrarySnapshot()
+        let restoredSnapshot = await Task.detached(priority: .utility) { () -> SystemLibrarySnapshot? in
+            guard let cached = AppLibraryStore().loadCachedSystemLibrarySnapshot() else { return nil }
+            // Discard the old derived indexes, not songs. They may already
+            // have lost valid Apple IDs to the former high-bit source filter.
+            return SystemLibrarySnapshot(songs: cached.songs.filter { $0.url == nil })
         }.value
-        guard let cached, systemSongs.isEmpty else { return false }
-        let snapshot = SystemLibrarySnapshot(
-            songs: cached.songs.filter { $0.url == nil },
-            artists: cached.artists.filter { !$0.isLocalLibraryIdentifier },
-            albums: cached.albums.filter { !$0.isLocalLibraryIdentifier }
-        )
+        guard let snapshot = restoredSnapshot, systemSongs.isEmpty else { return false }
 
         // A launch-time disk decode can finish after the user has selected a
         // track. Publishing thousands of rows then creates a large main-thread
@@ -2567,11 +2495,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             localPlaybackFormatDescription = hiResPlaybackEngine.currentFormat?.description ?? L10n.playbackFormatUnavailable()
             
             // 強制停止期間（ユーザーの停止操作直後）は、エンジンの報告を無視して「一時停止中」を維持します。
-            if isInForcedPausedWindow {
-                isPlaying = false
-            } else {
-                isPlaying = hiResPlaybackEngine.isPlaying
-            }
+            isPlaying = actualPlaybackState == .playing
             
         case .system:
             syncSystemPlaybackState()
@@ -2601,16 +2525,17 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         
         switch playbackSource {
         case .local:
-            return hiResPlaybackEngine.isPlaying ? .playing : .paused
+            guard hasInitializedHiResPlaybackEngine else { return .paused }
+            return PlaybackTransportPolicy.isPlaying(
+                nodePlaying: hiResPlaybackEngine.isPlaying,
+                engineRunning: hiResPlaybackEngine.isEngineRunning,
+                interrupted: isInterrupted, explicitlyPaused: isInForcedPausedWindow
+            ) ? .playing : .paused
         case .system:
             guard isSystemPlayerConfigured else { return .paused }
             let state: MPNowPlayingPlaybackState = systemPlayer.playbackState == .playing ? .playing : .paused
             return state
         }
-    }
-
-    private var actualPlaybackRate: Double {
-        actualPlaybackState == .playing ? 1.0 : 0.0
     }
 
     private func reinforceNowPlayingTransportState() {
@@ -2619,18 +2544,16 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         // システム側の「再生中」への予測復帰 (Prediction) を強力に抑え込みます。
         reinforceTaskID += 1
         let taskID = reinforceTaskID
+        let preparationToken = playbackPreparationToken
         updateNowPlayingInfo(force: true)
 
         let delays: [TimeInterval] = [0.15, 0.45, 1.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.reinforceTaskID == taskID, !self.isInterrupted else { return }
+                guard let self, self.reinforceTaskID == taskID,
+                      self.playbackPreparationToken == preparationToken, !self.isInterrupted else { return }
                 // forcedPausedWindowが終了していても、停止状態の場合は明示的に書き込む
-                if !self.isPlaying {
-                    self.forcedWriteNowPlayingPaused()
-                } else {
-                    self.updateNowPlayingInfo(force: true)
-                }
+                self.updateNowPlayingInfo(force: true)
                 
                 // システム再生時: forcedPausedWindow外でwatchdogが必要
                 if self.playbackSource == .system, !self.isPlaying {
@@ -2682,8 +2605,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         // 「再生中」になっている不整合を検知・修正します。
         // ただし DRM 起動シーケンス中（isSystemPlayerStarting）は isPlaying が
         // まだ false のためこのガードに入ってしまうが、pause() すると起動が壊れるため除外する。
-        guard !isPlaying, !isSystemPlayerStarting else { return false }
+        guard PlaybackTransportPolicy.shouldEnforcePause(
+            explicitlyPaused: isInForcedPausedWindow,
+            interrupted: isInterrupted,
+            starting: isPlaybackStarting || isSystemPlayerStarting,
+            recovering: interruptionResumeTask != nil || unexpectedPlaybackRecoveryTask != nil
+        ) else { return false }
 
+        PlaybackDebugLogger.event("audio.transport.enforce_pause source=\(playbackSource) pauseToken=\(userPauseIntentToken)")
         var didCorrect = false
 
         switch playbackSource {
@@ -2717,12 +2646,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func syncSystemPlaybackState() {
+        guard playbackSource == .system else { return }
         guard isSystemPlayerConfigured else {
             isPlaying = false
             updateQueueCapabilities()
             return
         }
 
+        guard acceptsCurrentSystemObservation else { return }
         guard let item = systemPlayer.nowPlayingItem else {
             progress = 0
             currentTimeText = "00:00"
@@ -2731,7 +2662,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             return
         }
 
-        let observedSongID = UInt64(item.persistentID)
+        let observedSongID = resolvedSystemSongID ?? UInt64(item.persistentID)
         if let previousSongID = lastObservedSystemPlaybackSongID,
            previousSongID != observedSongID,
            lastObservedSystemPlaybackProgress >= 0.9,
@@ -2762,16 +2693,52 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         durationText = formatTime(duration)
         nowPlayingArtwork = item.artwork?.image(at: CGSize(width: 600, height: 600))
         nowPlayingAlbum = resolveAlbum(from: item)
-        if isInForcedPausedWindow {
-            isPlaying = false
-        } else {
-            isPlaying = systemPlayer.playbackState == .playing
+        isPlaying = actualPlaybackState == .playing
+        if isPlaying, errorMessage == L10n.tr("error.system_playback_timeout") {
+            errorMessage = nil
+        }
+        if (isPlaybackStarting || isSystemPlayerStarting),
+           PlaybackTransportPolicy.systemStartConfirmed(
+            expectedSongID: selectedSystemSongID, observedSongID: observedSongID,
+            playing: systemPlayer.playbackState == .playing,
+            interrupted: isInterrupted, explicitlyPaused: isInForcedPausedWindow
+           ) {
+            // Confirmation, not the lifetime of the retry Task, owns the spinner.
+            isPlaybackStarting = false
+            isProcessing = false
+            isSystemPlayerStarting = false
+            errorMessage = nil
         }
         updateQueueCapabilities()
     }
 
+    private var acceptsCurrentSystemObservation: Bool {
+        guard isSystemPlayerConfigured else { return false }
+        return PlaybackTransportPolicy.acceptsSystemObservation(
+            systemSource: playbackSource == .system,
+            starting: isPlaybackStarting || isSystemPlayerStarting,
+            selectedSongID: selectedSystemSongID,
+            observedSongID: resolvedSystemSongID
+        )
+    }
+
+    private var resolvedSystemSongID: UInt64? {
+        guard isSystemPlayerConfigured, let item = systemPlayer.nowPlayingItem else { return nil }
+        if let requestedID = systemRequestedSongID,
+           PlaybackTransportPolicy.systemItemsMatch(
+            expectedID: requestedID, expectedStoreID: systemRequestedStoreID,
+            observedID: UInt64(item.persistentID), observedStoreID: item.playbackStoreID
+           ) {
+            return requestedID
+        }
+        return UInt64(item.persistentID)
+    }
+
     private var isSystemPlaybackAtTrackEnd: Bool {
-        guard let item = systemPlayer.nowPlayingItem else { return false }
+        guard let item = systemPlayer.nowPlayingItem else {
+            return lastObservedSystemPlaybackSongID == selectedSystemSongID
+                && lastObservedSystemPlaybackProgress >= 0.99
+        }
         let duration = item.playbackDuration
         guard duration.isFinite, duration > 0 else { return false }
         return (duration - systemPlayer.currentPlaybackTime) <= 0.5
@@ -2832,6 +2799,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func startVisualizationTimer() {
         stopVisualizationTimer()
+        guard isApplicationActive else { return }
         visualizationTimer = Timer.scheduledTimer(
             timeInterval: 1.0 / 30.0, // UI負荷を抑えるため30fpsに制限
             target: self,
@@ -3013,7 +2981,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
         
         // 停止時はセッションを非アクティブにしてシステムに通知する
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        PlaybackAudioSession.shared.deactivate()
         
         reinforceNowPlayingTransportState()
     }
@@ -3025,8 +2993,18 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     @objc private func handleTimerTick() {
+        guard !isInterrupted else {
+            refreshPlaybackState()
+            return
+        }
         memorySafetyTickCount &+= 1
         if memorySafetyTickCount % 8 == 0 {
+            let elapsed = playbackSource == .local
+                ? hiResPlaybackEngine.currentTime() : systemPlayer.currentPlaybackTime
+            if elapsed < 10 {
+                let running = hasInitializedHiResPlaybackEngine && hiResPlaybackEngine.isEngineRunning
+                PlaybackDebugLogger.event("audio.transport.sample source=\(playbackSource) time=\(elapsed) playing=\(isPlaying) engineRunning=\(running) interrupted=\(isInterrupted) forcedPause=\(isInForcedPausedWindow)")
+            }
             applyProactiveMemorySafetyIfNeeded()
         }
 
@@ -3063,7 +3041,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             }
         case .system:
             if isSystemPlayerConfigured,
-               !hasNextTrackInQueue,
+               !isPlaybackStarting, !isSystemPlayerStarting,
+               systemPlayer.playbackState == .stopped,
                isSystemPlaybackAtTrackEnd {
                 handleSystemPlaybackEnded()
                 return
@@ -3080,19 +3059,19 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
-    @objc private func handleSystemNowPlayingChanged() {
-        guard playbackSource == .system else { return }
+    private func handleSystemNowPlayingChanged() {
+        guard acceptsCurrentSystemObservation else { return }
         syncSystemPlaybackState()
         updateNowPlayingInfo(force: true)
     }
 
-    @objc private func handleSystemPlaybackChanged() {
-        guard playbackSource == .system else { return }
+    private func handleSystemPlaybackChanged() {
+        guard acceptsCurrentSystemObservation else { return }
 
         let state = systemPlayer.playbackState
+        PlaybackDebugLogger.event("audio.system.state state=\(state.rawValue) time=\(systemPlayer.currentPlaybackTime) starting=\(isPlaybackStarting)")
 
-        if state == .playing {
-            clearForcedPausedWindow()
+        if state == .playing && !isInterrupted && !isInForcedPausedWindow {
             startTimer()
             startVisualizationTimer()
         } else if state == .paused || state == .stopped {
@@ -3100,8 +3079,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
 
         syncSystemPlaybackState()
+        runPlaybackWatchdog()
         updateNowPlayingInfo(force: true)
 
+        guard !isInterrupted, interruptionResumeTask == nil, !isInForcedPausedWindow,
+              !isPlaybackStarting, !isSystemPlayerStarting else { return }
         guard state != .playing else { return }
         guard isSystemPlaybackAtTrackEnd else { return }
         handleSystemPlaybackEnded()
@@ -3208,14 +3190,24 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         persistLibraryState()
     }
 
-    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+    private func handleAudioSessionInterruption(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let rawType = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: rawType) else {
             return
         }
 
-        // Capture transport state before hopping back onto MainActor. The
+        // systemMusicPlayer belongs to Music, not our AVAudioSession. Music
+        // taking audio from our engine must not cancel its own startup task.
+        // Its playback notifications are authoritative for system playback.
+        if playbackSource == .system {
+            PlaybackDebugLogger.event("audio.system.app_session_interruption type=\(type.rawValue)")
+            syncSystemPlaybackState()
+            return
+        }
+
+        // Capture transport state on main-queue notification delivery before
+        // scheduling the recovery task. The
         // render watchdog can observe the OS-stopped node in the meantime and
         // set `isPlaying` to false, losing the intent that existed when the
         // interruption actually began.
@@ -3238,6 +3230,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            guard self.playbackSource == sourceAtNotification,
+                  self.playbackPreparationToken == preparationAtNotification else { return }
 
             switch type {
             case .began:
@@ -3252,11 +3246,23 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 self.interruptionResumeTask?.cancel()
                 self.interruptionResumeTask = nil
                 self.wasPlayingBeforeSessionInterruption = wasActiveAtNotification
+                    || (self.wasPlayingBeforeSessionInterruption
+                        && self.userPauseIntentToken == self.interruptionPauseIntentBaseline
+                        && self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline)
+                self.systemTransportStartTask?.cancel()
+                self.systemTransportStartTask = nil
+                self.sessionActivationRetryTask?.cancel()
+                self.sessionActivationRetryTask = nil
+                self.unexpectedPlaybackRecoveryTask?.cancel()
+                self.unexpectedPlaybackRecoveryTask = nil
+                self.reinforceTaskID += 1
                 self.interruptedPlaybackSource = sourceAtNotification
                 self.interruptionPauseIntentBaseline = pauseIntentAtNotification
                 self.interruptionPlaybackPreparationBaseline = preparationAtNotification
                 self.isInterrupted = true
+                self.isSystemPlayerStarting = false
                 self.isPlaying = false
+                self.isPlaybackStarting = false
                 self.stopTimer()
 
                 guard wasActiveAtNotification else {
@@ -3287,6 +3293,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 self.isInterrupted = false
                 let rawOptions = (userInfo[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0
                 let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+                self.interruptionAllowsImmediateResume = options.contains(.shouldResume)
                 let noPauseIntentSinceInterruption = self.userPauseIntentToken
                     == self.interruptionPauseIntentBaseline
                 let samePlaybackRequest = self.playbackPreparationToken
@@ -3326,14 +3333,32 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         interruptionResumeTask = nil
     }
 
+    private func cancelInterruptionResume() {
+        interruptionGeneration &+= 1
+        interruptionResumeTask?.cancel()
+        clearInterruptionResumeState()
+    }
+
+    private func resumePendingInterruptionIfNeeded() {
+        guard !isInterrupted, wasPlayingBeforeSessionInterruption,
+              interruptionResumeTask == nil,
+              userPauseIntentToken == interruptionPauseIntentBaseline,
+              playbackPreparationToken == interruptionPlaybackPreparationBaseline,
+              let source = interruptedPlaybackSource else { return }
+        resumePlaybackAfterInterruption(source: source, generation: interruptionGeneration)
+    }
+
     private func resumePlaybackAfterInterruption(
         source: PlaybackSource,
         generation: UInt64
     ) {
-        interruptionResumeTask?.cancel()
+        guard interruptionResumeTask == nil else { return }
+        let backgroundLease = PlaybackRecoveryBackgroundLease()
         interruptionResumeTask = Task { @MainActor [weak self] in
+            defer { backgroundLease.end() }
             guard let self else { return }
-            let retryDelays: [UInt64] = [0, 200_000_000, 500_000_000, 1_000_000_000, 1_500_000_000]
+            let retryDelays: [UInt64] = [0, 200_000_000, 500_000_000, 1_000_000_000,
+                                         2_000_000_000, 3_000_000_000, 5_000_000_000, 5_000_000_000]
             var lastActivationError: Error?
 
             for (attempt, delay) in retryDelays.enumerated() {
@@ -3345,6 +3370,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                       self.interruptionGeneration == generation,
                       self.userPauseIntentToken == self.interruptionPauseIntentBaseline,
                       self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline,
+                      self.playbackSource == source,
                       !Task.isCancelled else {
                     if self.interruptionGeneration == generation {
                         self.clearInterruptionResumeState()
@@ -3352,20 +3378,38 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     return
                 }
 
+                if backgroundLease.expired { break }
+                // Without an explicit OS resume recommendation, wait for the
+                // other app to release audio instead of taking it back.
+                guard PlaybackTransportPolicy.mayResume(
+                    osRecommended: self.interruptionAllowsImmediateResume,
+                    otherAudioPlaying: AVAudioSession.sharedInstance().isOtherAudioPlaying
+                ) else { continue }
+
                 do {
-                    let session = AVAudioSession.sharedInstance()
-                    try session.setCategory(.playback, mode: .default, options: [])
-                    try session.setActive(true)
+                    try await PlaybackAudioSession.shared.activate()
+                    if backgroundLease.expired { break }
+                    guard self.wasPlayingBeforeSessionInterruption,
+                          !self.isInterrupted,
+                          self.interruptionGeneration == generation,
+                          self.userPauseIntentToken == self.interruptionPauseIntentBaseline,
+                          self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline,
+                          self.playbackSource == source,
+                          !Task.isCancelled else { return }
 
                     let didResume: Bool
                     switch source {
                     case .local:
                         guard self.hasInitializedHiResPlaybackEngine,
                               self.hiResPlaybackEngine.hasTrack else {
-                            self.clearInterruptionResumeState()
+                            // Preparation can still be in flight; its completion
+                            // will retry the preserved interruption intent.
+                            self.interruptionResumeTask = nil
                             return
                         }
-                        try self.hiResPlaybackEngine.play()
+                        if !self.hiResPlaybackEngine.isPlaying {
+                            try self.hiResPlaybackEngine.play()
+                        }
                         try? await Task.sleep(nanoseconds: 160_000_000)
                         didResume = self.hiResPlaybackEngine.isPlaying
                             && self.hiResPlaybackEngine.isEngineRunning
@@ -3403,6 +3447,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         self.isPlaying = true
                         self.isProcessing = false
                         self.isPlaybackStarting = false
+                        self.errorMessage = nil
                         self.startTimer()
                         if source == .local {
                             self.refreshPlaybackState()
@@ -3422,7 +3467,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 }
             }
 
-            guard self.interruptionGeneration == generation else { return }
+            guard !Task.isCancelled, self.interruptionGeneration == generation,
+                  self.userPauseIntentToken == self.interruptionPauseIntentBaseline,
+                  self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline else { return }
             if let lastActivationError {
                 self.errorMessage = L10n.tr(
                     "error.playback_session_failed",
@@ -3436,7 +3483,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             self.stopTimer()
             self.refreshPlaybackState()
             self.updateNowPlayingInfo(force: true)
-            self.clearInterruptionResumeState()
+            // Preserve the intent for the next route/foreground/interruption
+            // event. A transient activation failure is not a user pause.
+            self.interruptionResumeTask = nil
         }
     }
 
@@ -3466,7 +3515,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             "audio.local.unexpected_stop reason=\(reason) current=\(String(format: "%.3f", resumeTime)) engineRunning=\(hiResPlaybackEngine.isEngineRunning)"
         )
 
+        let backgroundLease = PlaybackRecoveryBackgroundLease()
         unexpectedPlaybackRecoveryTask = Task { @MainActor [weak self] in
+            defer { backgroundLease.end() }
             guard let self else { return }
             let retryDelays: [UInt64] = [150_000_000, 500_000_000, 1_200_000_000]
             var lastError: Error?
@@ -3479,12 +3530,12 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 }
 
                 guard !Task.isCancelled,
+                      !backgroundLease.expired,
                       self.playbackSource == .local,
                       self.playbackPreparationToken == preparationToken,
                       self.userPauseIntentToken == pauseIntentToken,
                       self.selectedSystemSongID == expectedSongID,
                       self.hiResPlaybackEngine.currentAudioURL == expectedURL,
-                      self.isPlaying,
                       !self.isInterrupted,
                       !self.isInForcedPausedWindow else {
                     self.unexpectedPlaybackRecoveryTask = nil
@@ -3493,9 +3544,16 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 }
 
                 do {
-                    let session = AVAudioSession.sharedInstance()
-                    try session.setCategory(.playback, mode: .default, options: [])
-                    try session.setActive(true)
+                    try await PlaybackAudioSession.shared.activate()
+                    if backgroundLease.expired { break }
+                    guard PlaybackTransportPolicy.requestIsCurrent(
+                        pauseToken: pauseIntentToken, currentPauseToken: self.userPauseIntentToken,
+                        preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                        interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                    ),
+                       self.playbackSource == .local,
+                       self.selectedSystemSongID == expectedSongID,
+                       self.hiResPlaybackEngine.currentAudioURL == expectedURL else { return }
 
                     let safeResumeTime = min(
                         max(0, resumeTime),
@@ -3548,7 +3606,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
-    @objc private func handleMediaServicesWereReset(_ notification: Notification) {
+    private func handleMediaServicesWereReset(_ notification: Notification) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             // 音声サービスがリセットされた場合は、再生状態を同期し直す。
@@ -3568,6 +3626,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func handleLocalPlaybackEnded() {
+        guard !isInterrupted, !isInForcedPausedWindow, interruptionResumeTask == nil else { return }
         guard !shouldIgnoreDuplicateTrackEndEvent() else { return }
 
         PlaybackDebugLogger.event(
@@ -3615,7 +3674,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         updateQueueCapabilities()
         
         // 再生終了時はセッションを解除
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        PlaybackAudioSession.shared.deactivate()
         
         updateNowPlayingInfo(force: true)
         reinforceNowPlayingTransportState()
@@ -3623,6 +3682,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func handleSystemPlaybackEnded() {
+        guard !isInterrupted, !isInForcedPausedWindow, interruptionResumeTask == nil else { return }
         guard !shouldIgnoreDuplicateTrackEndEvent() else { return }
 
         recordCurrentSystemSongAsCompleted()
@@ -3654,7 +3714,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         updateQueueCapabilities()
         
         // システムプレーヤー停止時もセッションを解除
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        PlaybackAudioSession.shared.deactivate()
         
         reinforceNowPlayingTransportState()
         persistLibraryState()
@@ -3667,22 +3727,25 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
         commandCenter.playCommand.isEnabled = true
         let playTarget = commandCenter.playCommand.addTarget { [weak self] _ in
-            return self?.handleRemotePlayCommand() ?? .commandFailed
+            guard let self else { return .commandFailed }
+            Task { @MainActor in _ = self.handleRemotePlayCommand() }
+            return .success
         }
         remoteCommandRegistrations.append((commandCenter.playCommand, playTarget))
 
         commandCenter.pauseCommand.isEnabled = true
         let pauseTarget = commandCenter.pauseCommand.addTarget { [weak self] _ in
-            return self?.handleRemotePauseCommand() ?? .commandFailed
+            guard let self else { return .commandFailed }
+            Task { @MainActor in _ = self.handleRemotePauseCommand(origin: "remote") }
+            return .success
         }
         remoteCommandRegistrations.append((commandCenter.pauseCommand, pauseTarget))
         
         commandCenter.togglePlayPauseCommand.isEnabled = true
         let toggleTarget = commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
-            return self.actualPlaybackState == .playing
-                ? self.handleRemotePauseCommand()
-                : self.handleRemotePlayCommand()
+            Task { @MainActor in self.togglePlayback(origin: "remote") }
+            return .success
         }
         remoteCommandRegistrations.append((commandCenter.togglePlayPauseCommand, toggleTarget))
 
@@ -3722,15 +3785,54 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func handleRemotePlayCommand() -> MPRemoteCommandHandlerStatus {
         lastExplicitRemoteTransportCommandAt = CFAbsoluteTimeGetCurrent()
-        guard activatePlaybackSessionForRemoteStart() else {
-            scheduleRemoteSessionActivationRetry()
-            reinforceNowPlayingTransportState()
-            // The command has been accepted. AVAudioSession commonly needs a
-            // short settling period after another app or route owns the audio
-            // stack, so complete it asynchronously instead of surfacing a
-            // transient activation error.
+        if isInterrupted {
+            wasPlayingBeforeSessionInterruption = true
+            interruptedPlaybackSource = playbackSource
+            interruptionPauseIntentBaseline = userPauseIntentToken
+            interruptionPlaybackPreparationBaseline = playbackPreparationToken
             return .success
         }
+        guard systemTransportStartTask == nil, sessionActivationRetryTask == nil else { return .success }
+        cancelInterruptionResume()
+        clearForcedPausedWindow()
+        if playbackSource == .system {
+            return startRemotePlaybackAfterActivation()
+        }
+        let pauseToken = userPauseIntentToken
+        let preparationToken = playbackPreparationToken
+        let generation = interruptionGeneration
+        isPlaybackStarting = true
+        sessionActivationRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let lease = PlaybackRecoveryBackgroundLease()
+            defer { lease.end() }
+            do {
+                try await PlaybackAudioSession.shared.activate()
+                guard PlaybackTransportPolicy.requestIsCurrent(
+                    pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
+                    preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                    interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                ), self.interruptionGeneration == generation else { return }
+                self.sessionActivationRetryTask = nil
+                self.isPlaybackStarting = false
+                guard !lease.expired else { return }
+                _ = self.startRemotePlaybackAfterActivation()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard PlaybackTransportPolicy.requestIsCurrent(
+                    pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
+                    preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                    interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                ), self.interruptionGeneration == generation else { return }
+                PlaybackDebugLogger.warning("audio.session.activation_deferred error=\(error.localizedDescription)")
+                self.scheduleRemoteSessionActivationRetry()
+            }
+        }
+        return .success
+    }
+
+    private func startRemotePlaybackAfterActivation() -> MPRemoteCommandHandlerStatus {
         if !hasTrack {
             if resumePlaybackFromAnyKnownContext() {
                 return .success
@@ -3770,59 +3872,54 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 return .success
             }
             
-            // リモートコマンド起動時も、UIと同様の即時レスポンスとポーリングによる安定化を行う
-            isPlaying = true
+            guard systemTransportStartTask == nil else { return .success }
+            isPlaying = false
             isProcessing = true
             isPlaybackStarting = true
             clearForcedPausedWindow()
-            
-            print("[SystemPlayer] handleRemotePlayCommand: Triggering play()")
+            let pauseToken = userPauseIntentToken
+            let preparationToken = playbackPreparationToken
+            let generation = interruptionGeneration
             systemPlayer.play()
-            
-            Task { @MainActor in
-                var confirmed = false
-                // リモート時はコントロールセンター側のタイムアウトも考慮し、4回（約1秒）程度で判定
-                for i in 0..<4 {
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    if systemPlayer.playbackState == .playing {
-                        print("[SystemPlayer] handleRemotePlayCommand: Playback confirmed at poll \(i)")
-                        confirmed = true
-                        break
+            updateNowPlayingInfo(force: true)
+
+            systemTransportStartTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer {
+                    if self.userPauseIntentToken == pauseToken,
+                       self.playbackPreparationToken == preparationToken,
+                       self.interruptionGeneration == generation {
+                        self.systemTransportStartTask = nil
                     }
-                    systemPlayer.play()
                 }
-                
-                if !confirmed {
-                    print("[SystemPlayer] handleRemotePlayCommand: Fallback to robust resume")
-                    _ = resumePlaybackFromAnyKnownContext()
-                    monitorPlaybackStart(for: .system)
-                } else {
-                    syncSystemPlaybackState()
-                    if isPlaying {
-                        startTimer()
+                let lease = PlaybackRecoveryBackgroundLease()
+                defer { lease.end() }
+                for poll in 0..<8 {
+                    do { try await Task.sleep(nanoseconds: 250_000_000) }
+                    catch { return }
+                    guard PlaybackTransportPolicy.requestIsCurrent(
+                        pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
+                        preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                        interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                    ), self.interruptionGeneration == generation, self.playbackSource == .system else { return }
+
+                    if self.systemPlayer.playbackState == .playing {
+                        self.isPlaybackStarting = false
+                        self.isProcessing = false
+                        self.errorMessage = nil
+                        self.syncSystemPlaybackState()
+                        self.startTimer()
+                        self.reinforceNowPlayingTransportState()
+                        return
                     }
-                    reinforceNowPlayingTransportState()
-                    isPlaybackStarting = false
-                    isProcessing = false
-                    errorMessage = nil
+                    if poll == 2 || poll == 5 { self.systemPlayer.play() }
                 }
+                // Continue observing this request; do not replace the queue
+                // from an obsolete asynchronous play command.
+                self.monitorPlaybackStart(for: .system)
             }
             persistLibraryState()
             return .success
-        }
-    }
-
-    private func activatePlaybackSessionForRemoteStart() -> Bool {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
-            try session.setActive(true)
-            return true
-        } catch {
-            PlaybackDebugLogger.warning(
-                "audio.session.activation_deferred error=\(error.localizedDescription)"
-            )
-            return false
         }
     }
 
@@ -3832,7 +3929,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         let preparationToken = playbackPreparationToken
         isPlaybackStarting = true
 
+        let backgroundLease = PlaybackRecoveryBackgroundLease()
         sessionActivationRetryTask = Task { @MainActor [weak self] in
+            defer { backgroundLease.end() }
             guard let self else { return }
             let retryDelays: [UInt64] = [
                 150_000_000,
@@ -3860,10 +3959,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 }
 
                 do {
-                    let session = AVAudioSession.sharedInstance()
-                    try session.setCategory(.playback, mode: .default, options: [])
-                    try session.setActive(true)
+                    try await PlaybackAudioSession.shared.activate()
+                    guard PlaybackTransportPolicy.requestIsCurrent(
+                        pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
+                        preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                        interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                    ), !self.isInForcedPausedWindow else { return }
 
+                    if backgroundLease.expired { break }
                     let didStart: Bool
                     switch self.playbackSource {
                     case .local:
@@ -3883,6 +3986,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         didStart = self.systemPlayer.playbackState == .playing
                     }
 
+                    guard PlaybackTransportPolicy.requestIsCurrent(
+                        pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
+                        preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                        interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                    ) else { return }
                     if didStart {
                         self.clearForcedPausedWindow()
                         self.isPlaying = true
@@ -3922,7 +4030,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func handleRemotePauseCommand() -> MPRemoteCommandHandlerStatus {
+    private func handleRemotePauseCommand(origin: String = "app") -> MPRemoteCommandHandlerStatus {
+        let elapsed = playbackSource == .local
+            ? hiResPlaybackEngine.currentTime() : systemPlayer.currentPlaybackTime
+        PlaybackDebugLogger.event("audio.transport.pause origin=\(origin) source=\(playbackSource) time=\(elapsed) generation=\(playbackPreparationToken)")
         lastExplicitRemoteTransportCommandAt = CFAbsoluteTimeGetCurrent()
         recordUserPauseIntent()
         switch playbackSource {
@@ -3958,6 +4069,18 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func recordUserPauseIntent() {
         userPauseIntentToken &+= 1
+        isSystemPlayerStarting = false
+        localPlaybackLoadTask?.cancel()
+        localPlaybackLoadTask = nil
+        unexpectedPlaybackRecoveryTask?.cancel()
+        unexpectedPlaybackRecoveryTask = nil
+        cancelInterruptionResume()
+        systemTransportStartTask?.cancel()
+        systemTransportStartTask = nil
+        playbackStartMonitorTask?.cancel()
+        playbackStartMonitorTask = nil
+        isPlaybackStarting = false
+        isProcessing = false
         sessionActivationRetryTask?.cancel()
         sessionActivationRetryTask = nil
     }
@@ -3967,6 +4090,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     /// 「再生レート 0.0」が刻まれた純粋な辞書を新しく生成してセットすることで、
     /// システム側の古いキャッシュや予測ロジックによる「再生中」への回帰を回避します。
     private func forcedWriteNowPlayingPaused(item: MPMediaItem? = nil, elapsed: TimeInterval = 0) {
+        guard playbackSource == .local else { return }
         let title: String
         let subtitle: String
         let duration: TimeInterval
@@ -4096,22 +4220,39 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func updateNowPlayingInfo(force: Bool = false) {
-        // system再生時は force / forcedPausedWindow / 実状態変化時に反映。
-        // playbackState 直接設定は使わず、rate/elapsed中心で同期する。
         let currentState = actualPlaybackState
-        let hasStateChanged = currentState != lastNowPlayingState
-        let shouldUpdateForSystem = playbackSource == .system && (isInForcedPausedWindow || force || hasStateChanged)
-        guard playbackSource == .local || shouldUpdateForSystem else { return }
+        if isPlaying && currentState != .playing {
+            let engineState = hasInitializedHiResPlaybackEngine
+                ? "engineRunning=\(hiResPlaybackEngine.isEngineRunning) enginePlaying=\(hiResPlaybackEngine.isPlaying) time=\(hiResPlaybackEngine.currentTime())"
+                : "engine=uninitialized"
+            PlaybackDebugLogger.warning("audio.transport.observed_stop source=\(playbackSource) interrupted=\(isInterrupted) forcedPause=\(isInForcedPausedWindow) \(engineState)")
+        }
+        isPlaying = currentState == .playing
+        // The system player already publishes its own lock-screen session.
+        // Do not compete with it by advertising our inactive local engine.
+        guard playbackSource == .local else { return }
 
         let snapshot = makeNowPlayingSnapshot()
         
         guard snapshot.hasTrack else {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            if lastNowPlayingTrackKey != nil {
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            }
             lastNowPlayingTrackKey = nil
             lastNowPlayingState = .unknown
             lastNowPlayingElapsed = 0
             return
         }
+
+        // iOS advances elapsed time from the published rate. Replacing the
+        // metadata/artwork dictionary on every 250 ms tick needlessly rebuilds
+        // MediaRemote handlers; update only for transport/track changes or drift.
+        guard PlaybackTransportPolicy.shouldPublishNowPlaying(
+            systemSource: false, force: force,
+            trackChanged: snapshot.trackKey != lastNowPlayingTrackKey,
+            stateChanged: currentState != lastNowPlayingState,
+            elapsedDelta: snapshot.elapsed - lastNowPlayingElapsed
+        ) else { return }
 
         // Rebuild the dictionary for every track/state update. Reusing the
         // previous dictionary can leave stale artwork or metadata on the lock screen.
@@ -4120,7 +4261,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             MPMediaItemPropertyArtist: snapshot.subtitle,
             MPMediaItemPropertyPlaybackDuration: snapshot.duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: snapshot.elapsed,
-            MPNowPlayingInfoPropertyPlaybackRate: actualPlaybackRate,
+            MPNowPlayingInfoPropertyPlaybackRate: currentState == .playing ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
 
@@ -4138,7 +4280,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         lastNowPlayingElapsed = snapshot.elapsed
     }
 
-    private func stopCurrentPlaybackForTransition() {
+    private func stopCurrentPlaybackForTransition(pauseSystemPlayback: Bool = false) {
+        isSystemPlayerStarting = false
+        cancelInterruptionResume()
+        systemTransportStartTask?.cancel()
+        systemTransportStartTask = nil
         unexpectedPlaybackRecoveryTask?.cancel()
         unexpectedPlaybackRecoveryTask = nil
         sessionActivationRetryTask?.cancel()
@@ -4159,6 +4305,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             hiResPlaybackEngine.stop()
             localPlaybackFormatDescription = L10n.playbackFormatUnavailable()
         case .system:
+            if pauseSystemPlayback && isSystemPlayerConfigured {
+                systemPlayer.pause()
+            }
             // システムプレーヤーからシステムプレーヤー（別の曲）への遷移時は、
             // setQueue が自動的に現在の再生を停止・置換するため、明示的な stop() は不要。
             // 逆に stop() を呼ぶとデーモン側の状態が不安定になり no target descriptor を誘発する可能性がある。
@@ -4173,153 +4322,153 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func startProtectedSystemPlayback(with items: [MPMediaItem]) {
-        guard let firstItem = items.first else {
+        guard let item = items.first else {
+            isProcessing = false
+            isPlaybackStarting = false
             errorMessage = L10n.tr("error.queue_not_found")
             return
         }
 
-        // 遷移処理の開始
         stopCurrentPlaybackForTransition()
-        let transitionToken = playbackPreparationToken
-        let expectedSongID = UInt64(firstItem.persistentID)
         playbackSource = .system
+        // A local-session interruption is not the Music app's playback state.
+        isInterrupted = false
         ensureSystemPlayerConfigured()
-        
-        // 早期に再生中フラグを立てることで、UIを即座に再生画面の状態にする
-        isPlaying = true
+        let transitionToken = playbackPreparationToken
+        let pauseToken = userPauseIntentToken
+        let expectedSongID = UInt64(item.persistentID)
+        selectedSystemSongID = expectedSongID
+        systemRequestedSongID = expectedSongID
+        systemRequestedStoreID = item.playbackStoreID
+        lastObservedSystemPlaybackSongID = expectedSongID
+        lastObservedSystemPlaybackProgress = 0
+        systemPreparationState = .preparing
+        isPlaying = false
         isProcessing = true
         isPlaybackStarting = true
-
-        // セッションカテゴリの確保。setActive(false) はデーモンとの接続を不安定にするため呼びません。
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
-            // すでにアクティブな場合も多いため、エラーは無視。
-            try? session.setActive(true)
-        } catch {
-            print("[SystemPlayer] Failed to set session category: \(error)")
-        }
-
-        let targetID = firstItem.persistentID
-        let storeID = firstItem.playbackStoreID
-        print("[SystemPlayer] Attempting playback for ID: \(targetID), StoreID: \(storeID)")
-
-        // 【Freshnessの保証】
-        guard let freshItem = systemMediaLibrary.mediaItem(for: targetID) else {
-            print("[SystemPlayer] Failed to re-fetch fresh item content.")
-            isSystemPlayerStarting = false
-            isProcessing = false
-            isPlaybackStarting = false
-            isPlaying = false
-            errorMessage = L10n.tr("error.song_not_found")
-            return
-        }
-
-        // systemMusicPlayer では MPMediaItemCollection ベースのほうが
-        // ライブラリ内 DRM 曲の解決が安定しやすい。
-        let queueItems: [MPMediaItem]
-        if items.count > 1 {
-            let refreshedItems = items.compactMap { item in
-                systemMediaLibrary.mediaItem(for: UInt64(item.persistentID))
-            }
-            queueItems = refreshedItems.isEmpty ? [freshItem] : refreshedItems
-        } else {
-            queueItems = [freshItem]
-        }
-        let queueCollection = MPMediaItemCollection(items: queueItems)
-
-        print("[SystemPlayer] Setting media item queue with \(queueItems.count) item(s)...")
-        logProtectedPlaybackDiagnostics("before_start", queueItems: queueItems)
         isSystemPlayerStarting = true
+        errorMessage = nil
+        localPlaybackFormatDescription = L10n.playbackFormatProtected()
 
-        Task { @MainActor in
-            let maxAttempts = 3
-            let initialPropagationWait: UInt64 = 350_000_000
-            let pollInterval: UInt64 = 250_000_000
-            let maxPolls = 12
-            var didStartPlaying = false
+        systemTransportStartTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let lease = PlaybackRecoveryBackgroundLease()
+            defer {
+                lease.end()
+                if self.playbackPreparationToken == transitionToken,
+                   self.userPauseIntentToken == pauseToken {
+                    self.systemTransportStartTask = nil
+                    self.isSystemPlayerStarting = false
+                    self.isProcessing = false
+                    self.isPlaybackStarting = false
+                }
+            }
+            @MainActor func requestIsCurrent() -> Bool {
+                !Task.isCancelled && self.playbackPreparationToken == transitionToken
+                    && self.userPauseIntentToken == pauseToken
+                    && self.playbackSource == .system
+                    && self.selectedSystemSongID == expectedSongID
+            }
 
-            for attempt in 1...maxAttempts {
-                guard self.playbackPreparationToken == transitionToken,
-                      self.selectedSystemSongID == expectedSongID,
-                      self.playbackSource == .system else { return }
-                print("[SystemPlayer] Applying media item queue (attempt \(attempt))...")
-                self.systemPlayer.setQueue(with: queueCollection)
-                try? await Task.sleep(nanoseconds: initialPropagationWait)
-                guard self.playbackPreparationToken == transitionToken,
-                      self.selectedSystemSongID == expectedSongID,
-                      self.playbackSource == .system else { return }
-
-                let hasItemAfterQueue = self.systemPlayer.nowPlayingItem != nil
-                let stateAfterQueue = self.systemPlayer.playbackState
-                print("[SystemPlayer] Queue applied (attempt \(attempt)): state=\(stateAfterQueue.rawValue), hasItem=\(hasItemAfterQueue)")
-                self.logProtectedPlaybackDiagnostics("after_setQueue_attempt_\(attempt)", queueItems: queueItems)
-
-                print("[SystemPlayer] Triggering play() (attempt \(attempt)).")
-                self.systemPlayer.play()
-                self.logProtectedPlaybackDiagnostics("after_play_attempt_\(attempt)", queueItems: queueItems)
-
-                for poll in 0..<maxPolls {
-                    guard self.playbackPreparationToken == transitionToken,
-                          self.selectedSystemSongID == expectedSongID,
+            // stop() clears tracks but deliberately keeps the engine warm.
+            // Stop its render I/O before deactivating the app's session.
+            if self.hasInitializedHiResPlaybackEngine {
+                self.hiResPlaybackEngine.pause()
+            }
+            // Release the app's session; activating it here competes with Music.
+            do {
+                try await PlaybackAudioSession.shared.releaseForSystemPlayback()
+            } catch {
+                return
+            }
+            guard requestIsCurrent() else { return }
+            if self.lastNowPlayingTrackKey != nil {
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+                self.lastNowPlayingTrackKey = nil
+                self.lastNowPlayingState = .unknown
+                self.lastNowPlayingElapsed = 0
+            }
+            self.logProtectedPlaybackDiagnostics("prepare_begin", queueItems: [item])
+            self.systemPlayer.setQueue(with: MPMediaItemCollection(items: items))
+            self.systemPlayer.prepareToPlay { [weak self] error in
+                let message = error?.localizedDescription
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.playbackPreparationToken == transitionToken,
+                          self.userPauseIntentToken == pauseToken,
                           self.playbackSource == .system else { return }
-                    let state = self.systemPlayer.playbackState
-                    let itemExists = self.systemPlayer.nowPlayingItem != nil
-                    if state == .playing {
-                        print("[SystemPlayer] Playback confirmed at poll \(poll).")
-                        self.syncSystemPlaybackState()
-                        didStartPlaying = true
-                        break
+                    if let message {
+                        self.systemPreparationState = .failed(message)
+                        PlaybackDebugLogger.warning("audio.system.prepare_failed error=\(message)")
+                    } else {
+                        self.systemPreparationState = .ready
+                        self.logProtectedPlaybackDiagnostics("prepare_ready")
                     }
-                    if itemExists && state == .paused {
-                        print("[SystemPlayer] Queue is ready but paused at poll \(poll), retrying play().")
-                        self.systemPlayer.play()
+                }
+            }
+
+            // Polling is bounded even if Apple's completion/notifications never
+            // arrive. Do not repeatedly replace a queue that is still preparing.
+            let deadline = ContinuousClock.now.advanced(by: .seconds(60))
+            var issuedPlay = false
+            var pollsAfterPlay = 0
+            while requestIsCurrent() {
+                let confirmed = PlaybackTransportPolicy.systemStartConfirmed(
+                    expectedSongID: expectedSongID, observedSongID: self.resolvedSystemSongID,
+                    playing: self.systemPlayer.playbackState == .playing,
+                    interrupted: false, explicitlyPaused: self.isInForcedPausedWindow
+                )
+                let prepared: Bool
+                let preparationError: String?
+                switch self.systemPreparationState {
+                case .ready: prepared = true; preparationError = nil
+                case .failed(let message): prepared = false; preparationError = message
+                case .idle, .preparing: prepared = false; preparationError = nil
+                }
+                let action = PlaybackTransportPolicy.systemStartupAction(
+                    confirmed: confirmed, prepared: prepared,
+                    preparationFailed: preparationError != nil, playIssued: issuedPlay,
+                    deadlineReached: ContinuousClock.now >= deadline
+                )
+                switch action {
+                case .complete:
+                    self.syncSystemPlaybackState()
+                    self.isProcessing = false
+                    self.isPlaybackStarting = false
+                    self.isSystemPlayerStarting = false
+                    self.errorMessage = nil
+                    self.startTimer()
+                    self.persistLibraryState()
+                    self.logProtectedPlaybackDiagnostics("start_confirmed")
+                    return
+                case .preparationFailed:
+                    self.errorMessage = L10n.tr("error.playback_start_failed", preparationError ?? "")
+                    self.logProtectedPlaybackDiagnostics("start_failed")
+                    return
+                case .play:
+                    self.systemPlayer.play()
+                    issuedPlay = true
+                    self.logProtectedPlaybackDiagnostics("play_issued")
+                case .wait:
+                    if issuedPlay {
+                        pollsAfterPlay += 1
+                        // Retry play, not setQueue, and only for the intended item.
+                        if (pollsAfterPlay == 8 || pollsAfterPlay == 20),
+                           self.resolvedSystemSongID == expectedSongID,
+                           self.systemPlayer.playbackState == .paused {
+                            self.systemPlayer.play()
+                        }
                     }
-                    try? await Task.sleep(nanoseconds: pollInterval)
+                case .timedOut:
+                    self.logProtectedPlaybackDiagnostics("start_timeout")
+                    self.errorMessage = L10n.tr("error.system_playback_timeout")
+                    // A late start can still be observed; selection/retry is unblocked.
+                    self.startTimer()
+                    return
                 }
-
-                if didStartPlaying {
-                    break
-                }
-
-                print("[SystemPlayer] Playback did not start on attempt \(attempt).")
+                do { try await Task.sleep(nanoseconds: 250_000_000) }
+                catch { return }
             }
-
-            self.isSystemPlayerStarting = false
-            self.isProcessing = false
-
-            if !didStartPlaying {
-                print("[SystemPlayer] All specific attempts failed. Final play() attempt.")
-                self.systemPlayer.play()
-                self.logProtectedPlaybackDiagnostics("final_play_attempt", queueItems: queueItems)
-            }
-
-            self.syncSystemPlaybackState()
-            self.startTimer()
-            self.persistLibraryState()
-
-            // 最終監視
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard self.playbackPreparationToken == transitionToken,
-                  self.selectedSystemSongID == expectedSongID,
-                  self.playbackSource == .system else { return }
-            self.syncSystemPlaybackState()
-            if self.playbackSource == .system && self.systemPlayer.playbackState != .playing {
-                print("[SystemPlayer] Final fallback check failed. Forcing play() again.")
-                self.systemPlayer.play()
-                self.syncSystemPlaybackState()
-            }
-
-            self.isPlaybackStarting = self.playbackSource == .system
-                && self.systemPlayer.playbackState != .playing
-            if !self.isPlaybackStarting {
-                self.isProcessing = false
-            } else {
-                self.monitorPlaybackStart(for: .system)
-            }
-            
-            // 全ての準備が整い、音が鳴り始めた（または最終試行が終わった）段階で確実にフラグを折る
-            self.isProcessing = false
         }
     }
 
@@ -4343,11 +4492,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         autoplay: Bool,
         restoreUpsamplingMode: UpsamplingMode? = nil
     ) -> Bool {
-        if playbackSource == .system, isSystemPlayerConfigured {
-            systemPlayer.pause()
-        }
         localPlaybackFormatDescription = L10n.tr("playback.preparing")
-        stopCurrentPlaybackForTransition()
+        stopCurrentPlaybackForTransition(pauseSystemPlayback: true)
         playbackSource = .local
         selectedSystemSongID = song.id
         trackTitle = song.title
@@ -4426,7 +4572,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     throw CancellationError()
                 }
                 self.localPlaybackFormatDescription = self.hiResPlaybackEngine.currentFormat?.description ?? L10n.playbackFormatUnavailable()
-                if autoplay {
+                if autoplay && !self.isInterrupted {
                     try self.hiResPlaybackEngine.play()
                     self.clearForcedPausedWindow()
                     self.isPlaying = true
@@ -4436,6 +4582,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     self.isPlaying = false
                 }
                 self.refreshPlaybackState()
+                self.resumePendingInterruptionIfNeeded()
                 if shouldUseTwoStageLoad && self.isBackgroundQualityUpgradeEnabled {
                     self.startPrecisionSincUpgrade(
                         songID: song.id,
@@ -4465,7 +4612,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     try Task.checkCancellation()
                     guard self.playbackPreparationToken == preparationToken else { throw CancellationError() }
                     self.localPlaybackFormatDescription = self.hiResPlaybackEngine.currentFormat?.description ?? L10n.playbackFormatUnavailable()
-                    if autoplay {
+                    if autoplay && !self.isInterrupted {
                         try self.hiResPlaybackEngine.play()
                         self.clearForcedPausedWindow()
                         self.isPlaying = true
@@ -4476,6 +4623,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     }
                     self.playbackSource = .local
                     self.refreshPlaybackState()
+                    self.resumePendingInterruptionIfNeeded()
                     self.errorMessage = nil
                     self.localPlaybackLoadTask = nil
                     return
@@ -4501,7 +4649,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         try Task.checkCancellation()
                         guard self.playbackPreparationToken == preparationToken else { throw CancellationError() }
                         self.localPlaybackFormatDescription = self.hiResPlaybackEngine.currentFormat?.description ?? L10n.playbackFormatUnavailable()
-                        if autoplay {
+                        if autoplay && !self.isInterrupted {
                             try self.hiResPlaybackEngine.play()
                             self.clearForcedPausedWindow()
                             self.isPlaying = true
@@ -4509,6 +4657,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         }
                         self.playbackSource = .local
                         self.refreshPlaybackState()
+                        self.resumePendingInterruptionIfNeeded()
                         self.errorMessage = nil
                         self.localPlaybackLoadTask = nil
                         return
@@ -4892,13 +5041,16 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func resolvePlayableAsset(for song: SystemSong) -> (url: URL?, item: MPMediaItem?) {
-        if let localURL = song.url {
+        if song.source != .systemMusic, let localURL = song.url {
             return (localURL, nil)
         }
-        if let item = systemMediaLibrary.mediaItem(for: song.id), let assetURL = item.assetURL {
-            return (assetURL, item)
-        }
-        return (nil, systemMediaLibrary.mediaItem(for: song.id))
+        guard let item = systemMediaLibrary.mediaItem(for: song.id) else { return (nil, nil) }
+        let url = item.assetURL
+        let useSystem = PlaybackTransportPolicy.requiresSystemPlayer(
+            protectedAsset: item.hasProtectedAsset, hasAssetURL: url != nil
+        )
+        PlaybackDebugLogger.event("audio.asset.route songID=\(song.id) protected=\(item.hasProtectedAsset) source=\(useSystem ? "system" : "local")")
+        return (useSystem ? nil : url, item)
     }
 
     private func scheduleNextTrackPreload(after currentIndex: Int) {
@@ -5088,6 +5240,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func monitorPlaybackStart(for source: PlaybackSource) {
         playbackStartMonitorTask?.cancel()
+        let preparationToken = playbackPreparationToken
+        let pauseToken = userPauseIntentToken
+        let songID = selectedSystemSongID
+        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
         playbackStartMonitorTask = Task { @MainActor [weak self] in
             guard let self else { return }
             // Keep the loading state alive until playback is actually
@@ -5095,7 +5251,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             // take longer than the old fixed timeout; ending this monitor
             // early made the spinner stop while audio was still preparing.
             while !Task.isCancelled {
-                guard !Task.isCancelled else { return }
+                guard PlaybackTransportPolicy.requestIsCurrent(
+                    pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
+                    preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                    interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                ), self.playbackSource == source, self.selectedSystemSongID == songID else { return }
                 let didStart: Bool
                 switch source {
                 case .local:
@@ -5103,8 +5263,12 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         && self.hiResPlaybackEngine.isPlaying
                         && self.hiResPlaybackEngine.currentTime() > 0.02
                 case .system:
-                    didStart = self.playbackSource == .system
-                        && self.systemPlayer.playbackState == .playing
+                    didStart = PlaybackTransportPolicy.systemStartConfirmed(
+                        expectedSongID: songID,
+                        observedSongID: self.resolvedSystemSongID,
+                        playing: self.systemPlayer.playbackState == .playing,
+                        interrupted: self.isInterrupted, explicitlyPaused: self.isInForcedPausedWindow
+                    )
                 }
 
                 if didStart {
@@ -5113,6 +5277,21 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     self.errorMessage = nil
                     self.playbackStartMonitorTask = nil
                     self.refreshPlaybackState()
+                    return
+                }
+                if source == .system, ContinuousClock.now >= deadline {
+                    self.logProtectedPlaybackDiagnostics("resume_timeout")
+                    self.isPlaybackStarting = false
+                    self.isProcessing = false
+                    self.errorMessage = L10n.tr("error.system_playback_timeout")
+                    self.playbackStartMonitorTask = nil
+                    return
+                }
+                if self.errorMessage != nil, self.localPlaybackLoadTask == nil,
+                   self.systemTransportStartTask == nil {
+                    self.isPlaybackStarting = false
+                    self.isProcessing = false
+                    self.playbackStartMonitorTask = nil
                     return
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
@@ -5171,18 +5350,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         systemPlayer.repeatMode = .none
         systemPlayer.shuffleMode = .off
         systemPlayer.beginGeneratingPlaybackNotifications()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleSystemNowPlayingChanged),
-            name: .MPMusicPlayerControllerNowPlayingItemDidChange,
-            object: systemPlayer
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleSystemPlaybackChanged),
-            name: .MPMusicPlayerControllerPlaybackStateDidChange,
-            object: systemPlayer
-        )
+        NotificationCenter.default.publisher(for: .MPMusicPlayerControllerNowPlayingItemDidChange, object: systemPlayer)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.handleSystemNowPlayingChanged() }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: .MPMusicPlayerControllerPlaybackStateDidChange, object: systemPlayer)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.handleSystemPlaybackChanged() }
+            .store(in: &cancellables)
         isSystemPlayerConfigured = true
     }
 
@@ -5279,71 +5454,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         try Task.checkCancellation()
         let songs = try normalizedSystemSongs(library.fetchSongs())
         try Task.checkCancellation()
-        let artistGroups = Dictionary(grouping: songs) { song in
-            song.artistID.map(String.init) ?? "name:\(song.artist)"
-        }
-        let artists = artistGroups.values.compactMap { group -> SystemArtist? in
-            guard !Task.isCancelled else { return nil }
-            guard let first = group.first else { return nil }
-            let artistID = first.artistID ?? UInt64(bitPattern: Int64(first.artist.hashValue))
-            let albumCount = Set(group.map { $0.albumID ?? UInt64(bitPattern: Int64("\($0.artist)\($0.album)".hashValue)) }).count
-            return SystemArtist(
-                id: artistID,
-                name: first.artist,
-                albumCount: albumCount,
-                songCount: group.count,
-                normalizedSearchTerms: [normalizeSearchText(first.artist)]
-            )
-        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-
-        let albumGroups = Dictionary(grouping: songs) { song in
-            "\(song.albumID.map(String.init) ?? "name:\(song.artist):\(song.album)")"
-        }
-        let albums = albumGroups.values.compactMap { group -> SystemAlbum? in
-            guard !Task.isCancelled else { return nil }
-            guard let first = group.first else { return nil }
-            let albumID = first.albumID ?? UInt64(bitPattern: Int64("\(first.artist)\(first.album)".hashValue))
-            return SystemAlbum(
-                id: albumID,
-                title: first.album,
-                artist: first.artist,
-                songCount: group.count,
-                normalizedSearchTerms: [
-                    normalizeSearchText(first.album),
-                    normalizeSearchText(first.artist),
-                    normalizeSearchText("\(first.artist) \(first.album)")
-                ]
-            )
-        }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-
+        let snapshot = SystemLibrarySnapshot(songs: songs)
         try Task.checkCancellation()
-        return SystemLibrarySnapshot(songs: songs, artists: artists, albums: albums)
-    }
-
-    nonisolated private static func buildDetailedSystemLibrarySnapshot(
-        using library: SystemMediaLibrary,
-        songs: [SystemSong]
-    ) throws -> SystemLibrarySnapshot {
-        try Task.checkCancellation()
-        let artists = library.fetchArtists().map { artist in
-            var normalizedArtist = artist
-            normalizedArtist.normalizedSearchTerms = [normalizeSearchText(artist.name)]
-            return normalizedArtist
-        }
-
-        try Task.checkCancellation()
-        let albums = library.fetchAlbums().map { album in
-            var normalizedAlbum = album
-            normalizedAlbum.normalizedSearchTerms = [
-                normalizeSearchText(album.title),
-                normalizeSearchText(album.artist),
-                normalizeSearchText("\(album.artist) \(album.title)")
-            ]
-            return normalizedAlbum
-        }
-
-        try Task.checkCancellation()
-        return SystemLibrarySnapshot(songs: songs, artists: artists, albums: albums)
+        return snapshot
     }
 
     nonisolated private static func mergedSystemLibrarySnapshot(
@@ -5351,8 +5464,6 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         with localTracks: [LocalTrackMetadata]
     ) -> SystemLibrarySnapshot {
         var songs = base.songs
-        var artists = base.artists
-        var albums = base.albums
 
         for track in localTracks {
             let localID = UInt64(bitPattern: Int64(track.url.path.hashValue)) | 0x8000000000000000
@@ -5378,35 +5489,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             if !songs.contains(where: { $0.id == localID }) {
                 songs.append(newSong)
             }
-
-            if !artists.contains(where: { $0.name == track.artist }) {
-                let artistID = UInt64(bitPattern: Int64(track.artist.hashValue)) | 0x8000000000000000
-                artists.append(
-                    SystemArtist(
-                        id: artistID,
-                        name: track.artist,
-                        albumCount: 1,
-                        songCount: 1,
-                        normalizedSearchTerms: [normalizeSearchText(track.artist)]
-                    )
-                )
-            }
-
-            if !albums.contains(where: { $0.title == track.album && $0.artist == track.artist }) {
-                let albumID = UInt64(bitPattern: Int64("\(track.artist)\(track.album)".hashValue)) | 0x8000000000000000
-                albums.append(
-                    SystemAlbum(
-                        id: albumID,
-                        title: track.album,
-                        artist: track.artist,
-                        songCount: 1,
-                        normalizedSearchTerms: [normalizeSearchText(track.album), normalizeSearchText(track.artist)]
-                    )
-                )
-            }
         }
 
-        return SystemLibrarySnapshot(songs: songs, artists: artists, albums: albums)
+        return SystemLibrarySnapshot(songs: songs)
     }
 
     private func applySystemLibrarySnapshot(
@@ -5456,10 +5541,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private func snapshotIncludingLocalLibrary(
         _ snapshot: SystemLibrarySnapshot
     ) -> SystemLibrarySnapshot {
+        if localLibraryTracks.isEmpty, snapshot.songs.allSatisfy({ $0.url == nil }) {
+            return snapshot
+        }
         let systemOnly = SystemLibrarySnapshot(
-            songs: snapshot.songs.filter { $0.url == nil },
-            artists: snapshot.artists.filter { !$0.isLocalLibraryIdentifier },
-            albums: snapshot.albums.filter { !$0.isLocalLibraryIdentifier }
+            songs: snapshot.songs.filter { $0.url == nil }
         )
         return Self.mergedSystemLibrarySnapshot(base: systemOnly, with: localLibraryTracks)
     }
@@ -5475,6 +5561,12 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             return
         }
 
+        if systemLibraryFeedback == .working {
+            systemLibraryFeedback = .notice(L10n.tr("settings.library_feedback.interrupted"))
+        }
+        if localLibraryFeedback == .working {
+            localLibraryFeedback = .notice(L10n.tr("settings.library_feedback.interrupted"))
+        }
         if systemLibraryRefreshTask != nil {
             systemLibraryRefreshGeneration &+= 1
             systemLibraryRefreshTask?.cancel()
@@ -5498,17 +5590,5 @@ private extension PlaybackSnapshot {
     func queueSongs(from songs: [SystemSong]) -> [SystemSong] {
         let songMap = Dictionary(uniqueKeysWithValues: songs.map { ($0.id, $0) })
         return queueSongIDs.compactMap { songMap[$0] }
-    }
-}
-
-private extension SystemArtist {
-    var isLocalLibraryIdentifier: Bool {
-        (id & (UInt64(1) << 63)) != 0
-    }
-}
-
-private extension SystemAlbum {
-    var isLocalLibraryIdentifier: Bool {
-        (id & (UInt64(1) << 63)) != 0
     }
 }
