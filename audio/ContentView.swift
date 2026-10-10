@@ -742,27 +742,26 @@ struct ContentView: View {
                 emptyStateView(message: L10n.tr("empty.songs"))
             } else {
                 List(player.systemSongs) { song in
-                    Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                            player.playSystemSong(song)
-                            selectedTab = .nowPlaying
+                    SongRowView(
+                        song: song,
+                        isActive: player.isSongActive(song),
+                        isPlaying: player.isPlaying,
+                        isProcessing: player.isLoading,
+                        artwork: player.songArtwork(for: song),
+                        accentColor: player.accentColor,
+                        overlay: player.overlay(for: song),
+                        ongakuPlaylists: player.ongakuPlaylists,
+                        onFavoriteChange: { player.setFavorite($0, for: song) },
+                        onRatingChange: { player.setRating($0, for: song) },
+                        onTagsChange: { player.setDisplayTags($0, for: song) },
+                        onAddToPlaylist: { player.add(song, to: $0) },
+                        onPlay: {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                player.playSystemSong(song)
+                                selectedTab = .nowPlaying
+                            }
                         }
-                    } label: {
-                        SongRowView(
-                            song: song,
-                            isActive: player.isSongActive(song),
-                            isPlaying: player.isPlaying,
-                            isProcessing: player.isLoading,
-                            artwork: player.songArtwork(for: song),
-                            accentColor: player.accentColor,
-                            overlay: player.overlay(for: song),
-                            ongakuPlaylists: player.ongakuPlaylists,
-                            onFavoriteChange: { player.setFavorite($0, for: song) },
-                            onRatingChange: { player.setRating($0, for: song) },
-                            onTagsChange: { player.setDisplayTags($0, for: song) },
-                            onAddToPlaylist: { player.add(song, to: $0) }
-                        )
-                    }
+                    )
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
                 }
@@ -891,27 +890,26 @@ struct ContentView: View {
                             searchEmptyRow
                         } else {
                             ForEach(player.filteredSystemSongs.prefix(24)) { song in
-                                Button {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                        player.playSystemSong(song)
-                                        selectedTab = .nowPlaying
+                                SongRowView(
+                                    song: song,
+                                    isActive: player.isSongActive(song),
+                                    isPlaying: player.isPlaying,
+                                    isProcessing: player.isLoading,
+                                    artwork: player.songArtwork(for: song),
+                                    accentColor: player.accentColor,
+                                    overlay: player.overlay(for: song),
+                                    ongakuPlaylists: player.ongakuPlaylists,
+                                    onFavoriteChange: { player.setFavorite($0, for: song) },
+                                    onRatingChange: { player.setRating($0, for: song) },
+                                    onTagsChange: { player.setDisplayTags($0, for: song) },
+                                    onAddToPlaylist: { player.add(song, to: $0) },
+                                    onPlay: {
+                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                            player.playSystemSong(song)
+                                            selectedTab = .nowPlaying
+                                        }
                                     }
-                                } label: {
-                                    SongRowView(
-                                        song: song,
-                                        isActive: player.isSongActive(song),
-                                        isPlaying: player.isPlaying,
-                                        isProcessing: player.isLoading,
-                                        artwork: player.songArtwork(for: song),
-                                        accentColor: player.accentColor,
-                                        overlay: player.overlay(for: song),
-                                        ongakuPlaylists: player.ongakuPlaylists,
-                                        onFavoriteChange: { player.setFavorite($0, for: song) },
-                                        onRatingChange: { player.setRating($0, for: song) },
-                                        onTagsChange: { player.setDisplayTags($0, for: song) },
-                                        onAddToPlaylist: { player.add(song, to: $0) }
-                                    )
-                                }
+                                )
                                 .buttonStyle(.plain)
                                 .listRowBackground(Color.clear)
                             }
@@ -1097,27 +1095,26 @@ struct AlbumSongsView: View {
                 
                 Section(L10n.tr("album.track_list")) {
                     ForEach(songs) { song in
-                        Button {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                player.playSystemQueue(songs, startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0, title: album.title)
-                                onPlay()
+                        SongRowView(
+                            song: song,
+                            isActive: player.isSongActive(song),
+                            isPlaying: player.isPlaying,
+                            isProcessing: player.isLoading,
+                            artwork: player.songArtwork(for: song),
+                            accentColor: player.accentColor,
+                            overlay: player.overlay(for: song),
+                            ongakuPlaylists: player.ongakuPlaylists,
+                            onFavoriteChange: { player.setFavorite($0, for: song) },
+                            onRatingChange: { player.setRating($0, for: song) },
+                            onTagsChange: { player.setDisplayTags($0, for: song) },
+                            onAddToPlaylist: { player.add(song, to: $0) },
+                            onPlay: {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                    player.playSystemQueue(songs, startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0, title: album.title)
+                                    onPlay()
+                                }
                             }
-                        } label: {
-                            SongRowView(
-                                song: song,
-                                isActive: player.isSongActive(song),
-                                isPlaying: player.isPlaying,
-                                isProcessing: player.isLoading,
-                                artwork: player.songArtwork(for: song),
-                                accentColor: player.accentColor,
-                                overlay: player.overlay(for: song),
-                                ongakuPlaylists: player.ongakuPlaylists,
-                                onFavoriteChange: { player.setFavorite($0, for: song) },
-                                onRatingChange: { player.setRating($0, for: song) },
-                                onTagsChange: { player.setDisplayTags($0, for: song) },
-                                onAddToPlaylist: { player.add(song, to: $0) }
-                            )
-                        }
+                        )
                         .buttonStyle(.plain)
                         .listRowBackground(Color.clear)
                         .id(song.id)
@@ -1150,27 +1147,26 @@ struct PlaylistSongsView: View {
     var body: some View {
         let songs = player.songs(in: playlist)
         List(songs) { song in
-            Button {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                    player.playSystemQueue(songs, startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0, title: playlist.name)
-                    onPlay()
+            SongRowView(
+                song: song,
+                isActive: player.isSongActive(song),
+                isPlaying: player.isPlaying,
+                isProcessing: player.isLoading,
+                artwork: player.songArtwork(for: song),
+                accentColor: player.accentColor,
+                overlay: player.overlay(for: song),
+                ongakuPlaylists: player.ongakuPlaylists,
+                onFavoriteChange: { player.setFavorite($0, for: song) },
+                onRatingChange: { player.setRating($0, for: song) },
+                onTagsChange: { player.setDisplayTags($0, for: song) },
+                onAddToPlaylist: { player.add(song, to: $0) },
+                onPlay: {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                        player.playSystemQueue(songs, startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0, title: playlist.name)
+                        onPlay()
+                    }
                 }
-            } label: {
-                SongRowView(
-                    song: song,
-                    isActive: player.isSongActive(song),
-                    isPlaying: player.isPlaying,
-                    isProcessing: player.isLoading,
-                    artwork: player.songArtwork(for: song),
-                    accentColor: player.accentColor,
-                    overlay: player.overlay(for: song),
-                    ongakuPlaylists: player.ongakuPlaylists,
-                    onFavoriteChange: { player.setFavorite($0, for: song) },
-                    onRatingChange: { player.setRating($0, for: song) },
-                    onTagsChange: { player.setDisplayTags($0, for: song) },
-                    onAddToPlaylist: { player.add(song, to: $0) }
-                )
-            }
+            )
             .buttonStyle(.plain)
             .listRowBackground(Color.clear)
         }
@@ -1199,29 +1195,28 @@ struct OngakuPlaylistSongsView: View {
                 )
             } else {
                 List(songs) { song in
-                    Button {
-                        player.playSystemQueue(
-                            songs,
-                            startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0,
-                            title: currentPlaylist.name
-                        )
-                        onPlay()
-                    } label: {
-                        SongRowView(
-                            song: song,
-                            isActive: player.isSongActive(song),
-                            isPlaying: player.isPlaying,
-                            isProcessing: player.isLoading,
-                            artwork: player.songArtwork(for: song),
-                            accentColor: player.accentColor,
-                            overlay: player.overlay(for: song),
-                            ongakuPlaylists: player.ongakuPlaylists,
-                            onFavoriteChange: { player.setFavorite($0, for: song) },
-                            onRatingChange: { player.setRating($0, for: song) },
-                            onTagsChange: { player.setDisplayTags($0, for: song) },
-                            onAddToPlaylist: { player.add(song, to: $0) }
-                        )
-                    }
+                    SongRowView(
+                        song: song,
+                        isActive: player.isSongActive(song),
+                        isPlaying: player.isPlaying,
+                        isProcessing: player.isLoading,
+                        artwork: player.songArtwork(for: song),
+                        accentColor: player.accentColor,
+                        overlay: player.overlay(for: song),
+                        ongakuPlaylists: player.ongakuPlaylists,
+                        onFavoriteChange: { player.setFavorite($0, for: song) },
+                        onRatingChange: { player.setRating($0, for: song) },
+                        onTagsChange: { player.setDisplayTags($0, for: song) },
+                        onAddToPlaylist: { player.add(song, to: $0) },
+                        onPlay: {
+                            player.playSystemQueue(
+                                songs,
+                                startAt: songs.firstIndex(where: { $0.id == song.id }) ?? 0,
+                                title: currentPlaylist.name
+                            )
+                            onPlay()
+                        }
+                    )
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
                     .swipeActions(edge: .trailing) {

@@ -38,6 +38,7 @@ for name in ['PrecisionSincPhaseMode', 'PrecisionSincQualityMode']:
 output.append('enum HiResEngineError: Error { case upconvertFailed, upconvertBufferFailed, sourceBufferFailed, offlineBufferTooLarge }')
 output.append(block(engine, 'nonisolated private func availableAudioProcessMemoryBytes()'))
 output.append('enum ShippingSincMeasurement {')
+output.append(block(engine, 'private static func playbackSlice(').replace('private static func', 'static func', 1))
 for name in ['maxOfflinePlaybackBufferBytes', 'proactiveMemoryPressureThresholdBytes', 'sincKernelCacheLock']:
     lines = [line for line in engine.splitlines() if re.search(r'\blet ' + name + r'\b', line)]
     if len(lines) != 1: raise RuntimeError(name)
@@ -61,15 +62,16 @@ static func absolutePositionReference(_ source: AVAudioPCMBuffer, target: AVAudi
     let count = try checkedAudioFrameCount(ceil(Double(source.frameLength) * ratio), format: target, failure: .upconvertBufferFailed)
     let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: count)!
     let profile = quality.sincKernelProfile
-    let size = profile.radius * 2 + 1
+    let radius = profile.radius * (phase == .minimumPhase ? 3 : 1)
+    let size = profile.radius * (phase == .minimumPhase ? 4 : 2) + 1
     let kernels = cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)),
-        kernelRadius: profile.radius, kernelSize: size, numPhases: profile.numPhases, phaseMode: phase, qualityMode: quality)
+        kernelRadius: radius, kernelSize: size, numPhases: profile.numPhases, phaseMode: phase, qualityMode: quality)
     try kernels.withUnsafeBufferPointer { values in
         for channel in 0..<Int(target.channelCount) {
             try renderSincChunk(source: source.floatChannelData![channel], sourceFrameCount: Int(source.frameLength),
                 sourceFrameOffset: 0, output: output.floatChannelData![channel], outputStartFrame: 0,
                 outputFrameCount: Int(count), kernels: values.baseAddress!, ratio: ratio,
-                kernelRadius: profile.radius, kernelSize: size, numPhases: profile.numPhases)
+                kernelRadius: radius, kernelSize: size, numPhases: profile.numPhases)
         }
     }
     output.frameLength = count

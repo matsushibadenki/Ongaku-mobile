@@ -46,7 +46,20 @@ struct PlaybackHandoffRegression {
         precondition(plan(offset: Double.greatestFiniteMagnitude) == nil)
         print("PASS: invalid clocks and insufficient tails defer without a bogus frame")
 
-        // Fade-progress/unity-gain checks now exercise the actual audio unit in
-        // HandoffMixerRenderTests.mm, rather than an unused Swift approximation.
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            var previous: Float = 0
+            for frame in stride(from: Int64(0), through: Int64(rate * 0.1), by: 127) {
+                let progress = PlaybackHandoffClock.fadeProgress(renderedFrames: frame, sampleRate: rate)!
+                precondition(progress >= previous && progress <= 1)
+                precondition(abs((1 - progress) + progress - 1) < 1e-6)
+                previous = progress
+            }
+            precondition(previous == 1)
+        }
+        precondition(PlaybackHandoffClock.fadeProgress(renderedFrames: -1, sampleRate: 96_000) == nil)
+        for rate in [0.0, -1.0, Double.nan, Double.infinity] {
+            precondition(PlaybackHandoffClock.fadeProgress(renderedFrames: 1, sampleRate: rate) == nil)
+        }
+        print("PASS: shipping stock-mixer fade progress is monotonic/unity-sum and rejects invalid clocks")
     }
 }

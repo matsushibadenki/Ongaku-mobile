@@ -408,7 +408,7 @@ struct HiResPlaybackFormat: Equatable {
     }
 }
 
-private enum LoudnessCompensationRouteProfile: Sendable {
+private enum LoudnessCompensationRouteProfile: Sendable, Equatable {
     case speaker
     case headphone
     case bluetooth
@@ -578,7 +578,7 @@ final class HiResPlaybackEngine {
     // repeatedly rebuilding and discarding a Precision Sinc buffer near the
     // memory boundary.
     nonisolated static let memoryRecoveryThresholdBytes: UInt64 = 1_280 * 1_024 * 1_024
-    nonisolated private static let preparedAudioDiskCacheVersion = 2
+    nonisolated private static let preparedAudioDiskCacheVersion = 3
     nonisolated private static let maxPreparedAudioDiskCacheBytes: UInt64 = 1_536 * 1_024 * 1_024
     nonisolated private static let preparedAudioDiskCacheLock = NSLock()
     nonisolated private static let preparedAudioDiskCacheMigrationLock = NSLock()
@@ -597,9 +597,13 @@ final class HiResPlaybackEngine {
     private var meterLevels: MeterLevelStore
     private var smoothedMeasuredEffectBoostDB: Float = 0
     private var plannedOutputTrimDB: Float = 0
-    private var lastAnyEffectEnabled: Bool = false
     private var declickToken: UInt64 = 0
     private var pendingDeclickEffectSettings: [RealtimeAudioEffectSetting]?
+    private var pendingAutomaticDSPProfile: AutomaticDSPProfile?
+    private var pendingLoudnessCompensationVolume: Float?
+    private var appliedLoudnessCompensationVolume: Float?
+    private var appliedLoudnessCompensationRoute: LoudnessCompensationRouteProfile?
+    private var appliedAutomaticDSPProfile: AutomaticDSPProfile = .neutral
     private var effectDeclickRestoreVolume: Float?
     private var headphoneSpatialSettings = HeadphoneSpatialSettings.default
     private var memorySafetyMode = AudioMemorySafetyMode.deviceDefault
@@ -706,6 +710,7 @@ final class HiResPlaybackEngine {
     }
 
     func setSystemOutputVolume(_ value: Float) {
+        guard value.isFinite else { return }
         let clamped = min(max(value, 0.0), 1.0)
         guard abs(clamped - observedSystemOutputVolume) >= 0.005 else { return }
         observedSystemOutputVolume = clamped
@@ -905,6 +910,7 @@ final class HiResPlaybackEngine {
         pendingHandoff = nil
         playerNode.stop()
         upgradePlayerNode.stop()
+        cancelEffectTransitionForStop()
         spectrumAnalyzer.reset()
         playerNode.volume = 1.0
         upgradePlayerNode.volume = 0.0
@@ -923,6 +929,7 @@ final class HiResPlaybackEngine {
         lastAutomaticDSPCacheHit = false
         currentUpsamplingMode = .avAudioConverter
         applyAutomaticDSPProfile(.neutral)
+        applyLoudnessCompensation(for: observedSystemOutputVolume)
         duration = 0
         estimatedPipelineLatencyFrames = 0
         playbackOffset = 0
@@ -933,11 +940,7 @@ final class HiResPlaybackEngine {
         smoothedMeasuredEffectBoostDB = 0
         plannedOutputTrimDB = 0
         applyOutputSafetyGain()
-        lastAnyEffectEnabled = false
         lastAppliedEffectSettings.removeAll(keepingCapacity: true)
-        declickToken &+= 1
-        pendingDeclickEffectSettings = nil
-        effectDeclickRestoreVolume = nil
     }
 
     func releasePreloadedResources() {
@@ -1252,19 +1255,17 @@ final class HiResPlaybackEngine {
     }
 
     func setAutomaticDSPStrength(_ value: Float, effectSettings: [RealtimeAudioEffectSetting]) {
+        guard value.isFinite else { return }
         let clamped = min(max(value, 0.0), 1.5)
         guard abs(clamped - automaticDSPStrength) >= 0.001 else { return }
         automaticDSPStrength = clamped
         applyAutomaticDSPProfile(automaticDSPProfile)
-        applyGainStaging(effectSettings: effectSettings)
+        apply(effectSettings: effectSettings)
     }
 
     func setAutomaticDSPVoicing(_ voicing: AutomaticDSPVoicing) {
         automaticDSPVoicing = voicing
         applyAutomaticDSPProfile(automaticDSPProfile)
-        if hasTrack {
-            applyGainStaging(effectSettings: Array(lastAppliedEffectSettings.values))
-        }
     }
 
     func seek(to time: TimeInterval) throws {
@@ -1379,9 +1380,14 @@ final class HiResPlaybackEngine {
 
     func apply(effectSettings: [RealtimeAudioEffectSetting]) {
         let safeEffectSettings = memorySafetyMode.safeEffectSettings(effectSettings)
-        let anyEnabledNow = safeEffectSettings.contains(where: { $0.isEnabled })
-        let shouldDeclick = activePlayerNode.isPlaying && !lastAnyEffectEnabled && anyEnabledNow
-        lastAnyEffectEnabled = anyEnabledNow
+        let requested = Dictionary(safeEffectSettings.map { ($0.kind, $0) }, uniquingKeysWith: { _, latest in latest })
+        let changed = effectPipeline.contains { effect in
+            let target = requested[effect.kind] ?? RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: false)
+            let previous = lastAppliedEffectSettings[effect.kind]
+            let audible = target.isEnabled || previous?.isEnabled == true
+            return audible && (needsEffectReapplication || previous != target)
+        }
+        let shouldDeclick = activePlayerNode.isPlaying && changed
 
         // Coalesce updates during the fade-out. Otherwise the captured initial
         // ON setting can resurrect an effect that the user has already disabled.
@@ -1398,8 +1404,10 @@ final class HiResPlaybackEngine {
         applyImmediate(effectSettings: safeEffectSettings)
     }
 
-    private func applyImmediate(effectSettings: [RealtimeAudioEffectSetting]) {
+    @discardableResult
+    private func applyImmediate(effectSettings: [RealtimeAudioEffectSetting]) -> Bool {
         var anyChanged = false
+        var gainNeedsUpdate = needsEffectReapplication
         var requested: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
         for setting in effectSettings {
             requested[setting.kind] = setting
@@ -1410,6 +1418,7 @@ final class HiResPlaybackEngine {
             if !needsEffectReapplication && lastAppliedEffectSettings[effect.kind] == setting {
                 continue
             }
+            gainNeedsUpdate = gainNeedsUpdate || effect.isEnabled || setting.isEnabled
             effect.apply(setting: setting)
             anyChanged = true
             lastAppliedEffectSettings[effect.kind] = setting
@@ -1417,11 +1426,17 @@ final class HiResPlaybackEngine {
         needsEffectReapplication = false
 
         if !anyChanged {
-            return
+            return false
         }
         estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames }
         
-        applyGainStaging(effectSettings: effectSettings)
+        // Editing an inactive module must not re-sample audits and change
+        // normalization on the audible path.
+        if gainNeedsUpdate {
+            applyGainStaging(effectSettings: effectSettings)
+            return true
+        }
+        return false
     }
 
     private func applyWithDeclick(effectSettings: [RealtimeAudioEffectSetting]) {
@@ -1449,7 +1464,22 @@ final class HiResPlaybackEngine {
     private func applyPendingEffectSettings() {
         guard let settings = pendingDeclickEffectSettings else { return }
         pendingDeclickEffectSettings = nil
-        applyImmediate(effectSettings: settings)
+        let dspChanged = applyPendingAutomaticDSPProfile()
+        let loudnessChanged = applyPendingLoudnessCompensation()
+        let gainUpdated = applyImmediate(effectSettings: settings)
+        if (dspChanged || loudnessChanged) && !gainUpdated && hasTrack {
+            applyGainStaging(effectSettings: settings)
+        }
+    }
+
+    private func cancelEffectTransitionForStop() {
+        declickToken &+= 1
+        pendingDeclickEffectSettings = nil
+        pendingAutomaticDSPProfile = nil
+        pendingLoudnessCompensationVolume = nil
+        effectDeclickRestoreVolume = nil
+        // A cancelled mute must not silence the next song.
+        declickMixer.outputVolume = 1
     }
 
     private func rampOutputVolume(to target: Float, duration: TimeInterval, token: UInt64, completion: (() -> Void)?) {
@@ -1674,6 +1704,25 @@ final class HiResPlaybackEngine {
     }
 
     private func applyLoudnessCompensation(for outputVolume: Float) {
+        guard outputVolume.isFinite else { return }
+        let clamped = min(max(outputVolume, 0), 1)
+        guard clamped != appliedLoudnessCompensationVolume
+                || loudnessCompensationRouteProfile != appliedLoudnessCompensationRoute
+                || pendingLoudnessCompensationVolume != nil else { return }
+        pendingLoudnessCompensationVolume = clamped
+        commitPendingDSPChangesIfReady()
+    }
+
+    private func applyPendingLoudnessCompensation() -> Bool {
+        guard pendingHandoff == nil, let volume = pendingLoudnessCompensationVolume else { return false }
+        pendingLoudnessCompensationVolume = nil
+        applyImmediateLoudnessCompensation(for: volume)
+        appliedLoudnessCompensationVolume = volume
+        appliedLoudnessCompensationRoute = loudnessCompensationRouteProfile
+        return true
+    }
+
+    private func applyImmediateLoudnessCompensation(for outputVolume: Float) {
         let amount = loudnessCompensationAmount(for: outputVolume)
         let warmth = amount * amount
         let routeProfile = loudnessCompensationRouteProfile
@@ -1704,9 +1753,6 @@ final class HiResPlaybackEngine {
             loudnessCompensationEQ.bands[1].gain = 0.75 * warmth
             loudnessCompensationEQ.bands[2].gain = -0.30 * amount
             loudnessCompensationEQ.bands[3].gain = 3.4 * amount
-        }
-        if hasTrack {
-            applyGainStaging(effectSettings: Array(lastAppliedEffectSettings.values))
         }
     }
 
@@ -1741,11 +1787,39 @@ final class HiResPlaybackEngine {
 
     private func applyAutomaticDSPProfile(_ profile: AutomaticDSPProfile) {
         let scaled = scaledAutomaticDSPProfile(profile)
+        guard scaled != appliedAutomaticDSPProfile || pendingAutomaticDSPProfile != nil else { return }
+        pendingAutomaticDSPProfile = scaled
+        commitPendingDSPChangesIfReady()
+    }
+
+    private func commitPendingDSPChangesIfReady() {
+        // The EQ is shared by both players. Do not change the old source's
+        // sound before the replacement starts or while its fade is in flight.
+        guard pendingHandoff == nil,
+              pendingAutomaticDSPProfile != nil || pendingLoudnessCompensationVolume != nil,
+              pendingDeclickEffectSettings == nil else { return }
+        if activePlayerNode.isPlaying {
+            applyWithDeclick(effectSettings: Array(lastAppliedEffectSettings.values))
+        } else {
+            let dspChanged = applyPendingAutomaticDSPProfile()
+            let loudnessChanged = applyPendingLoudnessCompensation()
+            if (dspChanged || loudnessChanged) && hasTrack {
+                applyGainStaging(effectSettings: Array(lastAppliedEffectSettings.values))
+            }
+        }
+    }
+
+    @discardableResult
+    private func applyPendingAutomaticDSPProfile() -> Bool {
+        guard pendingHandoff == nil, let scaled = pendingAutomaticDSPProfile else { return false }
+        pendingAutomaticDSPProfile = nil
         automaticDSPEQ.bypass = scaled.shouldBypass
         automaticDSPEQ.bands[0].gain = scaled.lowShelfGainDB
         automaticDSPEQ.bands[1].gain = scaled.lowMidGainDB
         automaticDSPEQ.bands[2].gain = scaled.presenceGainDB
         automaticDSPEQ.bands[3].gain = scaled.highShelfGainDB
+        appliedAutomaticDSPProfile = scaled
+        return true
     }
 
     private func scaledAutomaticDSPProfile(_ profile: AutomaticDSPProfile? = nil) -> AutomaticDSPProfile {
@@ -1825,7 +1899,7 @@ final class HiResPlaybackEngine {
                 partial + max(0, effect.estimatedGainBoostDB)
             }
         )
-        let scaledAutomaticDSP = scaledAutomaticDSPProfile()
+        let scaledAutomaticDSP = appliedAutomaticDSPProfile
         let automaticDSPBoost = max(
             0,
             scaledAutomaticDSP.lowShelfGainDB,
@@ -3693,8 +3767,8 @@ final class HiResPlaybackEngine {
         }
         if handoffHasRendered(handoff),
            let stamp = newNode.lastRenderTime,
-           let time = newNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid, time.sampleRate > 0 {
-            let progress = Float(min(1, max(0, Double(time.sampleTime) / time.sampleRate / PlaybackHandoffClock.fadeDuration)))
+           let time = newNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid,
+           let progress = PlaybackHandoffClock.fadeProgress(renderedFrames: time.sampleTime, sampleRate: time.sampleRate) {
             handoff.oldNode.volume = 1 - progress
             newNode.volume = progress
             if progress >= 1 {
@@ -3722,6 +3796,7 @@ final class HiResPlaybackEngine {
         inactiveNode.reset()
         inactiveNode.volume = 0
         activePlayerNode.volume = 1
+        commitPendingDSPChangesIfReady()
     }
 
     private func schedulePreparedBuffer(
@@ -3861,8 +3936,8 @@ final class HiResPlaybackEngine {
             interleaved: false
         )!
         let kernelProfile = qualityMode.sincKernelProfile
-        let kernelRadius = kernelProfile.radius
-        let kernelSize = kernelRadius * 2 + 1
+        let kernelRadius = kernelProfile.radius * (phaseMode == .minimumPhase ? 3 : 1)
+        let kernelSize = kernelProfile.radius * (phaseMode == .minimumPhase ? 4 : 2) + 1
         let numPhases = kernelProfile.numPhases
         let cutoff = Float(min(1.0, targetRate / sourceRate) * Double(phaseMode.cutoffScale))
         let kernels = cachedPolyphaseSincKernels(
@@ -4186,8 +4261,8 @@ final class HiResPlaybackEngine {
 
         let cutoff = Float(min(1.0, targetRate / sourceRate) * Double(phaseMode.cutoffScale))
         let kernelProfile = qualityMode.sincKernelProfile
-        let kernelRadius = kernelProfile.radius
-        let kernelSize = kernelRadius * 2 + 1
+        let kernelRadius = kernelProfile.radius * (phaseMode == .minimumPhase ? 3 : 1)
+        let kernelSize = kernelProfile.radius * (phaseMode == .minimumPhase ? 4 : 2) + 1
         let numPhases = kernelProfile.numPhases
         let polyphaseKernels = Self.cachedPolyphaseSincKernels(
             cutoff: cutoff,
@@ -4237,34 +4312,22 @@ final class HiResPlaybackEngine {
         kernelSize: Int,
         numPhases: Int
     ) throws {
-        var edgeSamples = [Float](repeating: 0, count: kernelSize)
-        var sourcePosition = 0.0
-        let positionStep = 1.0 / ratio
-
-        for outputIndex in 0..<outputFrameCount {
-            if outputIndex & 0x3FFF == 0 {
-                try Task.checkCancellation()
-            }
-            let center = Int(sourcePosition)
-            let fractional = sourcePosition - Double(center)
-            let phaseIndex = Int(min(Double(numPhases - 1), max(0, fractional * Double(numPhases))))
-            let kernel = kernels.advanced(by: phaseIndex * kernelSize)
-            let startIndex = center - kernelRadius
-
-            var result: Float = 0
-            if startIndex >= 0 && (startIndex + kernelSize) <= sourceFrameCount {
-                vDSP_dotpr(kernel, 1, source.advanced(by: startIndex), 1, &result, vDSP_Length(kernelSize))
-            } else {
-                for kernelIndex in 0..<kernelSize {
-                    let sampleIndex = startIndex + kernelIndex
-                    edgeSamples[kernelIndex] = (sampleIndex >= 0 && sampleIndex < sourceFrameCount) ? source[sampleIndex] : 0
-                }
-                vDSP_dotpr(kernel, 1, edgeSamples, 1, &result, vDSP_Length(kernelSize))
-            }
-
-            output[outputIndex] = result
-            sourcePosition += positionStep
-        }
+        // Use the same absolute-frame positions as file-backed chunk preparation.
+        // Repeatedly adding 1 / ratio can land on the opposite side of an
+        // integer/phase-bin boundary, selecting a different minimum-phase kernel.
+        try renderSincChunk(
+            source: source,
+            sourceFrameCount: sourceFrameCount,
+            sourceFrameOffset: 0,
+            output: output,
+            outputStartFrame: 0,
+            outputFrameCount: outputFrameCount,
+            kernels: kernels,
+            ratio: ratio,
+            kernelRadius: kernelRadius,
+            kernelSize: kernelSize,
+            numPhases: numPhases
+        )
     }
 
     nonisolated private static func checkedAudioFrameCount(
@@ -4451,50 +4514,45 @@ final class HiResPlaybackEngine {
 
         var kernels = [Float](repeating: 0, count: numPhases * kernelSize)
 
-        let minimumPhaseFFTSize = max(2, 1 << Int(ceil(log2(Double(kernelSize * 2)))))
-        let minimumPhaseForwardSetup = phaseMode == .minimumPhase
-            ? vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(minimumPhaseFFTSize), .FORWARD)
-            : nil
-        let minimumPhaseInverseSetup = phaseMode == .minimumPhase
-            ? vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(minimumPhaseFFTSize), .INVERSE)
-            : nil
-        defer {
-            if let setup = minimumPhaseForwardSetup { vDSP_DFT_DestroySetup(setup) }
-            if let setup = minimumPhaseInverseSetup { vDSP_DFT_DestroySetup(setup) }
+        // A magnitude-only minimum-phase reconstruction removes fractional
+        // delay. Apply it once to a source-rate prototype, then convolve that
+        // causal FIR with each fractional interpolation kernel. The expanded
+        // window retains the entire convolution, including its source history.
+        let prototypeRadius = phaseMode == .minimumPhase ? kernelRadius / 3 : kernelRadius
+        let prototypeSize = prototypeRadius * 2 + 1
+        var sourceFilter: [Float] = [1]
+        if phaseMode == .minimumPhase {
+            let prototype = (0..<prototypeSize).map { k in
+                Self.sincCoefficientFloat(distance: Float(k - prototypeRadius),
+                    cutoff: cutoff, kernelRadius: prototypeRadius, phaseMode: phaseMode)
+            }
+            let fftSize = 1 << Int(ceil(log2(Double(prototypeSize * 64))))
+            let forward = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(fftSize), .FORWARD)
+            let inverse = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(fftSize), .INVERSE)
+            defer {
+                if let forward { vDSP_DFT_DestroySetup(forward) }
+                if let inverse { vDSP_DFT_DestroySetup(inverse) }
+            }
+            if let forward, let inverse {
+                sourceFilter = Self.minimumPhaseKernel(prototype, fftSize: fftSize,
+                    forwardSetup: forward, inverseSetup: inverse)
+            }
         }
 
         for p in 0..<numPhases {
             let fractional = Float(p) / Float(numPhases)
-            var totalWeight: Float = 0
             let phaseOffset = p * kernelSize
-
-            for k in 0..<kernelSize {
-                let distance = Float(k - kernelRadius) - fractional
-                let coeff = Self.sincCoefficientFloat(
-                    distance: distance,
-                    cutoff: cutoff,
-                    kernelRadius: kernelRadius,
-                    phaseMode: phaseMode
-                )
-                kernels[phaseOffset + k] = coeff
-                totalWeight += coeff
-            }
-
-            if phaseMode == .minimumPhase,
-               let forwardSetup = minimumPhaseForwardSetup,
-               let inverseSetup = minimumPhaseInverseSetup {
-                let linearKernel = Array(kernels[phaseOffset..<(phaseOffset + kernelSize)])
-                let minimumPhaseKernel = Self.minimumPhaseKernel(
-                    linearKernel,
-                    fftSize: minimumPhaseFFTSize,
-                    forwardSetup: forwardSetup,
-                    inverseSetup: inverseSetup
-                )
-                for k in 0..<kernelSize {
-                    kernels[phaseOffset + k] = minimumPhaseKernel[k]
+            for k in 0..<prototypeSize {
+                let coefficient = Self.sincCoefficientFloat(
+                    distance: Float(k - prototypeRadius) - fractional,
+                    cutoff: cutoff, kernelRadius: prototypeRadius, phaseMode: phaseMode)
+                for tap in sourceFilter.indices {
+                    // y(t) = sum_j h[j] * interpolation(t - j).
+                    let index = kernelRadius - prototypeRadius + k - tap
+                    kernels[phaseOffset + index] += coefficient * sourceFilter[tap]
                 }
-                totalWeight = minimumPhaseKernel.reduce(0, +)
             }
+            let totalWeight = kernels[phaseOffset..<(phaseOffset + kernelSize)].reduce(0, +)
 
             if abs(totalWeight) > 1e-9 {
                 let invWeight = 1.0 / totalWeight

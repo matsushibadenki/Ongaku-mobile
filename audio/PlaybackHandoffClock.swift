@@ -5,6 +5,12 @@ import Foundation
 nonisolated enum PlaybackHandoffClock {
     static let fadeDuration: TimeInterval = 0.064
 
+    /// Invalid render stamps must not change either source gain.
+    static func fadeProgress(renderedFrames: Int64, sampleRate: Double) -> Float? {
+        guard renderedFrames >= 0, sampleRate.isFinite, sampleRate > 0 else { return nil }
+        return Float(min(1, Double(renderedFrames) / sampleRate / fadeDuration))
+    }
+
     struct Plan {
         let startFrame: Int64
         let startSeconds: TimeInterval

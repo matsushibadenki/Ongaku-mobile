@@ -118,10 +118,52 @@ struct SongRowView: View {
     var onRatingChange: ((Int) -> Void)? = nil
     var onTagsChange: (([String]) -> Void)? = nil
     var onAddToPlaylist: ((UUID) -> Void)? = nil
+    var onPlay: (() -> Void)? = nil
     @State private var isShowingTrackDetails = false
-    
+
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 4) {
+            Button { onPlay?() } label: {
+                playbackContent
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                isShowingTrackDetails = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("library.track_info.open"))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .background(isActive ? accentColor.opacity(0.05) : Color.clear)
+        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 16 }
+        .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width - 16 }
+        .sheet(isPresented: $isShowingTrackDetails) {
+            TrackCapabilityDetailView(
+                song: song,
+                accentColor: accentColor,
+                overlay: overlay,
+                ongakuPlaylists: ongakuPlaylists,
+                onFavoriteChange: onFavoriteChange,
+                onRatingChange: onRatingChange,
+                onTagsChange: onTagsChange,
+                onAddToPlaylist: onAddToPlaylist
+            )
+        }
+    }
+
+    private var playbackContent: some View {
+        HStack(spacing: 12) {
             ZStack {
                 if let artwork {
                     Image(uiImage: artwork)
@@ -139,7 +181,7 @@ struct SongRowView: View {
                                 .foregroundStyle(isActive ? accentColor : Theme.textSecondary)
                         )
                 }
-                
+
                 if isProcessing && isActive {
                     ZStack {
                         ProgressView()
@@ -147,46 +189,44 @@ struct SongRowView: View {
                             .scaleEffect(0.8)
                     }
                 }
-                
+
                 RoundedRectangle(cornerRadius: artwork != nil ? 6 : 8, style: .continuous)
                     .stroke(isActive ? accentColor.opacity(0.6) : Theme.border, lineWidth: 1)
                     .frame(width: 40, height: 40)
             }
-            
-            VStack(alignment: .leading, spacing: 2) {
-                MarqueeView(
-                    text: song.title,
-                    font: .system(size: 16, weight: .regular),
-                    color: isActive ? accentColor : Theme.textPrimary,
-                    maxWidth: Theme.maxContentWidth - 88
-                )
-                
-                HStack(spacing: 6) {
-                    MarqueeView(
-                        text: "\(song.artist) • \(song.album)",
-                        font: .system(size: 12, weight: .light),
-                        color: Theme.textSecondary,
-                        maxWidth: max(120, Theme.maxContentWidth - 170)
-                    )
 
-                    Label(song.source.localizedName, systemImage: song.source.systemImageName)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(song.source == .ongakuManaged ? accentColor : Theme.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                GeometryReader { geometry in
+                    MarqueeView(
+                        text: song.title,
+                        font: .system(size: 16, weight: .regular),
+                        color: isActive ? accentColor : Theme.textPrimary,
+                        maxWidth: max(1, geometry.size.width)
+                    )
+                }
+                .frame(height: 22)
+
+                HStack(spacing: 6) {
+                    Text("\(song.artist) • \(song.album)")
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(
-                                    song.source == .ongakuManaged
-                                        ? accentColor.opacity(0.12)
-                                        : Color.white.opacity(0.06)
-                                )
-                        )
-                        .accessibilityLabel(
-                            L10n.tr("library.source.accessibility", song.source.localizedName)
-                        )
+                        .truncationMode(.tail)
+
+                    // Explicit text keeps the source readable inside the playback
+                    // button, whose automatic LabelStyle may show only the icon.
+                    HStack(spacing: 3) {
+                        Image(systemName: song.source.systemImageName)
+                        Text(song.source.localizedName)
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(song.source == .ongakuManaged ? accentColor : Theme.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(
+                        L10n.tr("library.source.accessibility", song.source.localizedName)
+                    )
                 }
 
                 if let tags = overlay?.displayTags, !tags.isEmpty {
@@ -194,11 +234,11 @@ struct SongRowView: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(accentColor)
                         .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            
-            Spacer(minLength: 4)
+            .layoutPriority(1)
+
+            Spacer(minLength: 0)
 
             if let overlay, overlay.isFavorite || overlay.rating > 0 {
                 HStack(spacing: 5) {
@@ -219,31 +259,6 @@ struct SongRowView: View {
                     .font(.appCaption())
                     .foregroundStyle(Theme.textSecondary.opacity(0.6))
             }
-        }
-        .padding(.vertical, 8)
-        .frame(width: Theme.maxContentWidth)
-        .background(
-            Rectangle()
-                .fill(isActive ? accentColor.opacity(0.05) : Color.clear)
-        )
-        .contextMenu {
-            Button {
-                isShowingTrackDetails = true
-            } label: {
-                Label(L10n.tr("library.track_info.open"), systemImage: "info.circle")
-            }
-        }
-        .sheet(isPresented: $isShowingTrackDetails) {
-            TrackCapabilityDetailView(
-                song: song,
-                accentColor: accentColor,
-                overlay: overlay,
-                ongakuPlaylists: ongakuPlaylists,
-                onFavoriteChange: onFavoriteChange,
-                onRatingChange: onRatingChange,
-                onTagsChange: onTagsChange,
-                onAddToPlaylist: onAddToPlaylist
-            )
         }
     }
 }

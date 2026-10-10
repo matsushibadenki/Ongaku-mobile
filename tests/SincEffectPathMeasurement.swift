@@ -9,7 +9,15 @@ struct SincEffectPathMeasurement {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
         let target = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!
+        if CommandLine.arguments.dropFirst().contains("--core-only") {
+            try coreResponseChecks(target: target)
+            if !CommandLine.arguments.dropFirst().contains("--boundary-only") { return }
+        }
         try chunkBoundaryChecks(directory: directory, target: target)
+        if CommandLine.arguments.dropFirst().contains("--boundary-only") {
+            print("PASS: 18 shipping sinc chunk-boundary comparisons, both channels")
+            return
+        }
         var cases = 0
         var largestPeak = 0.0
         var largestLevelDifference = 0.0
@@ -40,6 +48,7 @@ struct SincEffectPathMeasurement {
                     }
                 }
                 for phase in [PrecisionSincPhaseMode.linear, .minimumPhase, .apodizing] {
+                    if CommandLine.arguments.dropFirst().contains("--minimum-phase-only") && phase != .minimumPhase { continue }
                     for quality in [PrecisionSincQualityMode.eco, .standard, .master] {
                         let file = try AVAudioFile(forReading: url)
                         let pcm = try ShippingSincMeasurement.makeChunkedPrecisionSincPlaybackBuffer(
@@ -98,7 +107,8 @@ struct SincEffectPathMeasurement {
         print("PASS: \(cases) sinc/effect path comparisons, both channels; largestPeak=\(largestPeak) largestLevelDifferenceDB=\(largestLevelDifference) largestImpulseDelayFrames=\(largestDelay)")
     }
     // Cross the production 262,144-output-frame boundary with stereo PCM.
-    // Compare against the shipping contiguous renderer, including file edges.
+    // Compare against an absolute-position reference, including file edges;
+    // require the shipping contiguous renderer to match sample for sample.
     static func chunkBoundaryChecks(directory: URL, target: AVAudioFormat) throws {
         for rate in [44_100.0, 48_000.0] {
             let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
@@ -119,7 +129,7 @@ struct SincEffectPathMeasurement {
                     let chunked = try ShippingSincMeasurement.makeChunkedPrecisionSincPlaybackBuffer(
                         from: file, sourceFrameCount: AVAudioFrameCount(file.length), sourceFormat: file.processingFormat,
                         targetFormat: target, phaseMode: phase, qualityMode: quality)
-                    let accumulated = try ShippingSincMeasurement.resampleBufferWithWindowedSinc(
+                    let wholeBuffer = try ShippingSincMeasurement.resampleBufferWithWindowedSinc(
                         source, to: target, phaseMode: phase, qualityMode: quality)
                     let contiguous = try ShippingSincMeasurement.absolutePositionReference(source, target: target, phase: phase, quality: quality)
                     try SourcePathConversionRegression.require(chunked.frameLength == contiguous.frameLength, "Chunk length mismatch")
@@ -130,16 +140,69 @@ struct SincEffectPathMeasurement {
                             let a = chunked.floatChannelData![ch][i], b = contiguous.floatChannelData![ch][i]
                             try SourcePathConversionRegression.require(a.isFinite && b.isFinite, "Nonfinite chunk boundary")
                             maximumError = max(maximumError, abs(a - b))
-                            accumulatedError = max(accumulatedError, abs(a - accumulated.floatChannelData![ch][i]))
+                            accumulatedError = max(accumulatedError, abs(a - wholeBuffer.floatChannelData![ch][i]))
                         }
                     }
                     // Identical absolute positions must produce the same samples
                     // across chunk boundaries, including the padded file edges.
-                    try SourcePathConversionRegression.require(maximumError < 0.000001, "Chunk/contiguous disagreement: \(maximumError)")
-                    print("BOUNDARY source=\(Int(rate)) phase=\(phase.rawValue) quality=\(quality.rawValue) absoluteMaxError=\(maximumError) accumulatedPositionMaxError=\(accumulatedError)")
+                    try SourcePathConversionRegression.require(maximumError == 0 && accumulatedError == 0, "Chunk/contiguous disagreement: absolute=\(maximumError), contiguous=\(accumulatedError)")
+                    print("BOUNDARY source=\(Int(rate)) phase=\(phase.rawValue) quality=\(quality.rawValue) absoluteMaxError=\(maximumError) contiguousMaxError=\(accumulatedError)")
                 }
             }
         }
+    }
+
+    // Fit the fundamental directly; unlike a raw null this separates intended
+    // phase rotation from non-fundamental modulation and magnitude response.
+    static func coreResponseChecks(target: AVAudioFormat) throws {
+        var cases = 0
+        for rate in [44_100.0, 48_000.0] {
+            let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
+            for phase in [PrecisionSincPhaseMode.linear, .minimumPhase, .apodizing] {
+                for quality in [PrecisionSincQualityMode.eco, .standard, .master] {
+                    for frequency in [1_000.0, 12_000.0, rate * 0.4, rate * 0.48] {
+                        let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate / 4))!
+                        source.frameLength = source.frameCapacity
+                        for ch in 0..<2 {
+                            for i in 0..<Int(source.frameLength) {
+                                source.floatChannelData![ch][i] = Float((ch == 0 ? 0.2 : -0.1) * sin(2 * .pi * frequency * Double(i) / rate))
+                            }
+                        }
+                        let output = try ShippingSincMeasurement.resampleBufferWithWindowedSinc(
+                            source, to: target, phaseMode: phase, qualityMode: quality)
+                        for ch in 0..<2 {
+                            var ss = 0.0, cc = 0.0, sc = 0.0, ys = 0.0, yc = 0.0, energy = 0.0
+                            for i in 9_600..<19_200 {
+                                let y = Double(output.floatChannelData![ch][i])
+                                try SourcePathConversionRegression.require(y.isFinite && abs(y) < 0.6, "Invalid sinc core output")
+                                let angle = 2 * Double.pi * frequency * Double(i) / target.sampleRate
+                                let s = sin(angle), c = cos(angle)
+                                ss += s*s; cc += c*c; sc += s*c
+                                ys += y*s; yc += y*c; energy += y*y
+                            }
+                            let determinant = ss*cc-sc*sc
+                            let a = (ys*cc-yc*sc)/determinant
+                            let b = (yc*ss-ys*sc)/determinant
+                            let amplitude = hypot(a,b)
+                            let expected = ch == 0 ? 0.2 : 0.1
+                            let gain = 20 * log10(amplitude / expected)
+                            let residualEnergy = max(0, energy-a*ys-b*yc)
+                            let residualDB = residualEnergy == 0 ? -Double.infinity : 10 * log10(residualEnergy / energy)
+                            try SourcePathConversionRegression.require(gain.isFinite && amplitude > 0.00001, "Missing fundamental")
+                            if phase == .minimumPhase && frequency <= 12_000 {
+                                try SourcePathConversionRegression.require(abs(gain) < 0.1,
+                                    "Minimum-phase passband gain regression")
+                                try SourcePathConversionRegression.require(residualDB < -50,
+                                    "Minimum-phase fractional modulation regression: \(residualDB) dB")
+                            }
+                            print(String(format: "CORE source=%.0f phase=%@ quality=%@ frequency=%.0f channel=%d fundamentalGainDB=%.6f nonFundamentalDB=%.3f", rate, phase.rawValue, quality.rawValue, frequency, ch, gain, residualDB))
+                        }
+                        cases += 1
+                    }
+                }
+            }
+        }
+        print("PASS: \(cases) shipping sinc frequency-response probes, both channels")
     }
 
 }
