@@ -61,6 +61,22 @@ nonisolated struct SystemLibraryIndex {
         return song.album == album.title && (song.albumArtist ?? song.artist) == album.artist
     }
 
+    /// Keep album navigation available while a library refresh is deferred.
+    /// The fallback uses the same identity and album artist as the index.
+    static func album(for song: SystemSong, in albums: [SystemAlbum]) -> SystemAlbum {
+        if let match = albums.first(where: { contains(song, album: $0) }) { return match }
+        return SystemAlbum(
+            id: song.albumID ?? stableID(albumKey(song)),
+            title: song.album, artist: song.albumArtist ?? song.artist, songCount: 1
+        )
+    }
+
+    static func acceptsSearchResult(query: String, currentQuery: String,
+                                    revision: UInt64, currentRevision: UInt64,
+                                    request: UInt64, currentRequest: UInt64) -> Bool {
+        query == currentQuery && revision == currentRevision && request == currentRequest
+    }
+
     private static func albumKey(_ song: SystemSong) -> String {
         if let id = song.albumID { return "id:\(id)" }
         let artist = song.albumArtist ?? song.artist

@@ -3,6 +3,22 @@ import Foundation
 @main
 struct PlaybackTransportRegression {
     static func main() {
+        var interrupted = PlaybackTransportPolicy.interruptionRemainsActive(after: .began)
+        precondition(interrupted)
+        precondition(!PlaybackTransportPolicy.requestIsCurrent(pauseToken: 1, currentPauseToken: 1,
+            preparationToken: 2, currentPreparationToken: 2, interrupted: interrupted, cancelled: false))
+        // No ended notification: an explicit user play must still reach activation.
+        interrupted = PlaybackTransportPolicy.interruptionRemainsActive(after: .explicitPlay)
+        precondition(!interrupted)
+        precondition(PlaybackTransportPolicy.requestIsCurrent(pauseToken: 1, currentPauseToken: 1,
+            preparationToken: 2, currentPreparationToken: 2, interrupted: interrupted, cancelled: false))
+        // A new real interruption after the tap must stop the pending request.
+        interrupted = PlaybackTransportPolicy.interruptionRemainsActive(after: .began)
+        precondition(interrupted)
+        precondition(!PlaybackTransportPolicy.interruptionRemainsActive(after: .ended))
+        precondition(!PlaybackTransportPolicy.mayResume(osRecommended: false, otherAudioPlaying: true))
+        print("PASS: explicit play can reactivate without interruption end; new interruptions still block pending playback")
+
         precondition(!PlaybackTransportPolicy.shouldPublishNowPlaying(systemSource: true,
             force: true, trackChanged: true, stateChanged: true, elapsedDelta: 10))
         precondition(!PlaybackTransportPolicy.shouldPublishNowPlaying(systemSource: false,

@@ -76,5 +76,29 @@ struct LibraryIndexRegression {
         let legacySong = try JSONDecoder().decode(SystemSong.self, from: JSONSerialization.data(withJSONObject: legacyJSON))
         precondition(legacySong.albumArtist == nil)
         print("PASS: pre-fix song cache remains compatible")
+
+        // The playing track survives in the queue while a library snapshot is
+        // replaced. Album navigation must work before and after that refresh.
+        let localCompilation = song(12, "Guest", local: true, album: "Collection", albumArtist: "Various Artists")
+        let provisional = SystemLibraryIndex.album(for: localCompilation, in: [])
+        precondition(provisional.artist == "Various Artists")
+        precondition(SystemLibraryIndex.contains(localCompilation, album: provisional))
+        let refreshedAlbums = SystemLibraryIndex(songs: [localCompilation]).albums
+        let refreshedAlbum = SystemLibraryIndex.album(for: localCompilation, in: refreshedAlbums)
+        precondition(provisional.id == refreshedAlbum.id)
+        precondition(refreshedAlbum == refreshedAlbums[0])
+        let systemFallback = SystemLibraryIndex.album(for: compilation[0], in: [])
+        precondition(systemFallback.id == 30 && systemFallback.artist == "Various Artists")
+        print("PASS: playing album remains navigable across deferred refresh and compilation metadata")
+
+        precondition(SystemLibraryIndex.acceptsSearchResult(query: "Guest", currentQuery: "Guest",
+            revision: 4, currentRevision: 4, request: 8, currentRequest: 8))
+        precondition(!SystemLibraryIndex.acceptsSearchResult(query: "Guest", currentQuery: "Guest",
+            revision: 3, currentRevision: 4, request: 8, currentRequest: 8))
+        precondition(!SystemLibraryIndex.acceptsSearchResult(query: "Guest", currentQuery: "Other",
+            revision: 4, currentRevision: 4, request: 8, currentRequest: 8))
+        precondition(!SystemLibraryIndex.acceptsSearchResult(query: "Guest", currentQuery: "Guest",
+            revision: 4, currentRevision: 4, request: 7, currentRequest: 8))
+        print("PASS: queued search results cannot overwrite a newer library, query, or request")
     }
 }

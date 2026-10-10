@@ -55,9 +55,12 @@ struct SystemMediaLibrary {
         await MusicAuthorization.request()
     }
 
-    nonisolated func fetchSongs() -> [SystemSong] {
+    nonisolated func fetchSongs() throws -> [SystemSong] {
         let query = MPMediaQuery.songs()
-        let items = query.items ?? []
+        guard let items = query.items else {
+            throw NSError(domain: "Ongaku.MediaLibrary", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Music library query unavailable"])
+        }
 
         return items.compactMap { item in
             guard !Task.isCancelled else { return nil }

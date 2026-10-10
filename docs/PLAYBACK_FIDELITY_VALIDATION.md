@@ -1,3 +1,82 @@
+## Precision-sinc and effect-path measurements (2026-10-10)
+
+Run `bash tests/run_sinc_effect_path_measurement.sh` outside the sandbox when
+Core Audio cannot instantiate nodes within it. The script compiles the shipping
+sinc methods extracted from `HiResPlaybackEngine.swift`, plus the shipping phase
+and quality enums, kernel profiles, kernel cache and DSP helpers. Extraction
+requires unique source anchors and fails if they change; no separate sinc/kernel
+implementation is maintained in the test. The host adapter supplies the error
+enum and invokes the existing absolute-position renderer for a reference.
+Shipping macOS memory checks, cancellation points and worker throttling remain.
+
+Coverage:
+
+- Nine combinations: linear/minimum-phase/apodizing × eco/standard/master.
+- 44.1/48 kHz stereo float inputs; 96 kHz internal processing; 44.1/48/96 kHz
+  offline output. An impulse, 997 Hz sine and 12 kHz sine use differing levels
+  and opposite polarity across channels.
+- Compare file-backed playback against the shipping file/chunk-prepared sinc
+  buffer through bypass, Basic, and Pro graphs. Basic/Pro attach the entire
+  registry pipeline in shipping order, enable that tab's default effects, and
+  include the shipping AUPeakLimiter settings and -1 dB post-limiter ceiling.
+  Flutter is zero to make the timer-driven modulation deterministic.
+- Measure impulse peak displacement, steady-state RMS ratio, unaligned null
+  residual, fundamental phase-equivalent delay, and final sample peak. A
+  minimum-phase conversion deliberately changes phase; a nonzero raw residual
+  is a measurement, not automatically a failed test. Phase-equivalent delay is
+  wrapped to one sine period and must not be read as broadband group delay.
+- Reject invalid/silent output, sample peaks above 0.895 for protected graphs,
+  impulse displacement beyond 5 ms, and gross level changes above 3 dB. These
+  are regression guards, not perceptual transparency or true-peak guarantees.
+- Cross the actual 262,144-output-frame chunk boundary with 2.8-second stereo
+  signals in all nine modes at both source rates. Compare every output frame
+  against the same shipping renderer invoked on the whole source using absolute
+  positions. Separately report the accumulated-position legacy renderer's error.
+
+Limits: the engine's adaptive input/output trim, loudness compensation, automatic
+DSP, HRTF/spatial preparation, dither, scheduled handoffs and physical output
+routes are not exercised. The graph uses fixed default settings and moderate
+input levels; it does not establish overloaded-output or intersample-peak safety.
+The app's production signal path and phase alignment are unchanged.
+
+## Source-path conversion baseline (2026-10-10)
+
+`bash tests/run_source_path_conversion_regression.sh` compares file-backed
+`AVAudioPlayerNode.scheduleSegment` playback with PCM prepared through
+`AVAudioConverter` and scheduled with `scheduleBuffer`. The standalone converter
+uses the same default converter settings and one-buffer/end-of-stream input
+contract as `HiResPlaybackEngine.convertBuffer`; it is a measurement fixture,
+not a call into the complete shipping engine.
+
+Measurement contract:
+
+- Stereo float PCM at 44.1/48 kHz; 96 kHz stock mixer graph; final offline output
+  at 44.1/48/96 kHz. No effects, output protection, or handoff fade.
+- An impulse at 250 ms measures peak timing per channel. Bound common output
+  delay to 1 ms and source-path delay difference to one output frame.
+- 997 Hz and 12 kHz sines use opposite channel polarity and different levels.
+  Compare the middle 80% of output to exclude startup/tail transients. Require
+  relative and absolute RMS level errors below 0.1 dB and null residual below
+  -40 dB. Also reject nonfinite, silent, and excessive output.
+- This contract can be reused by desktop tests without assuming its graph is
+  identical to this app's graph.
+
+Results: all 18 comparisons passed on macOS (both channels). Source-path impulse
+peak differences were 0 frames. Final conversion added a common delay of 7 frames
+at 44.1 kHz and 8 frames at 48 kHz; 96 kHz output had no measured peak delay.
+Steady-state sine outputs matched sample for sample (zero residual, reported as
+`-inf` dB rather than an artificial numerical floor).
+
+The sandbox prevented Core Audio node creation (`comp != nullptr`); measurements
+ran outside the sandbox. A separate existing effect-audit attempt failed at the
+same environment boundary, before its EQ assertion could run, so it supplies
+no new evidence about the intermittent exciter failure.
+
+Remaining work: precision-sinc preparation, the complete effects/protection
+chain, seek offsets and running handoffs, desktop implementation comparisons,
+and physical iPhone routes. These results do not establish hardware group delay,
+true-peak safety, compressed-codec behavior, or click-free quality transitions.
+
 # Playback fidelity validation
 
 ## Current runtime status: stock mixer restored

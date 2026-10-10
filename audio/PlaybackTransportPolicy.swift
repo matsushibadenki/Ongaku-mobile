@@ -2,6 +2,23 @@ import Foundation
 
 /// UI state is an observation, never a request to stop a recovering player.
 nonisolated enum PlaybackTransportPolicy {
+    enum InterruptionEvent {
+        case began
+        case ended
+        case explicitPlay
+    }
+
+    static func interruptionRemainsActive(after event: InterruptionEvent) -> Bool {
+        switch event {
+        case .began:
+            return true
+        case .ended, .explicitPlay:
+            // A user request may attempt activation. The OS still arbitrates
+            // audio ownership (and may reject activation during a call).
+            return false
+        }
+    }
+
     static func shouldPublishNowPlaying(systemSource: Bool, force: Bool,
                                         trackChanged: Bool, stateChanged: Bool,
                                         elapsedDelta: Double) -> Bool {

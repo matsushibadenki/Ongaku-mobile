@@ -15,9 +15,15 @@ struct NowPlayingView: View {
     @ObservedObject var player: AudioPlayerViewModel
     var onGoToAlbum: (SystemAlbum) -> Void
     
-    @State private var dragOffset: CGSize = .zero
-    @State private var dragAxis: Axis? = nil
+    @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.5, dampingFraction: 0.7)))
+    private var dragTranslation: CGSize = .zero
     @State private var artworkMode: ArtworkMode = .thumbnail
+
+    private var dragOffset: CGSize {
+        abs(dragTranslation.width) > abs(dragTranslation.height)
+            ? CGSize(width: dragTranslation.width * 0.7, height: 0)
+            : CGSize(width: 0, height: dragTranslation.height * 0.7)
+    }
     
     private var canUseVisualizationModes: Bool {
         player.supportsRealtimeEffects
@@ -86,53 +92,35 @@ struct NowPlayingView: View {
                     player: player
                 )
                 .padding(.bottom, artworkMode == .vuMeter ? 0 : 24)
-                    .offset(dragOffset)
-                    .opacity(max(0.3, 1.0 - Double(abs(dragOffset.width) + abs(dragOffset.height)) / 300.0))
-                    .gesture(
-                        DragGesture(minimumDistance: 10)
-                            .onChanged { value in
-                                let h = value.translation.width
-                                let v = value.translation.height
-                                
-                                if dragAxis == nil {
-                                    dragAxis = abs(h) > abs(v) ? .horizontal : .vertical
-                                }
-                                
-                                withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.7)) {
-                                    if dragAxis == .horizontal {
-                                        dragOffset = CGSize(width: h * 0.7, height: 0)
-                                    } else {
-                                        dragOffset = CGSize(width: 0, height: v * 0.7)
-                                    }
-                                }
-                            }
-                            .onEnded { value in
-                                let h = value.translation.width
-                                let v = value.translation.height
-                                
-                                if dragAxis == .horizontal {
-                                    if h > 40 {
-                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { player.playNextTrack() }
-                                    } else if h < -40 {
-                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { player.playPreviousTrack() }
-                                    }
-                                } else if dragAxis == .vertical {
-                                    if v < -60, let album = player.nowPlayingAlbum {
-                                        onGoToAlbum(album)
-                                    } else if v > 60, canUseVisualizationModes {
-                                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                            let nextRaw = (artworkMode.rawValue + 1) % ArtworkMode.allCases.count
-                                            artworkMode = ArtworkMode(rawValue: nextRaw) ?? .thumbnail
-                                        }
-                                    }
-                                }
-                                
-                                dragAxis = nil
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                                    dragOffset = .zero
+                .offset(dragOffset)
+                .opacity(max(0.3, 1.0 - Double(abs(dragOffset.width) + abs(dragOffset.height)) / 300.0))
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 10)
+                        .updating($dragTranslation) { value, translation, _ in
+                            translation = value.translation
+                        }
+                        .onEnded { value in
+                            let h = value.translation.width
+                            let v = value.translation.height
+                            // Read this gesture's final direction. A drag cancelled
+                            // by an app switch must not lock the next gesture's axis.
+                            if abs(h) > abs(v) {
+                                if h > 40 { player.playNextTrack() }
+                                else if h < -40 { player.playPreviousTrack() }
+                            } else if v < -60, let album = player.nowPlayingAlbum {
+                                onGoToAlbum(album)
+                            } else if v > 60, canUseVisualizationModes {
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                    let nextRaw = (artworkMode.rawValue + 1) % ArtworkMode.allCases.count
+                                    artworkMode = ArtworkMode(rawValue: nextRaw) ?? .thumbnail
                                 }
                             }
-                    )
+                        }
+                )
+                .accessibilityAction(named: Text(L10n.tr("library.albums"))) {
+                    if let album = player.nowPlayingAlbum { onGoToAlbum(album) }
+                }
                 
                 // トラック情報
                 VStack(spacing: 12) {

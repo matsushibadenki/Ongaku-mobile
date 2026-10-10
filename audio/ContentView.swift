@@ -33,6 +33,27 @@ enum LibraryRoute: Hashable {
     case album(SystemAlbum)
     case playlist(SystemPlaylist)
     case ongakuPlaylist(OngakuPlaylist)
+
+    // Counts/search terms can change during a refresh without changing the
+    // destination. Navigation identity must survive those metadata updates.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.artist(let a), .artist(let b)): return a.id == b.id
+        case (.album(let a), .album(let b)): return a.id == b.id
+        case (.playlist(let a), .playlist(let b)): return a.id == b.id
+        case (.ongakuPlaylist(let a), .ongakuPlaylist(let b)): return a.id == b.id
+        default: return false
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .artist(let item): hasher.combine(0); hasher.combine(item.id)
+        case .album(let item): hasher.combine(1); hasher.combine(item.id)
+        case .playlist(let item): hasher.combine(2); hasher.combine(item.id)
+        case .ongakuPlaylist(let item): hasher.combine(3); hasher.combine(item.id)
+        }
+    }
 }
 
 private enum LibraryCategory: String, CaseIterable, Identifiable {
@@ -71,6 +92,7 @@ struct ContentView: View {
     @State private var isCreatingOngakuPlaylist = false
     @State private var newOngakuPlaylistName = ""
     @State private var libraryPath = NavigationPath()
+    @State private var pendingAlbumNavigation: SystemAlbum?
     @State private var hasPreparedEffectsScreen = false
     @State private var shouldRenderEffectsControls = false
     @State private var effectsControlsRenderID = UUID()
@@ -91,19 +113,8 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             // NOW PLAYING
             NowPlayingView(player: player, onGoToAlbum: { album in
-                let artist = player.findArtist(for: album)
-                
-                // 階層構造を作成: Root -> Artist -> Album
-                var newPath = NavigationPath()
-                if let artist = artist {
-                    newPath.append(LibraryRoute.artist(artist))
-                }
-                newPath.append(LibraryRoute.album(album))
-                
-                libraryPath = newPath
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                    selectedTab = .library
-                }
+                pendingAlbumNavigation = album
+                selectedTab = .library
             })
                 .tag(RootTab.nowPlaying)
                 .toolbar(.hidden, for: .tabBar)
@@ -161,9 +172,11 @@ struct ContentView: View {
                 .navigationDestination(for: LibraryRoute.self) { route in
                     switch route {
                     case .artist(let artist):
-                        ArtistAlbumsView(artist: artist, player: player, onPlay: { selectedTab = .nowPlaying })
+                        ArtistAlbumsView(artist: player.systemArtists.first { $0.id == artist.id } ?? artist,
+                                         player: player, onPlay: { selectedTab = .nowPlaying })
                     case .album(let album):
-                        AlbumSongsView(album: album, player: player, onPlay: { selectedTab = .nowPlaying })
+                        AlbumSongsView(album: player.systemAlbums.first { $0.id == album.id } ?? album,
+                                       player: player, onPlay: { selectedTab = .nowPlaying })
                     case .playlist(let playlist):
                         PlaylistSongsView(playlist: playlist, player: player, onPlay: { selectedTab = .nowPlaying })
                     case .ongakuPlaylist(let playlist):
@@ -391,6 +404,20 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             scheduleEffectsPresentationUpdate(refreshViewIdentity: newPhase == .active && selectedTab == .effects)
         }
+        .task(id: selectedTab) {
+            guard selectedTab == .library, let requestedAlbum = pendingAlbumNavigation else { return }
+            // Let the destination NavigationStack mount before replacing its path.
+            await Task.yield()
+            guard !Task.isCancelled, selectedTab == .library else { return }
+            let album = player.systemAlbums.first { $0.id == requestedAlbum.id } ?? requestedAlbum
+            var path = NavigationPath()
+            if let artist = player.findArtist(for: album) {
+                path.append(LibraryRoute.artist(artist))
+            }
+            path.append(LibraryRoute.album(album))
+            libraryPath = path
+            pendingAlbumNavigation = nil
+        }
     }
 
     private func activateEffectsScreen(refreshViewIdentity: Bool = false) {
@@ -496,7 +523,16 @@ struct ContentView: View {
     }
     
     private var settingsToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if selectedTab == .library {
+                Button {
+                    isShowingDesktopSync = true
+                } label: {
+                    Image(systemName: "desktopcomputer.and.arrow.down")
+                        .foregroundStyle(player.accentColor)
+                }
+                .accessibilityLabel(L10n.tr("settings.sync.title"))
+            }
             Button { isShowingSettings = true } label: {
                 Image(systemName: "person.crop.circle")
             }
@@ -510,15 +546,6 @@ struct ContentView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
-
-            Button {
-                isShowingDesktopSync = true
-            } label: {
-                Image(systemName: "desktopcomputer.and.arrow.down")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(player.accentColor)
-            }
-            .accessibilityLabel(L10n.tr("settings.sync.title"))
 
             Spacer(minLength: 0)
         }
@@ -540,7 +567,7 @@ struct ContentView: View {
     
     private var playlistsView: some View {
         Group {
-            if player.filteredSystemPlaylists.isEmpty && player.ongakuPlaylists.isEmpty {
+            if player.systemPlaylists.isEmpty && player.ongakuPlaylists.isEmpty {
                 VStack(spacing: 16) {
                     Button {
                         newOngakuPlaylistName = ""
@@ -590,9 +617,9 @@ struct ContentView: View {
                         }
                     }
 
-                    if !player.filteredSystemPlaylists.isEmpty {
+                    if !player.systemPlaylists.isEmpty {
                         Section(L10n.tr("library.music_playlist.section")) {
-                            ForEach(player.filteredSystemPlaylists) { playlist in
+                            ForEach(player.systemPlaylists) { playlist in
                                 NavigationLink(value: LibraryRoute.playlist(playlist)) {
                                     playlistRow(
                                         name: playlist.name,
@@ -641,10 +668,10 @@ struct ContentView: View {
     
     private var artistsView: some View {
         Group {
-            if player.filteredSystemArtists.isEmpty {
+            if player.systemArtists.isEmpty {
                 emptyStateView(message: L10n.tr("empty.artists"))
             } else {
-                List(player.filteredSystemArtists) { artist in
+                List(player.systemArtists) { artist in
                     NavigationLink(value: LibraryRoute.artist(artist)) {
                         HStack(spacing: 16) {
                             // アーティストサムネイル（円形）
@@ -687,12 +714,12 @@ struct ContentView: View {
     
     private var albumsView: some View {
         Group {
-            if player.filteredSystemAlbums.isEmpty {
+            if player.systemAlbums.isEmpty {
                 emptyStateView(message: L10n.tr("empty.albums"))
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 20) {
-                        ForEach(player.filteredSystemAlbums) { album in
+                        ForEach(player.systemAlbums) { album in
                             NavigationLink(value: LibraryRoute.album(album)) {
                                 AlbumTileView(album: album, artwork: player.albumArtwork(for: album))
                             }
@@ -711,10 +738,10 @@ struct ContentView: View {
     
     private var songsView: some View {
         Group {
-            if player.filteredSystemSongs.isEmpty {
+            if player.systemSongs.isEmpty {
                 emptyStateView(message: L10n.tr("empty.songs"))
             } else {
-                List(player.filteredSystemSongs) { song in
+                List(player.systemSongs) { song in
                     Button {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                             player.playSystemSong(song)
