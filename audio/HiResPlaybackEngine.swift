@@ -594,6 +594,7 @@ final class HiResPlaybackEngine {
     nonisolated(unsafe) private static var analysisCacheMisses: Int = 0
 
     private var tappedNodes: [AVAudioNode] = []
+    private var renderHeartbeat: AudioRenderHeartbeat?
     private var meterLevels: MeterLevelStore
     private var smoothedMeasuredEffectBoostDB: Float = 0
     private var plannedOutputTrimDB: Float = 0
@@ -678,8 +679,8 @@ final class HiResPlaybackEngine {
         return (levels.peakDBFS, levels.rmsDBFS, currentSpectrum)
     }
 
-    /// Polls final-output render continuity and emits one diagnostic event per
-    /// detected dropout and recovery. This does not modify playback behavior.
+    /// Polls render cycles separately from meter-tap delivery. Neither event
+    /// alone establishes the duration of an audible interruption.
     func pollRenderHealth() -> AudioRenderHealthSnapshot {
         let result = renderHealthMonitor.poll(
             expectedToRender: isPlaying && engine.isRunning
@@ -697,13 +698,18 @@ final class HiResPlaybackEngine {
             let routeText = route.isEmpty ? "unknown" : route
             let effectsText = enabledEffects.isEmpty ? "none" : enabledEffects
             PlaybackDebugLogger.warning(
-                "audio.dropout.detected gapMs=\(gapText) count=\(result.snapshot.dropoutCount) route=\(routeText) effects=\(effectsText)"
+                "audio.render.gap.detected gapMs=\(gapText) count=\(result.snapshot.dropoutCount) source=render_observer route=\(routeText) effects=\(effectsText)"
             )
         }
         if let recovery = result.recoveredAfterMilliseconds {
             let recoveryText = String(format: "%.1f", recovery)
             PlaybackDebugLogger.event(
-                "audio.dropout.recovered durationMs=\(recoveryText) count=\(result.snapshot.dropoutCount)"
+                "audio.render.gap.recovered durationMs=\(recoveryText) count=\(result.snapshot.dropoutCount) source=render_observer"
+            )
+        }
+        if let gap = result.tapDeliveryGapMilliseconds {
+            PlaybackDebugLogger.event(
+                "audio.tap.delivery_gap gapMs=\(String(format: "%.1f", gap)) renderGapCount=\(result.snapshot.dropoutCount) renderCallbacks=\(result.renderCallbackCount) source=meter_tap"
             )
         }
         return result.snapshot
@@ -718,7 +724,7 @@ final class HiResPlaybackEngine {
     }
 
     /// Suspends visualization-only work without touching the audio graph.
-    /// Render-heartbeat monitoring remains active so background dropouts can
+    /// Render-heartbeat monitoring remains active so background render gaps can
     /// still be diagnosed without paying for FFT and per-stage metering.
     func setRealtimeAnalysisEnabled(_ enabled: Bool) {
         guard realtimeAnalysisGate.setEnabled(enabled) else { return }
@@ -1968,6 +1974,11 @@ final class HiResPlaybackEngine {
 
     private func installEffectLevelMeters() {
         clearEffectLevelMeters()
+        renderHeartbeat = AudioRenderHeartbeat(
+            unit: engine.mainMixerNode.auAudioUnit,
+            sampleRate: engine.mainMixerNode.outputFormat(forBus: 0).sampleRate,
+            monitor: renderHealthMonitor
+        )
         
         // Index 0 is the signal entering the modular effect chain. The final
         // index is the actual main-mixer output after trim and limiting.
@@ -1998,7 +2009,7 @@ final class HiResPlaybackEngine {
                 guard let self else { return }
                 let isFinal = target.index == meterCount - 1
                 if isFinal {
-                    self.renderHealthMonitor.recordRender(
+                    self.renderHealthMonitor.recordTapDelivery(
                         frameCount: buffer.frameLength,
                         sampleRate: buffer.format.sampleRate
                     )
@@ -2020,6 +2031,7 @@ final class HiResPlaybackEngine {
     }
 
     private func clearEffectLevelMeters() {
+        renderHeartbeat = nil
         for node in tappedNodes {
             node.removeTap(onBus: 0)
         }

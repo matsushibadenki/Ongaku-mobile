@@ -97,10 +97,10 @@
 "effects.availability.protected" = "この曲は保護された Apple Music / システム曲のため、iOS が音声サンプルをアプリへ渡せません。エフェクトを使うには端末内ファイルまたは assetURL を取得できる曲が必要です。";
 "effects.signal.unavailable" = "入力レベルを取得できません";
 "effects.signal.summary" = "入力ピーク %.1f dBFS  |  RMS %.1f dBFS  |  ラウドネス %.1f LUFS  |  入力トリム %.1f dB  |  32f 余裕 %.1f dB  |  出力トリム %.1f dB  |  FX 余裕 %.1f dB";
-"effects.render_health.healthy" = "オーディオレンダーは安定しています（音切れ未検知）";
-"effects.render_health.summary" = "音切れ %d 回・最長 %.0f ms — %@";
-"effects.render_health.stalled" = "現在停止中";
-"effects.render_health.recovered" = "復旧済み";
+"effects.render_health.healthy" = "レンダー周期は安定（遅延の検出なし）";
+"effects.render_health.summary" = "レンダー周期の遅延 %d 回、最長 %.0f ms — %@";
+"effects.render_health.stalled" = "コールバック待ち";
+"effects.render_health.recovered" = "再開済み";
 "effects.auto_dsp.title" = "Auto DSP 強度";
 "effects.auto_dsp.summary" = "Auto EQ  Low %.1f dB  |  LowMid %.1f dB  |  Presence %.1f dB  |  High %.1f dB  |  強度 %.0f%%  |  キャッシュ %6$@ (%7$d/%8$d)";
 "effects.auto_dsp.cache.hit" = "HIT";
@@ -351,3 +351,39 @@
 "settings.library_feedback.resident" = "現在の曲を読み込み済みのため、再生を保護する目的で、一時停止中も再読込を制限しています。アプリを再起動し、再生前にお試しください。";
 "settings.library_feedback.permission" = "iPhoneの設定でミュージックへのアクセスを許可してから、もう一度お試しください。";
 "settings.library_feedback.interrupted" = "処理が中断されました。再生していない状態で、もう一度お試しください。";
+
+// LRCLIB and synchronized lyrics
+"lyrics.title" = "歌詞";
+"lyrics.search" = "LRCLIBで検索";
+"lyrics.track" = "楽曲名";
+"lyrics.artist" = "アーティスト";
+"lyrics.search.detail" = "楽曲名とアーティスト名をLRCLIBに送信します。時間同期の歌詞を優先表示します。アルバムと曲の長さを確認して選んでください。";
+"lyrics.synced" = "時間同期LRC";
+"lyrics.plain" = "同期なしの歌詞";
+"lyrics.instrumental" = "インストゥルメンタル";
+"lyrics.empty" = "歌詞はまだありません";
+"lyrics.empty.detail" = "LRCLIBから歌詞を探して、この楽曲に保存できます。";
+"lyrics.no_results" = "見つかりませんでした。楽曲名を短くするか、アーティスト名を変更してください。";
+"lyrics.no_track" = "楽曲を選択してください";
+"lyrics.preview" = "歌詞のプレビュー";
+"lyrics.use" = "この歌詞を保存";
+"lyrics.saved" = "歌詞をこの端末に保存しました。";
+"lyrics.embed" = "音源ファイルに埋め込む";
+"lyrics.embed.detail" = "埋め込み歌詞をこの内容に置き換えます。LRCの時刻も保存し、音声は再圧縮しません。";
+"lyrics.embedded" = "音源ファイルに歌詞を埋め込みました。";
+"lyrics.app_only" = "歌詞はOngaku内に保存できます。ファイルへの埋め込みはOngakuフォルダ内のMP3・FLAC・M4A（AAC/ALAC）・ALACに対応しています。";
+"lyrics.follow" = "再生位置に戻る";
+"lyrics.play" = "再生";
+"lyrics.pause" = "一時停止";
+"lyrics.error.server" = "LRCLIBでエラーが発生しました（%d）。時間をおいて再試行してください。";
+"lyrics.error.response" = "歌詞データを読み込めませんでした。";
+"lyrics.error.tag" = "このファイルのタグ構造には埋め込めません。保存した歌詞はOngaku内で表示できます。";
+"lyrics.error.changed" = "書き込み中にファイルが変更されました。再試行してください。";
+"lyrics.error.writable" = "Ongakuフォルダ内の書き込み可能なMP3・FLAC・M4A（AAC/ALAC）・ALACが対象です。";
+"lyrics.error.large" = "歌詞またはメタデータが対応サイズを超えています。";
+
+// Additional Japanese lyric search sites
+"lyrics.search.title" = "歌詞を検索";
+"lyrics.web.title" = "日本語歌詞をWebで検索";
+"lyrics.web.open" = "%@をブラウザで検索";
+"lyrics.web.detail" = "各サイトをブラウザで開きます。歌ネットは曲名（空欄なら歌手名）、UtaTenは両方で検索します。サイト内での閲覧用で、Ongakuへの歌詞保存・同期表示には対応しません。";

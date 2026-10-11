@@ -97,10 +97,10 @@
 "effects.availability.protected" = "Effects cannot be applied to this protected Apple Music/system track because iOS does not expose its audio samples to the app.";
 "effects.signal.unavailable" = "Input level unavailable";
 "effects.signal.summary" = "Input Peak %.1f dBFS  |  RMS %.1f dBFS  |  Loudness %.1f LUFS  |  In Trim %.1f dB  |  32f Headroom %.1f dB  |  Out Trim %.1f dB  |  FX Headroom %.1f dB";
-"effects.render_health.healthy" = "Audio render stable — no dropouts detected";
-"effects.render_health.summary" = "Audio render: %d dropout(s), longest gap %.0f ms — %@";
-"effects.render_health.stalled" = "interrupted";
-"effects.render_health.recovered" = "recovered";
+"effects.render_health.healthy" = "Render cycles stable — no scheduling gaps detected";
+"effects.render_health.summary" = "Render scheduling: %d gap(s), longest %.0f ms — %@";
+"effects.render_health.stalled" = "no callback yet";
+"effects.render_health.recovered" = "resumed";
 "effects.auto_dsp.title" = "Auto DSP Strength";
 "effects.auto_dsp.summary" = "Auto EQ  Low %.1f dB  |  LowMid %.1f dB  |  Presence %.1f dB  |  High %.1f dB  |  Strength %.0f%%  |  Cache %6$@ (%7$d/%8$d)";
 "effects.auto_dsp.cache.hit" = "HIT";
@@ -351,3 +351,39 @@
 "settings.library_feedback.resident" = "The current track is still loaded. To protect playback, this reload is unavailable even while paused. Restart Ongaku and reload before playing.";
 "settings.library_feedback.permission" = "Allow Music access in iPhone Settings, then try again.";
 "settings.library_feedback.interrupted" = "The operation was interrupted. Please try again when playback is idle.";
+
+// LRCLIB and synchronized lyrics
+"lyrics.title" = "Lyrics";
+"lyrics.search" = "Search LRCLIB";
+"lyrics.track" = "Track title";
+"lyrics.artist" = "Artist";
+"lyrics.search.detail" = "Send the title and artist to LRCLIB. Synced results appear first; check the album and duration before choosing.";
+"lyrics.synced" = "Synced lyrics";
+"lyrics.plain" = "Plain lyrics";
+"lyrics.instrumental" = "Instrumental";
+"lyrics.empty" = "No lyrics saved";
+"lyrics.empty.detail" = "Find lyrics on LRCLIB and save them for this song.";
+"lyrics.no_results" = "No matches. Try shortening the title or changing the artist.";
+"lyrics.no_track" = "Select a song";
+"lyrics.preview" = "Lyrics preview";
+"lyrics.use" = "Use these lyrics";
+"lyrics.saved" = "Lyrics saved on this device.";
+"lyrics.embed" = "Embed in audio file";
+"lyrics.embed.detail" = "Replaces embedded lyrics with this text (including LRC timestamps). Audio is not re-encoded.";
+"lyrics.embedded" = "Lyrics embedded in the audio file.";
+"lyrics.app_only" = "Lyrics are stored in Ongaku. File embedding supports MP3, FLAC, M4A (AAC/ALAC) and ALAC in the Ongaku folder.";
+"lyrics.follow" = "Follow playback";
+"lyrics.play" = "Play";
+"lyrics.pause" = "Pause";
+"lyrics.error.server" = "LRCLIB returned an error (%d). Please try again later.";
+"lyrics.error.response" = "The lyrics data could not be read.";
+"lyrics.error.tag" = "This file’s tag structure is not supported for embedding. Saved lyrics can still be displayed in Ongaku.";
+"lyrics.error.changed" = "The file changed during writing. Please try again.";
+"lyrics.error.writable" = "Choose a writable MP3, FLAC, M4A or ALAC in the Ongaku folder.";
+"lyrics.error.large" = "The lyrics or metadata exceed the supported size.";
+
+// Additional Japanese lyric search sites
+"lyrics.search.title" = "Find lyrics";
+"lyrics.web.title" = "Japanese lyrics on the web";
+"lyrics.web.open" = "Search on %@ in your browser";
+"lyrics.web.detail" = "Opens each site in your browser. Uta-Net searches by title (or artist if the title is empty); UtaTen uses both fields. These sites provide viewing only, without saving or synchronized playback in Ongaku.";

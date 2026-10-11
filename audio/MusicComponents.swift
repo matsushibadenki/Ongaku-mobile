@@ -403,6 +403,14 @@ struct TrackCapabilityDetailView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        SongLyricsView(song: song)
+                    } label: {
+                        Label(L10n.tr("lyrics.title"), systemImage: "text.quote")
+                    }
+                }
+
                 capabilitySection(
                     title: L10n.tr("library.track_info.available"),
                     capabilities: availableCapabilities,

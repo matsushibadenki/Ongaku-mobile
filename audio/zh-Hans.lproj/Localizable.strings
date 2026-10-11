@@ -97,9 +97,9 @@
 "effects.availability.protected" = "此曲目是受保护的 Apple Music / 系统曲目，iOS 不会向应用暴露音频采样。要使用效果，需要本地文件或可获取 assetURL 的曲目。";
 "effects.signal.unavailable" = "无法获取输入电平";
 "effects.signal.summary" = "输入峰值 %.1f dBFS  |  RMS %.1f dBFS  |  响度 %.1f LUFS  |  输入修正 %.1f dB  |  32f 余量 %.1f dB  |  输出修正 %.1f dB  |  FX 余量 %.1f dB";
-"effects.render_health.healthy" = "音频渲染稳定（未检测到中断）";
-"effects.render_health.summary" = "音频中断 %d 次，最长 %.0f 毫秒 — %@";
-"effects.render_health.stalled" = "当前已中断";
+"effects.render_health.healthy" = "渲染周期稳定（未检测到调度延迟）";
+"effects.render_health.summary" = "渲染调度延迟 %d 次，最长 %.0f 毫秒 — %@";
+"effects.render_health.stalled" = "等待回调";
 "effects.render_health.recovered" = "已恢复";
 "effects.auto_dsp.title" = "Auto DSP 强度";
 "effects.auto_dsp.summary" = "Auto EQ  Low %.1f dB  |  LowMid %.1f dB  |  Presence %.1f dB  |  High %.1f dB  |  强度 %.0f%%  |  缓存 %6$@ (%7$d/%8$d)";
@@ -351,3 +351,39 @@
 "settings.library_feedback.resident" = "当前歌曲仍处于已加载状态。为保护播放，暂停时也无法重新加载。请重启 Ongaku，并在播放前重试。";
 "settings.library_feedback.permission" = "请在 iPhone 设置中允许访问音乐，然后重试。";
 "settings.library_feedback.interrupted" = "操作已中断。请在未播放时重试。";
+
+// LRCLIB and synchronized lyrics
+"lyrics.title" = "歌词";
+"lyrics.search" = "搜索 LRCLIB";
+"lyrics.track" = "歌曲名";
+"lyrics.artist" = "歌手";
+"lyrics.search.detail" = "将歌曲名和歌手名发送至 LRCLIB。优先显示时间同步歌词，请核对专辑和时长后选择。";
+"lyrics.synced" = "时间同步歌词";
+"lyrics.plain" = "无时间轴歌词";
+"lyrics.instrumental" = "纯音乐";
+"lyrics.empty" = "尚未保存歌词";
+"lyrics.empty.detail" = "从 LRCLIB 查找歌词并为此歌曲保存。";
+"lyrics.no_results" = "未找到结果。请尝试简化歌曲名或修改歌手名。";
+"lyrics.no_track" = "请选择歌曲";
+"lyrics.preview" = "歌词预览";
+"lyrics.use" = "保存此歌词";
+"lyrics.saved" = "歌词已保存到此设备。";
+"lyrics.embed" = "嵌入音频文件";
+"lyrics.embed.detail" = "将文件内的歌词替换为此内容（含 LRC 时间戳），音频不会重新编码。";
+"lyrics.embedded" = "歌词已嵌入音频文件。";
+"lyrics.app_only" = "歌词可保存在 Ongaku 内。文件嵌入支持 Ongaku 文件夹内的 MP3、FLAC、M4A（AAC/ALAC）及 ALAC。";
+"lyrics.follow" = "跟随播放";
+"lyrics.play" = "播放";
+"lyrics.pause" = "暂停";
+"lyrics.error.server" = "LRCLIB 返回错误（%d），请稍后重试。";
+"lyrics.error.response" = "无法读取歌词数据。";
+"lyrics.error.tag" = "不支持此文件的标签结构，已保存的歌词仍可在 Ongaku 中显示。";
+"lyrics.error.changed" = "写入期间文件发生了变化，请重试。";
+"lyrics.error.writable" = "请选择 Ongaku 文件夹内可写入的 MP3、FLAC、M4A 或 ALAC。";
+"lyrics.error.large" = "歌词或元数据超出支持的大小。";
+
+// Additional Japanese lyric search sites
+"lyrics.search.title" = "搜索歌词";
+"lyrics.web.title" = "在网站搜索日语歌词";
+"lyrics.web.open" = "在浏览器中使用 %@ 搜索";
+"lyrics.web.detail" = "在浏览器打开网站。歌网络按歌曲名搜索（为空时使用歌手名），UtaTen 使用两个字段。这些网站仅供浏览，不支持保存到 Ongaku 或同步显示。";

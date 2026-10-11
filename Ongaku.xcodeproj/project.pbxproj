@@ -7,15 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A732E3B1C846417FA6200006 /* PlaybackAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A732E3B1C846417FA6200007 /* PlaybackAudioSession.swift */; };
 		A732E3B1C846417FA6200001 /* audio/PlaybackHandoffClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A732E3B1C846417FA6200002 /* audio/PlaybackHandoffClock.swift */; };
 		A732E3B1C846417FA6200004 /* audio/HandoffMixerAudioUnit.mm in Sources */ = {isa = PBXBuildFile; fileRef = A732E3B1C846417FA6200005 /* audio/HandoffMixerAudioUnit.mm */; };
+		A732E3B1C846417FA6200006 /* audio/PlaybackAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A732E3B1C846417FA6200007 /* audio/PlaybackAudioSession.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A732E3B1C846417FA6200007 /* PlaybackAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = audio/PlaybackAudioSession.swift; sourceTree = SOURCE_ROOT; };
 		A732E3B1C846417FA6200002 /* audio/PlaybackHandoffClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = audio/PlaybackHandoffClock.swift; sourceTree = SOURCE_ROOT; };
 		A732E3B1C846417FA6200005 /* audio/HandoffMixerAudioUnit.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = audio/HandoffMixerAudioUnit.mm; sourceTree = SOURCE_ROOT; };
+		A732E3B1C846417FA6200007 /* audio/PlaybackAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = audio/PlaybackAudioSession.swift; sourceTree = SOURCE_ROOT; };
 		E8F493F92F7E67F800C073E8 /* audio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = audio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -23,8 +23,8 @@
 		A732E3B1C846417FA6200003 /* Exceptions for "audio" folder in "audio" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				PlaybackAudioSession.swift,
 				HandoffMixerAudioUnit.mm,
+				PlaybackAudioSession.swift,
 				PlaybackHandoffClock.swift,
 			);
 			target = E8F493F82F7E67F800C073E8 /* audio */;
@@ -58,6 +58,7 @@
 			children = (
 				A732E3B1C846417FA6200002 /* audio/PlaybackHandoffClock.swift */,
 				A732E3B1C846417FA6200005 /* audio/HandoffMixerAudioUnit.mm */,
+				A732E3B1C846417FA6200007 /* audio/PlaybackAudioSession.swift */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -155,7 +156,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A732E3B1C846417FA6200006 /* PlaybackAudioSession.swift in Sources */,
+				A732E3B1C846417FA6200006 /* audio/PlaybackAudioSession.swift in Sources */,
 				A732E3B1C846417FA6200004 /* audio/HandoffMixerAudioUnit.mm in Sources */,
 				A732E3B1C846417FA6200001 /* audio/PlaybackHandoffClock.swift in Sources */,
 			);

@@ -18,11 +18,12 @@ struct AudioRenderHealthPollResult: Sendable {
     let snapshot: AudioRenderHealthSnapshot
     let detectedGapMilliseconds: Double?
     let recoveredAfterMilliseconds: Double?
+    let tapDeliveryGapMilliseconds: Double?
+    let renderCallbackCount: UInt64
 }
 
-/// Detects audible render stalls from the final-output tap heartbeat.
-/// Silence is not treated as a dropout because the render callback continues
-/// to arrive even when sample values are zero.
+/// Observes render-cycle scheduling, independently of meter-tap delivery.
+/// A render gap is diagnostic evidence, not a measurement of audible silence.
 final class AudioRenderHealthMonitor: @unchecked Sendable {
     private struct State: Sendable {
         var isMonitoring = false
@@ -35,6 +36,9 @@ final class AudioRenderHealthMonitor: @unchecked Sendable {
         var maxRenderGapNanoseconds: UInt64 = 0
         var pendingDetectedGapNanoseconds: UInt64?
         var pendingRecoveryNanoseconds: UInt64?
+        var lastTapNanoseconds: UInt64 = 0
+        var pendingTapDeliveryGapNanoseconds: UInt64?
+        var renderCallbackCount: UInt64 = 0
     }
 
     private let lock = OSAllocatedUnfairLock(initialState: State())
@@ -43,8 +47,8 @@ final class AudioRenderHealthMonitor: @unchecked Sendable {
 
     nonisolated init() {}
 
-    nonisolated func beginMonitoring() {
-        let now = Self.nowNanoseconds()
+    nonisolated func beginMonitoring(nowNanoseconds: UInt64? = nil) {
+        let now = nowNanoseconds ?? Self.nowNanoseconds()
         lock.withLock { state in
             state.isMonitoring = true
             state.monitoringStartedNanoseconds = now
@@ -54,6 +58,9 @@ final class AudioRenderHealthMonitor: @unchecked Sendable {
             state.stallStartedNanoseconds = 0
             state.pendingDetectedGapNanoseconds = nil
             state.pendingRecoveryNanoseconds = nil
+            state.lastTapNanoseconds = 0
+            state.pendingTapDeliveryGapNanoseconds = nil
+            state.renderCallbackCount = 0
         }
     }
 
@@ -65,41 +72,41 @@ final class AudioRenderHealthMonitor: @unchecked Sendable {
             state.stallStartedNanoseconds = 0
             state.pendingDetectedGapNanoseconds = nil
             state.pendingRecoveryNanoseconds = nil
+            state.lastTapNanoseconds = 0
+            state.pendingTapDeliveryGapNanoseconds = nil
         }
     }
 
-    /// Called from the realtime audio tap. Lock contention is skipped rather
+    /// Called from the Audio Unit's pre-render observer. Lock contention is skipped rather
     /// than blocking the render thread.
-    nonisolated func recordRender(frameCount: AVAudioFrameCount, sampleRate: Double) {
-        guard frameCount > 0, sampleRate > 0 else { return }
-        let now = Self.nowNanoseconds()
+    nonisolated func recordRender(frameCount: AVAudioFrameCount, sampleRate: Double,
+                                  nowNanoseconds: UInt64? = nil) {
+        guard frameCount > 0, sampleRate.isFinite, sampleRate > 0 else { return }
+        let now = nowNanoseconds ?? Self.nowNanoseconds()
         let expectedInterval = UInt64(
             (Double(frameCount) / sampleRate * 1_000_000_000).rounded()
         )
 
         _ = lock.withLockIfAvailable { state in
             guard state.isMonitoring else { return }
+            state.renderCallbackCount &+= 1
 
             state.expectedCallbackIntervalNanoseconds = max(1, expectedInterval)
-            if state.lastRenderNanoseconds > 0 {
+            if state.isStalled {
+                // This also handles recovery when no first callback arrived
+                // during startup. Previously it remained stalled forever.
+                let recoveryDuration = now &- state.stallStartedNanoseconds
+                state.pendingRecoveryNanoseconds = max(state.pendingRecoveryNanoseconds ?? 0, recoveryDuration)
+                state.maxRenderGapNanoseconds = max(state.maxRenderGapNanoseconds, recoveryDuration)
+                state.isStalled = false
+                state.stallStartedNanoseconds = 0
+            } else if state.lastRenderNanoseconds > 0 {
                 let gap = now &- state.lastRenderNanoseconds
                 let threshold = Self.dropoutThreshold(
                     expectedIntervalNanoseconds: state.expectedCallbackIntervalNanoseconds
                 )
 
-                if state.isStalled {
-                    let recoveryDuration = now &- state.stallStartedNanoseconds
-                    state.pendingRecoveryNanoseconds = max(
-                        state.pendingRecoveryNanoseconds ?? 0,
-                        recoveryDuration
-                    )
-                    state.maxRenderGapNanoseconds = max(
-                        state.maxRenderGapNanoseconds,
-                        recoveryDuration
-                    )
-                    state.isStalled = false
-                    state.stallStartedNanoseconds = 0
-                } else if gap > threshold {
+                if gap > threshold {
                     state.dropoutCount += 1
                     state.maxRenderGapNanoseconds = max(state.maxRenderGapNanoseconds, gap)
                     state.pendingDetectedGapNanoseconds = max(
@@ -117,8 +124,29 @@ final class AudioRenderHealthMonitor: @unchecked Sendable {
         }
     }
 
-    nonisolated func poll(expectedToRender: Bool) -> AudioRenderHealthPollResult {
-        let now = Self.nowNanoseconds()
+    /// Meter delivery can be delayed while render cycles continue normally.
+    /// Record it separately; it must never increment the render-gap count.
+    nonisolated func recordTapDelivery(frameCount: AVAudioFrameCount, sampleRate: Double,
+                                       nowNanoseconds: UInt64? = nil) {
+        guard frameCount > 0, sampleRate.isFinite, sampleRate > 0 else { return }
+        let now = nowNanoseconds ?? Self.nowNanoseconds()
+        let interval = UInt64((Double(frameCount) / sampleRate * 1_000_000_000).rounded())
+        _ = lock.withLockIfAvailable { state in
+            guard state.isMonitoring else { return }
+            if state.lastTapNanoseconds > 0 {
+                let gap = now &- state.lastTapNanoseconds
+                if gap > Self.dropoutThreshold(expectedIntervalNanoseconds: max(1, interval)) {
+                    state.pendingTapDeliveryGapNanoseconds = max(
+                        state.pendingTapDeliveryGapNanoseconds ?? 0, gap
+                    )
+                }
+            }
+            state.lastTapNanoseconds = now
+        }
+    }
+
+    nonisolated func poll(expectedToRender: Bool, nowNanoseconds: UInt64? = nil) -> AudioRenderHealthPollResult {
+        let now = nowNanoseconds ?? Self.nowNanoseconds()
         return lock.withLock { state in
             if state.isMonitoring, expectedToRender {
                 let hasRendered = state.lastRenderNanoseconds > 0
@@ -154,10 +182,13 @@ final class AudioRenderHealthMonitor: @unchecked Sendable {
             let result = AudioRenderHealthPollResult(
                 snapshot: snapshot,
                 detectedGapMilliseconds: state.pendingDetectedGapNanoseconds.map(Self.milliseconds),
-                recoveredAfterMilliseconds: state.pendingRecoveryNanoseconds.map(Self.milliseconds)
+                recoveredAfterMilliseconds: state.pendingRecoveryNanoseconds.map(Self.milliseconds),
+                tapDeliveryGapMilliseconds: state.pendingTapDeliveryGapNanoseconds.map(Self.milliseconds),
+                renderCallbackCount: state.renderCallbackCount
             )
             state.pendingDetectedGapNanoseconds = nil
             state.pendingRecoveryNanoseconds = nil
+            state.pendingTapDeliveryGapNanoseconds = nil
             return result
         }
     }

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 import MusicKit
 import UniformTypeIdentifiers
 
@@ -24,34 +25,6 @@ private enum SearchScope: String, CaseIterable, Identifiable {
         case .artists: return L10n.tr("library.artists")
         case .albums: return L10n.tr("library.albums")
         case .songs: return L10n.tr("library.songs")
-        }
-    }
-}
-
-enum LibraryRoute: Hashable {
-    case artist(SystemArtist)
-    case album(SystemAlbum)
-    case playlist(SystemPlaylist)
-    case ongakuPlaylist(OngakuPlaylist)
-
-    // Counts/search terms can change during a refresh without changing the
-    // destination. Navigation identity must survive those metadata updates.
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        switch (lhs, rhs) {
-        case (.artist(let a), .artist(let b)): return a.id == b.id
-        case (.album(let a), .album(let b)): return a.id == b.id
-        case (.playlist(let a), .playlist(let b)): return a.id == b.id
-        case (.ongakuPlaylist(let a), .ongakuPlaylist(let b)): return a.id == b.id
-        default: return false
-        }
-    }
-
-    func hash(into hasher: inout Hasher) {
-        switch self {
-        case .artist(let item): hasher.combine(0); hasher.combine(item.id)
-        case .album(let item): hasher.combine(1); hasher.combine(item.id)
-        case .playlist(let item): hasher.combine(2); hasher.combine(item.id)
-        case .ongakuPlaylist(let item): hasher.combine(3); hasher.combine(item.id)
         }
     }
 }
@@ -82,16 +55,14 @@ private extension View {
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @ObservedObject private var player: AudioPlayerViewModel
+    private let player: AudioPlayerViewModel
+    @State private var accentColor: Color
+    @State private var errorMessage: String?
     @State private var selectedTab: RootTab = .nowPlaying
-    @State private var selectedLibraryCategory: LibraryCategory = .artists
-    @State private var selectedSearchScope: SearchScope = .songs
-    @State private var isSearchPresented = false
     @State private var isShowingSettings = false
     @State private var isShowingDesktopSync = false
-    @State private var isCreatingOngakuPlaylist = false
-    @State private var newOngakuPlaylistName = ""
-    @State private var libraryPath = NavigationPath()
+    @State private var libraryPath: [LibraryRoute] = []
+    @State private var searchPath: [LibraryRoute] = []
     @State private var pendingAlbumNavigation: SystemAlbum?
     @State private var hasPreparedEffectsScreen = false
     @State private var shouldRenderEffectsControls = false
@@ -100,6 +71,8 @@ struct ContentView: View {
     
     init(player: AudioPlayerViewModel) {
         self.player = player
+        _accentColor = State(initialValue: player.accentColor)
+        _errorMessage = State(initialValue: player.errorMessage)
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
         appearance.backgroundColor = .clear
@@ -119,271 +92,48 @@ struct ContentView: View {
                 .tag(RootTab.nowPlaying)
                 .toolbar(.hidden, for: .tabBar)
             
-            // LIBRARY
+            // Navigation owners do not observe playback telemetry. Observed
+            // content sits inside each stack, below destination registration.
             NavigationStack(path: $libraryPath) {
-                VStack(spacing: 0) {
-                    libraryHeader
-
-                    if player.mediaLibraryAccess == .authorized {
-                        if player.isLibraryBootstrapInProgress {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(player.accentColor)
-                                Text(L10n.tr("now_playing.loading.badge"))
-                                    .font(.appCaption())
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                        }
-                        Picker(L10n.tr("library.picker"), selection: $selectedLibraryCategory) {
-                            ForEach(LibraryCategory.allCases) { category in
-                                Text(category.title).tag(category)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: Theme.maxContentWidth)
-                        .padding(.vertical, 8)
-                        
-                        if player.isLibraryBootstrapInProgress && player.systemSongs.isEmpty {
-                            LoadingStateView(
-                                title: L10n.tr("now_playing.loading.title"),
-                                subtitle: L10n.tr("now_playing.loading.subtitle"),
-                                accentColor: player.accentColor
-                            )
-                        } else {
-                            libraryRoot
-                                .scrollContentBackground(.hidden)
-                        }
-                    } else {
-                        MediaLibraryPermissionView(
-                            state: player.mediaLibraryAccess,
-                            accentColor: player.accentColor,
-                            isLoading: player.isRequestingSystemLibraryAccess
-                        ) {
-                            player.requestSystemLibraryAccess()
-                        }
+                LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                    .toolbar { settingsToolbar(for: .library) }
+                    .navigationDestination(for: LibraryRoute.self) { route in
+                        LibraryDestinationView(route: route, player: player,
+                                               onPlay: { selectedTab = .nowPlaying })
                     }
-                }
-                .background(Theme.background)
-                .toolbar { settingsToolbar }
-                .navigationDestination(for: LibraryRoute.self) { route in
-                    switch route {
-                    case .artist(let artist):
-                        ArtistAlbumsView(artist: player.systemArtists.first { $0.id == artist.id } ?? artist,
-                                         player: player, onPlay: { selectedTab = .nowPlaying })
-                    case .album(let album):
-                        AlbumSongsView(album: player.systemAlbums.first { $0.id == album.id } ?? album,
-                                       player: player, onPlay: { selectedTab = .nowPlaying })
-                    case .playlist(let playlist):
-                        PlaylistSongsView(playlist: playlist, player: player, onPlay: { selectedTab = .nowPlaying })
-                    case .ongakuPlaylist(let playlist):
-                        OngakuPlaylistSongsView(
-                            playlist: playlist,
-                            player: player,
-                            onPlay: { selectedTab = .nowPlaying }
-                        )
-                    }
-                }
             }
             .tag(RootTab.library)
             .toolbar(.hidden, for: .tabBar)
-            
-            // EFFECTS
+
             NavigationStack {
-                ZStack {
-                    Theme.background.ignoresSafeArea()
-                    
-                    ScrollView {
-                        LazyVStack(spacing: 32) {
-                            SectionHeader(
-                                title: L10n.tr("effects.realtime_processing"),
-                                subtitle: player.realtimeEffectsStatusText
-                            )
-                            .overlay(alignment: .topTrailing) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(player.accentColor)
-                                    .padding(.trailing, 16)
-                                    .padding(.top, 4)
-                                    .opacity(
-                                        player.isEffectProcessing || player.isSpatialProcessing
-                                            ? 1
-                                            : 0
-                                    )
-                                    .accessibilityLabel(L10n.tr("effects.realtime_processing"))
-                                    .accessibilityHidden(
-                                        !(player.isEffectProcessing || player.isSpatialProcessing)
-                                    )
-                                    .animation(
-                                        .easeInOut(duration: 0.15),
-                                        value: player.isEffectProcessing || player.isSpatialProcessing
-                                    )
-                            }
-
-                            if !player.supportsRealtimeEffects {
-                                Text(player.realtimeEffectsAvailabilityDetail)
-                                    .font(.appCaption())
-                                    .foregroundStyle(Color.orange.opacity(0.9))
-                                    .frame(width: Theme.maxContentWidth, alignment: .leading)
-                                    .padding(.horizontal, 20)
-                            }
-                            
-                            if shouldRenderEffectsControls {
-                                effectsControlsContent
-                                    .id(effectsControlsRenderID)
-                            } else {
-                                VStack(spacing: 14) {
-                                    ProgressView()
-                                        .tint(player.accentColor)
-                                        .scaleEffect(0.8)
-                                    Text("エフェクトを準備中...")
-                                        .font(.system(size: 13, weight: .light))
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                                .frame(width: Theme.maxContentWidth)
-                                .padding(.vertical, 36)
-                                .background(Theme.secondaryBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                            }
-                            
-                            if !player.isLoading {
-                                Text(player.localPlaybackFormatDescription)
-                                    .font(.appCaption())
-                                    .foregroundStyle(Theme.textSecondary.opacity(0.4))
-                                    .padding(.top, 10)
-                                    .frame(width: Theme.maxContentWidth)
-                                    .lineLimit(1)
-                            }
-
-                            Text(player.signalDiagnosticsSummary)
-                                .font(.appCaption())
-                                .foregroundStyle(Theme.textSecondary.opacity(0.55))
-                                .frame(width: Theme.maxContentWidth)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-
-                            Text(player.audioRenderHealthSummary)
-                                .font(.appCaption())
-                                .foregroundStyle(
-                                    player.audioRenderHealth.isStalled
-                                        ? Color.red
-                                        : Theme.textSecondary.opacity(0.55)
-                                )
-                                .frame(width: Theme.maxContentWidth)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text(L10n.tr("effects.auto_dsp.title"))
-                                        .font(.system(size: 12, weight: .regular))
-                                        .foregroundStyle(Theme.textPrimary)
-                                    Spacer()
-                                    Text("\(Int(player.automaticDSPStrength * 100))%")
-                                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-
-                                Slider(
-                                    value: Binding(
-                                        get: { player.automaticDSPStrength },
-                                        set: { player.setAutomaticDSPStrength($0) }
-                                    ),
-                                    in: 0...1.5
-                                )
-                                .tint(player.accentColor)
-                                .disabled(!player.supportsRealtimeEffects)
-
-                                Picker("DSP", selection: Binding(
-                                    get: { player.automaticDSPVoicing },
-                                    set: { player.setAutomaticDSPVoicing($0) }
-                                )) {
-                                    Text("Natural").tag(AutomaticDSPVoicing.natural)
-                                    Text("Reference").tag(AutomaticDSPVoicing.reference)
-                                    Text("Immersive").tag(AutomaticDSPVoicing.immersive)
-                                    Text("Safe").tag(AutomaticDSPVoicing.safe)
-                                }
-                                .pickerStyle(.segmented)
-                                .disabled(!player.supportsRealtimeEffects)
-
-                                Button {
-                                    player.toggleABReferenceMode()
-                                } label: {
-                                    Label(
-                                        player.isABReferenceMode ? "Reference" : "A/B Compare",
-                                        systemImage: player.isABReferenceMode ? "waveform" : "arrow.left.arrow.right"
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(player.isABReferenceMode ? player.accentColor : Theme.textSecondary)
-                                .disabled(!player.supportsRealtimeEffects)
-
-                                Text(player.automaticDSPSummary)
-                                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                    .foregroundStyle(Theme.textSecondary.opacity(0.58))
-                                    .lineLimit(nil)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            .padding(12)
-                            .frame(width: Theme.maxContentWidth, alignment: .leading)
-                            .background(Theme.secondaryBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-
-                            Text(player.effectAuditSummaryText)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .foregroundStyle(Theme.textSecondary.opacity(0.58))
-                                .frame(width: Theme.maxContentWidth, alignment: .leading)
-                                .lineLimit(nil)
-                                .multilineTextAlignment(.leading)
-                        }
-                        .padding(.horizontal, Theme.horizontalPadding)
-                        .padding(.vertical, 10)
-                        .padding(.bottom, 132)
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-                .navigationTitle(L10n.tr("effects.title"))
-                .toolbar { settingsToolbar }
+                EffectsTabContent(player: player,
+                                  shouldRenderControls: shouldRenderEffectsControls,
+                                  controlsRenderID: effectsControlsRenderID)
+                    .toolbar { settingsToolbar(for: .effects) }
             }
             .tag(RootTab.effects)
             .toolbar(.hidden, for: .tabBar)
-            
-            // SEARCH
-            NavigationStack {
-                ZStack {
-                    Theme.background.ignoresSafeArea()
 
-                    searchRoot
-                        .scrollContentBackground(.hidden)
-                        .scrollDismissesKeyboard(.interactively)
-                }
-                .navigationTitle(L10n.tr("search.title"))
-                .toolbar { settingsToolbar }
-                .searchable(
-                    text: $player.searchText,
-                    isPresented: $isSearchPresented,
-                    prompt: L10n.tr("search.prompt")
-                )
-                .onSubmit(of: .search) {
-                    isSearchPresented = false
-                }
+            NavigationStack(path: $searchPath) {
+                SearchTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                    .toolbar { settingsToolbar(for: .search) }
+                    .navigationDestination(for: LibraryRoute.self) { route in
+                        LibraryDestinationView(route: route, player: player,
+                                               onPlay: { selectedTab = .nowPlaying })
+                    }
             }
             .tag(RootTab.search)
             .toolbar(.hidden, for: .tabBar)
         }
         .safeAreaInset(edge: .bottom) {
-            CustomTabBar(selectedTab: $selectedTab, accentColor: player.accentColor)
+            CustomTabBar(selectedTab: $selectedTab, accentColor: accentColor)
         }
         .preferredColorScheme(.dark)
-        .tint(player.accentColor)
+        .tint(accentColor)
         .alert(L10n.tr("common.error"), isPresented: errorBinding) {
             Button(L10n.tr("common.ok"), role: .cancel) { player.errorMessage = nil }
         } message: {
-            Text(player.errorMessage ?? "")
+            Text(errorMessage ?? "")
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(player: player, isShowing: $isShowingSettings)
@@ -396,26 +146,34 @@ struct ContentView: View {
             scheduleEffectsPresentationUpdate()
         }
         .onChange(of: selectedTab) { _, newValue in
-            if newValue != .search {
-                isSearchPresented = false
-            }
+            PlaybackDebugLogger.event("ui.navigation.tab selected=\(newValue)")
             scheduleEffectsPresentationUpdate(refreshViewIdentity: newValue == .effects)
         }
         .onChange(of: scenePhase) { _, newPhase in
             scheduleEffectsPresentationUpdate(refreshViewIdentity: newPhase == .active && selectedTab == .effects)
         }
-        .task(id: selectedTab) {
+        .onReceive(player.$upsamplingMode.removeDuplicates()) { mode in
+            accentColor = mode.isPrecisionSinc ? Theme.precisionSincAccent : Theme.accent
+        }
+        .onReceive(player.$errorMessage.removeDuplicates()) { errorMessage = $0 }
+        .onChange(of: libraryPath) { _, path in
+            PlaybackDebugLogger.event("ui.navigation.path source=library depth=\(path.count)")
+        }
+        .onChange(of: searchPath) { _, path in
+            PlaybackDebugLogger.event("ui.navigation.path source=search depth=\(path.count)")
+        }
+        .task(id: pendingAlbumNavigation?.id) {
             guard selectedTab == .library, let requestedAlbum = pendingAlbumNavigation else { return }
             // Let the destination NavigationStack mount before replacing its path.
             await Task.yield()
             guard !Task.isCancelled, selectedTab == .library else { return }
             let album = player.systemAlbums.first { $0.id == requestedAlbum.id } ?? requestedAlbum
-            var path = NavigationPath()
+            var path: [LibraryRoute] = []
             if let artist = player.findArtist(for: album) {
-                path.append(LibraryRoute.artist(artist))
+                path.append(.artist(artist))
             }
-            path.append(LibraryRoute.album(album))
-            libraryPath = path
+            path.append(.album(album))
+            if libraryPath != path { libraryPath = path }
             pendingAlbumNavigation = nil
         }
     }
@@ -463,68 +221,9 @@ struct ContentView: View {
         }
     }
 
-    private var effectsControlsContent: some View {
-        VStack(spacing: 20) {
-            VStack(spacing: 10) {
-                Picker(
-                    L10n.tr("effects.tab.accessibility_label"),
-                    selection: Binding(
-                        get: { player.selectedEffectPageTab },
-                        set: { player.selectEffectPageTab($0) }
-                    )
-                ) {
-                    ForEach(AudioEffectPageTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(L10n.tr("effects.tab.selected_only_footer"))
-                    .font(.appCaption())
-                    .foregroundStyle(Theme.textSecondary.opacity(0.75))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: Theme.maxContentWidth)
-
-            if player.selectedEffectPageTab == .pro {
-                HeadphoneSpatialCard(
-                    isEnabled: player.headphoneSpatialSettings.isEnabled,
-                    preset: player.headphoneSpatialSettings.preset,
-                    spatial: player.headphoneSpatialSettings.spatial,
-                    crossfeed: player.headphoneSpatialSettings.crossfeed,
-                    isInteractive: player.supportsRealtimeEffects,
-                    onToggle: { player.setHeadphoneSpatialEnabled($0) },
-                    onPresetChange: { player.setHeadphoneHRTFPreset($0) },
-                    onParameterChange: { key, value in
-                        player.setHeadphoneSpatialParameter(value, key: key)
-                    },
-                    accentColor: player.accentColor
-                )
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-            }
-
-            ForEach(player.visibleEffectSettings) { effect in
-                EffectCard(
-                    kind: effect.kind,
-                    isEnabled: effect.isEnabled,
-                    parameters: effect.parameters,
-                    isInteractive: player.supportsRealtimeEffects,
-                    onToggle: { player.setEffectEnabled($0, for: effect.kind) },
-                    onParameterChange: { key, value in
-                        player.setEffectParameter(value, key: key, for: effect.kind)
-                    },
-                    accentColor: player.accentColor
-                )
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-            }
-        }
-        .animation(.easeInOut(duration: 0.22), value: player.selectedEffectPageTab)
-    }
-    
-    private var settingsToolbar: some ToolbarContent {
+    private func settingsToolbar(for tab: RootTab) -> some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if selectedTab == .library {
+            if tab == .library {
                 Button {
                     isShowingDesktopSync = true
                 } label: {
@@ -537,6 +236,75 @@ struct ContentView: View {
                 Image(systemName: "person.crop.circle")
             }
         }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(get: { errorMessage != nil }, set: { if !$0 { player.errorMessage = nil; errorMessage = nil } })
+    }
+}
+
+private struct LibraryTabContent: View {
+    let player: AudioPlayerViewModel
+    let onPlay: () -> Void
+    @StateObject private var updates: CoalescedViewUpdates
+    @State private var selectedLibraryCategory: LibraryCategory = .artists
+    @State private var isCreatingOngakuPlaylist = false
+    @State private var newOngakuPlaylistName = ""
+
+    init(player: AudioPlayerViewModel, onPlay: @escaping () -> Void) {
+        self.player = player
+        self.onPlay = onPlay
+        _updates = StateObject(wrappedValue: CoalescedViewUpdates(events: player.libraryPresentationEvents))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            libraryHeader
+
+            if player.mediaLibraryAccess == .authorized {
+                if player.isLibraryBootstrapInProgress {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(player.accentColor)
+                        Text(L10n.tr("now_playing.loading.badge"))
+                            .font(.appCaption())
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                }
+                Picker(L10n.tr("library.picker"), selection: $selectedLibraryCategory) {
+                    ForEach(LibraryCategory.allCases) { category in
+                        Text(category.title).tag(category)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: Theme.maxContentWidth)
+                .padding(.vertical, 8)
+
+                if player.isLibraryBootstrapInProgress && player.systemSongs.isEmpty {
+                    LoadingStateView(
+                        title: L10n.tr("now_playing.loading.title"),
+                        subtitle: L10n.tr("now_playing.loading.subtitle"),
+                        accentColor: player.accentColor
+                    )
+                } else {
+                    libraryRoot
+                        .scrollContentBackground(.hidden)
+                }
+            } else {
+                MediaLibraryPermissionView(
+                    state: player.mediaLibraryAccess,
+                    accentColor: player.accentColor,
+                    isLoading: player.isRequestingSystemLibraryAccess
+                ) {
+                    player.requestSystemLibraryAccess()
+                }
+            }
+        }
+        .background(Theme.background)
     }
 
     private var libraryHeader: some View {
@@ -758,7 +526,7 @@ struct ContentView: View {
                         onPlay: {
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                                 player.playSystemSong(song)
-                                selectedTab = .nowPlaying
+                                onPlay()
                             }
                         }
                     )
@@ -771,6 +539,50 @@ struct ContentView: View {
         }
     }
     
+    private func emptyStateView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "music.note.list")
+                .font(.system(size: 30, weight: .thin))
+                .foregroundStyle(Theme.textSecondary.opacity(0.3))
+            Text(message)
+                .font(.system(size: 14, weight: .light))
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+        }
+        .frame(width: Theme.maxContentWidth)
+    }
+
+}
+
+private struct SearchTabContent: View {
+    let player: AudioPlayerViewModel
+    let onPlay: () -> Void
+    @StateObject private var updates: CoalescedViewUpdates
+    @State private var selectedSearchScope: SearchScope = .songs
+    @State private var isSearchPresented = false
+
+    init(player: AudioPlayerViewModel, onPlay: @escaping () -> Void) {
+        self.player = player
+        self.onPlay = onPlay
+        _updates = StateObject(wrappedValue: CoalescedViewUpdates(events: player.searchPresentationEvents))
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            searchRoot
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+        }
+        .navigationTitle(L10n.tr("search.title"))
+        .searchable(text: Binding(get: { player.searchText }, set: { player.searchText = $0 }),
+                    isPresented: $isSearchPresented,
+                    prompt: L10n.tr("search.prompt"))
+        .onSubmit(of: .search) { isSearchPresented = false }
+        .onDisappear { isSearchPresented = false }
+    }
+
     private var searchRoot: some View {
         List {
             Section {
@@ -906,7 +718,7 @@ struct ContentView: View {
                                     onPlay: {
                                         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                                             player.playSystemSong(song)
-                                            selectedTab = .nowPlaying
+                                            onPlay()
                                         }
                                     }
                                 )
@@ -1030,22 +842,259 @@ struct ContentView: View {
             .padding(.vertical, 6)
     }
     
-    private func emptyStateView(message: String) -> some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "music.note.list")
-                .font(.system(size: 30, weight: .thin))
-                .foregroundStyle(Theme.textSecondary.opacity(0.3))
-            Text(message)
-                .font(.system(size: 14, weight: .light))
-                .foregroundStyle(Theme.textSecondary)
-            Spacer()
+
+}
+
+private struct EffectsTabContent: View {
+    @ObservedObject var player: AudioPlayerViewModel
+    let shouldRenderControls: Bool
+    let controlsRenderID: UUID
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+
+            ScrollView {
+                LazyVStack(spacing: 32) {
+                    SectionHeader(
+                        title: L10n.tr("effects.realtime_processing"),
+                        subtitle: player.realtimeEffectsStatusText
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(player.accentColor)
+                            .padding(.trailing, 16)
+                            .padding(.top, 4)
+                            .opacity(
+                                player.isEffectProcessing || player.isSpatialProcessing
+                                    ? 1
+                                    : 0
+                            )
+                            .accessibilityLabel(L10n.tr("effects.realtime_processing"))
+                            .accessibilityHidden(
+                                !(player.isEffectProcessing || player.isSpatialProcessing)
+                            )
+                            .animation(
+                                .easeInOut(duration: 0.15),
+                                value: player.isEffectProcessing || player.isSpatialProcessing
+                            )
+                    }
+
+                    if !player.supportsRealtimeEffects {
+                        Text(player.realtimeEffectsAvailabilityDetail)
+                            .font(.appCaption())
+                            .foregroundStyle(Color.orange.opacity(0.9))
+                            .frame(width: Theme.maxContentWidth, alignment: .leading)
+                            .padding(.horizontal, 20)
+                    }
+
+                    if shouldRenderControls {
+                        effectsControlsContent
+                            .id(controlsRenderID)
+                    } else {
+                        VStack(spacing: 14) {
+                            ProgressView()
+                                .tint(player.accentColor)
+                                .scaleEffect(0.8)
+                            Text("エフェクトを準備中...")
+                                .font(.system(size: 13, weight: .light))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .frame(width: Theme.maxContentWidth)
+                        .padding(.vertical, 36)
+                        .background(Theme.secondaryBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+                    }
+
+                    if !player.isLoading {
+                        Text(player.localPlaybackFormatDescription)
+                            .font(.appCaption())
+                            .foregroundStyle(Theme.textSecondary.opacity(0.4))
+                            .padding(.top, 10)
+                            .frame(width: Theme.maxContentWidth)
+                            .lineLimit(1)
+                    }
+
+                    Text(player.signalDiagnosticsSummary)
+                        .font(.appCaption())
+                        .foregroundStyle(Theme.textSecondary.opacity(0.55))
+                        .frame(width: Theme.maxContentWidth)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+
+                    Text(player.audioRenderHealthSummary)
+                        .font(.appCaption())
+                        .foregroundStyle(
+                            player.audioRenderHealth.isStalled
+                                ? Color.red
+                                : Theme.textSecondary.opacity(0.55)
+                        )
+                        .frame(width: Theme.maxContentWidth)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(L10n.tr("effects.auto_dsp.title"))
+                                .font(.system(size: 12, weight: .regular))
+                                .foregroundStyle(Theme.textPrimary)
+                            Spacer()
+                            Text("\(Int(player.automaticDSPStrength * 100))%")
+                                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+
+                        Slider(
+                            value: Binding(
+                                get: { player.automaticDSPStrength },
+                                set: { player.setAutomaticDSPStrength($0) }
+                            ),
+                            in: 0...1.5
+                        )
+                        .tint(player.accentColor)
+                        .disabled(!player.supportsRealtimeEffects)
+
+                        Picker("DSP", selection: Binding(
+                            get: { player.automaticDSPVoicing },
+                            set: { player.setAutomaticDSPVoicing($0) }
+                        )) {
+                            Text("Natural").tag(AutomaticDSPVoicing.natural)
+                            Text("Reference").tag(AutomaticDSPVoicing.reference)
+                            Text("Immersive").tag(AutomaticDSPVoicing.immersive)
+                            Text("Safe").tag(AutomaticDSPVoicing.safe)
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(!player.supportsRealtimeEffects)
+
+                        Button {
+                            player.toggleABReferenceMode()
+                        } label: {
+                            Label(
+                                player.isABReferenceMode ? "Reference" : "A/B Compare",
+                                systemImage: player.isABReferenceMode ? "waveform" : "arrow.left.arrow.right"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(player.isABReferenceMode ? player.accentColor : Theme.textSecondary)
+                        .disabled(!player.supportsRealtimeEffects)
+
+                        Text(player.automaticDSPSummary)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Theme.textSecondary.opacity(0.58))
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .padding(12)
+                    .frame(width: Theme.maxContentWidth, alignment: .leading)
+                    .background(Theme.secondaryBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+
+                    Text(player.effectAuditSummaryText)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.58))
+                        .frame(width: Theme.maxContentWidth, alignment: .leading)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(.horizontal, Theme.horizontalPadding)
+                .padding(.vertical, 10)
+                .padding(.bottom, 132)
+                .frame(maxWidth: .infinity)
+            }
         }
-        .frame(width: Theme.maxContentWidth)
+        .navigationTitle(L10n.tr("effects.title"))
+    }
+
+    private var effectsControlsContent: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 10) {
+                Picker(
+                    L10n.tr("effects.tab.accessibility_label"),
+                    selection: Binding(
+                        get: { player.selectedEffectPageTab },
+                        set: { player.selectEffectPageTab($0) }
+                    )
+                ) {
+                    ForEach(AudioEffectPageTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(L10n.tr("effects.tab.selected_only_footer"))
+                    .font(.appCaption())
+                    .foregroundStyle(Theme.textSecondary.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: Theme.maxContentWidth)
+
+            if player.selectedEffectPageTab == .pro {
+                HeadphoneSpatialCard(
+                    isEnabled: player.headphoneSpatialSettings.isEnabled,
+                    preset: player.headphoneSpatialSettings.preset,
+                    spatial: player.headphoneSpatialSettings.spatial,
+                    crossfeed: player.headphoneSpatialSettings.crossfeed,
+                    isInteractive: player.supportsRealtimeEffects,
+                    onToggle: { player.setHeadphoneSpatialEnabled($0) },
+                    onPresetChange: { player.setHeadphoneHRTFPreset($0) },
+                    onParameterChange: { key, value in
+                        player.setHeadphoneSpatialParameter(value, key: key)
+                    },
+                    accentColor: player.accentColor
+                )
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+
+            ForEach(player.visibleEffectSettings) { effect in
+                EffectCard(
+                    kind: effect.kind,
+                    isEnabled: effect.isEnabled,
+                    parameters: effect.parameters,
+                    isInteractive: player.supportsRealtimeEffects,
+                    onToggle: { player.setEffectEnabled($0, for: effect.kind) },
+                    onParameterChange: { key, value in
+                        player.setEffectParameter(value, key: key, for: effect.kind)
+                    },
+                    accentColor: player.accentColor
+                )
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: player.selectedEffectPageTab)
     }
     
-    private var errorBinding: Binding<Bool> {
-        Binding(get: { player.errorMessage != nil }, set: { if !$0 { player.errorMessage = nil } })
+}
+
+private struct LibraryDestinationView: View {
+    let route: LibraryRoute
+    let player: AudioPlayerViewModel
+    let onPlay: () -> Void
+    @StateObject private var updates: CoalescedViewUpdates
+
+    init(route: LibraryRoute, player: AudioPlayerViewModel, onPlay: @escaping () -> Void) {
+        self.route = route
+        self.player = player
+        self.onPlay = onPlay
+        _updates = StateObject(wrappedValue: CoalescedViewUpdates(events: player.libraryPresentationEvents))
+    }
+
+    var body: some View {
+        switch route {
+        case .artist(let artist):
+            ArtistAlbumsView(artist: player.systemArtists.first { $0.id == artist.id } ?? artist,
+                             player: player, updates: updates, onPlay: onPlay)
+        case .album(let album):
+            AlbumSongsView(album: player.systemAlbums.first { $0.id == album.id } ?? album,
+                           player: player, updates: updates, onPlay: onPlay)
+        case .playlist(let playlist):
+            PlaylistSongsView(playlist: player.systemPlaylists.first { $0.id == playlist.id } ?? playlist,
+                              player: player, updates: updates, onPlay: onPlay)
+        case .ongakuPlaylist(let playlist):
+            OngakuPlaylistSongsView(playlist: playlist, player: player, updates: updates, onPlay: onPlay)
+        }
     }
 }
 
@@ -1054,6 +1103,7 @@ struct ContentView: View {
 struct ArtistAlbumsView: View {
     let artist: SystemArtist
     let player: AudioPlayerViewModel
+    @ObservedObject var updates: CoalescedViewUpdates
     let onPlay: () -> Void
     
     var body: some View {
@@ -1084,6 +1134,7 @@ struct ArtistAlbumsView: View {
 struct AlbumSongsView: View {
     let album: SystemAlbum
     let player: AudioPlayerViewModel
+    @ObservedObject var updates: CoalescedViewUpdates
     let onPlay: () -> Void
     
     var body: some View {
@@ -1142,6 +1193,7 @@ struct AlbumSongsView: View {
 struct PlaylistSongsView: View {
     let playlist: SystemPlaylist
     let player: AudioPlayerViewModel
+    @ObservedObject var updates: CoalescedViewUpdates
     let onPlay: () -> Void
     
     var body: some View {
@@ -1181,6 +1233,7 @@ struct PlaylistSongsView: View {
 struct OngakuPlaylistSongsView: View {
     let playlist: OngakuPlaylist
     let player: AudioPlayerViewModel
+    @ObservedObject var updates: CoalescedViewUpdates
     let onPlay: () -> Void
 
     var body: some View {

@@ -18,6 +18,7 @@ struct NowPlayingView: View {
     @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.5, dampingFraction: 0.7)))
     private var dragTranslation: CGSize = .zero
     @State private var artworkMode: ArtworkMode = .thumbnail
+    @State private var showingLyrics = false
 
     private var dragOffset: CGSize {
         abs(dragTranslation.width) > abs(dragTranslation.height)
@@ -78,132 +79,138 @@ struct NowPlayingView: View {
                     .ignoresSafeArea()
             }
             
-            // コンテンツレイヤー
-            VStack(spacing: 0) {
-                Spacer(minLength: 12)
-                
-                // アートワーク
-                ArtworkView(
-                    image: player.nowPlayingArtwork,
-                    isPlaying: player.isPlaying,
-                    isLoading: player.isLoading,
-                    mode: artworkMode,
-                    accentColor: player.accentColor,
-                    player: player
-                )
-                .padding(.bottom, artworkMode == .vuMeter ? 0 : 24)
-                .offset(dragOffset)
-                .opacity(max(0.3, 1.0 - Double(abs(dragOffset.width) + abs(dragOffset.height)) / 300.0))
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 10)
-                        .updating($dragTranslation) { value, translation, _ in
-                            translation = value.translation
-                        }
-                        .onEnded { value in
-                            let h = value.translation.width
-                            let v = value.translation.height
-                            // Read this gesture's final direction. A drag cancelled
-                            // by an app switch must not lock the next gesture's axis.
-                            if abs(h) > abs(v) {
-                                if h > 40 { player.playNextTrack() }
-                                else if h < -40 { player.playPreviousTrack() }
-                            } else if v < -60, let album = player.nowPlayingAlbum {
-                                onGoToAlbum(album)
-                            } else if v > 60, canUseVisualizationModes {
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                    let nextRaw = (artworkMode.rawValue + 1) % ArtworkMode.allCases.count
-                                    artworkMode = ArtworkMode(rawValue: nextRaw) ?? .thumbnail
+            // Keep every control reachable on compact screens and larger text sizes.
+            GeometryReader { geometry in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 12)
+
+                        // アートワーク
+                        ArtworkView(
+                            image: player.nowPlayingArtwork,
+                            isPlaying: player.isPlaying,
+                            isLoading: player.isLoading,
+                            mode: artworkMode,
+                            accentColor: player.accentColor,
+                            player: player
+                        )
+                        .padding(.bottom, artworkMode == .vuMeter ? 0 : 24)
+                        .offset(dragOffset)
+                        .opacity(max(0.3, 1.0 - Double(abs(dragOffset.width) + abs(dragOffset.height)) / 300.0))
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 10)
+                                .updating($dragTranslation) { value, translation, _ in
+                                    translation = value.translation
                                 }
+                                .onEnded { value in
+                                    let h = value.translation.width
+                                    let v = value.translation.height
+                                    // Read this gesture's final direction. A drag cancelled
+                                    // by an app switch must not lock the next gesture's axis.
+                                    if abs(h) > abs(v) {
+                                        if h > 40 { player.playNextTrack() }
+                                        else if h < -40 { player.playPreviousTrack() }
+                                    } else if v < -60, let album = player.nowPlayingAlbum {
+                                        onGoToAlbum(album)
+                                    } else if v > 60, canUseVisualizationModes {
+                                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                            let nextRaw = (artworkMode.rawValue + 1) % ArtworkMode.allCases.count
+                                            artworkMode = ArtworkMode(rawValue: nextRaw) ?? .thumbnail
+                                        }
+                                    }
+                                }
+                        )
+                        .accessibilityAction(named: Text(L10n.tr("library.albums"))) {
+                            if let album = player.nowPlayingAlbum { onGoToAlbum(album) }
+                        }
+
+                        // トラック情報
+                        VStack(spacing: 12) {
+                            MarqueeView(
+                                text: player.nowPlayingDisplayTitle,
+                                font: .appTitle(),
+                                color: Theme.textPrimary
+                            )
+
+                            MarqueeView(
+                                text: player.nowPlayingDisplaySubtitle,
+                                font: .appSubtitle(),
+                                color: Theme.textSecondary
+                            )
+
+                            if let signalSummary = player.playbackSignalSummary {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "waveform")
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text(signalSummary)
+                                        .font(.appCaption())
+                                }
+                                .foregroundStyle(player.accentColor.opacity(0.95))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    GlassFallbackShape(
+                                        shape: Capsule(style: .continuous),
+                                        fallbackFill: player.accentColor.opacity(0.12),
+                                        cornerRadius: 100
+                                    )
+                                )
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(player.accentColor.opacity(0.24), lineWidth: 0.5)
+                                )
                             }
                         }
-                )
-                .accessibilityAction(named: Text(L10n.tr("library.albums"))) {
-                    if let album = player.nowPlayingAlbum { onGoToAlbum(album) }
-                }
-                
-                // トラック情報
-                VStack(spacing: 12) {
-                    MarqueeView(
-                        text: player.nowPlayingDisplayTitle,
-                        font: .appTitle(),
-                        color: Theme.textPrimary
-                    )
-                    
-                    MarqueeView(
-                        text: player.nowPlayingDisplaySubtitle,
-                        font: .appSubtitle(),
-                        color: Theme.textSecondary
-                    )
+                        .padding(.bottom, 28)
 
-                    if let signalSummary = player.playbackSignalSummary {
-                        HStack(spacing: 8) {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text(signalSummary)
-                                .font(.appCaption())
-                        }
-                        .foregroundStyle(player.accentColor.opacity(0.95))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(
-                            GlassFallbackShape(
-                                shape: Capsule(style: .continuous),
-                                fallbackFill: player.accentColor.opacity(0.12),
-                                cornerRadius: 100
+                        // プログレスバー
+                        VStack(spacing: 12) {
+                            CustomProgressBar(
+                                value: Binding(
+                                    get: { player.progress },
+                                    set: { player.seek(to: $0) }
+                                ),
+                                accentColor: player.accentColor
                             )
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(player.accentColor.opacity(0.24), lineWidth: 0.5)
-                        )
-                    }
-                }
-                .padding(.bottom, 28)
-                
-                // プログレスバー
-                VStack(spacing: 12) {
-                    CustomProgressBar(
-                        value: Binding(
-                            get: { player.progress },
-                            set: { player.seek(to: $0) }
-                        ),
-                        accentColor: player.accentColor
-                    )
-                    .disabled(!player.hasTrack)
-                    .frame(width: Theme.maxContentWidth, height: 12)
-                    
-                    HStack {
-                        Text(player.currentTimeText)
-                        Spacer()
-                        Text(player.durationText)
-                    }
-                    .font(.appCaption())
-                    .foregroundStyle(Theme.textSecondary.opacity(0.6))
-                    .frame(width: Theme.maxContentWidth)
-                }
-                .padding(.bottom, 32)
-                
-                // コントロール
-                PlaybackControlsView(player: player)
-                    .padding(.bottom, 12)
+                            .disabled(!player.hasTrack)
+                            .frame(width: Theme.maxContentWidth, height: 12)
 
-                PlaybackModeButtonsView(player: player)
-                    .padding(.bottom, 12)
-                
-                Spacer(minLength: 24)
-                
-                if player.canOpenNowPlayingAlbum {
-                    Image(systemName: "chevron.compact.up")
-                        .font(.system(size: 24, weight: .thin))
-                        .foregroundStyle(Theme.textSecondary.opacity(0.3))
+                            HStack {
+                                Text(player.currentTimeText)
+                                Spacer()
+                                Text(player.durationText)
+                            }
+                            .font(.appCaption())
+                            .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                            .frame(width: Theme.maxContentWidth)
+                        }
+                        .padding(.bottom, 32)
+
+                        // コントロール
+                        PlaybackControlsView(player: player)
+                            .padding(.bottom, 12)
+
+                        PlaybackModeButtonsView(player: player, onLyrics: { showingLyrics = true })
+                            .padding(.bottom, 12)
+
+                        Spacer(minLength: 24)
+
+                        if player.canOpenNowPlayingAlbum {
+                            Image(systemName: "chevron.compact.up")
+                                .font(.system(size: 24, weight: .thin))
+                                .foregroundStyle(Theme.textSecondary.opacity(0.3))
+                        }
+
+                        Spacer(minLength: 12)
+                    }
+                    .padding(.horizontal, Theme.horizontalPadding)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: geometry.size.height)
                 }
-                
-                Spacer(minLength: 12)
             }
-            .padding(.horizontal, Theme.horizontalPadding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .sheet(isPresented: $showingLyrics) { NowPlayingLyricsView(player: player) }
         .preferredColorScheme(.dark)
         .onAppear {
             if !canUseVisualizationModes {
@@ -220,10 +227,11 @@ struct NowPlayingView: View {
 
 private struct PlaybackModeButtonsView: View {
     @ObservedObject var player: AudioPlayerViewModel
+    var onLyrics: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 ModeIconButton(
                     iconName: "repeat.1",
                     isActive: player.isSingleTrackRepeatEnabled,
@@ -259,6 +267,12 @@ private struct PlaybackModeButtonsView: View {
                 ) {
                     player.toggleLibraryShuffle()
                 }
+                ModeIconButton(
+                    iconName: "text.quote", isActive: false,
+                    isDisabled: player.lyricsPlaybackSong == nil, accentColor: player.accentColor,
+                    action: onLyrics
+                )
+                .accessibilityLabel(L10n.tr("lyrics.title"))
             }
             .frame(width: Theme.maxContentWidth)
         }

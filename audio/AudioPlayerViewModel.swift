@@ -483,6 +483,21 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         return "\(format) \(L10n.tr("separator.dot")) \(dspLabel)"
     }
 
+    var lyricsPlaybackSong: SystemSong? { currentPlaybackSong }
+
+    // Read the transport clock, not a rounded display string or cached library duration.
+    var lyricsPlaybackTime: TimeInterval {
+        let time = playbackSource == .local ? hiResPlaybackEngine.currentTime() : systemPlayer.currentPlaybackTime
+        return time.isFinite ? max(0, time) : 0
+    }
+
+    func seekLyrics(to time: TimeInterval, songKey: String) {
+        guard currentPlaybackSong?.overlayKey == songKey, time.isFinite else { return }
+        let duration = playbackSource == .local ? hiResPlaybackEngine.duration : (systemPlayer.nowPlayingItem?.playbackDuration ?? 0)
+        guard duration > 0 else { return }
+        seek(to: min(max(time / duration, 0), 1))
+    }
+
     private var currentPlaybackSong: SystemSong? {
         if let selectedSystemSongID,
            let selectedSong = systemSongs.first(where: { $0.id == selectedSystemSongID }) {
@@ -3079,7 +3094,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         // Fallback end detection: some devices/routes don't always emit reliable completion transitions.
         switch playbackSource {
         case .local:
-            audioRenderHealth = hiResPlaybackEngine.pollRenderHealth()
+            let renderHealth = hiResPlaybackEngine.pollRenderHealth()
+            if renderHealth != audioRenderHealth { audioRenderHealth = renderHealth }
             let hasTrack = hiResPlaybackEngine.hasTrack
             let duration = hiResPlaybackEngine.duration
             let current = hiResPlaybackEngine.currentTime()
