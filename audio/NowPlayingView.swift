@@ -171,11 +171,15 @@ struct NowPlayingView: View {
                             CustomProgressBar(
                                 value: Binding(
                                     get: { player.progress },
-                                    set: { player.seek(to: $0) }
+                                    set: {
+                                        guard !player.isLoading, player.hasTrack else { return }
+                                        player.seek(to: $0)
+                                    }
                                 ),
                                 accentColor: player.accentColor
                             )
                             .disabled(player.isLoading || !player.hasTrack)
+                            .allowsHitTesting(!player.isLoading && player.hasTrack)
                             .opacity(player.isLoading ? 0.35 : 1)
                             .frame(width: Theme.maxContentWidth, height: 12)
 

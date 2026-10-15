@@ -221,6 +221,9 @@ import Foundation
 
     static func run() throws {
         setbuf(stdout, nil)
+        if CommandLine.arguments.contains("--continuous") {
+            try ContinuousMeterHandoffRegression.run(); return
+        }
         try verifyDeferredControls()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)

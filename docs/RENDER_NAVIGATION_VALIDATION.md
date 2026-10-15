@@ -193,3 +193,43 @@ The disposable host used fixed album/song data with external service startup
 and artwork queries disabled. These checks exercised the presentation handler
 and rendered transition, not a physical swipe or live audio playback. Confirm
 gesture feel on the affected iPhone; no audio processing code changed.
+
+## Now Playing DSP readiness (2026-10-15)
+
+Paused startup restoration selects a track before asynchronous local
+preparation completes, without setting the autoplay-specific loading flags.
+Consequently `hasTrack` could become true and hide the initial spinner while
+PCM/format/DSP preparation was still pending. The local preparation task now
+publishes its lifetime into `isLoading`; success, failure, transition and stop
+already clear that task. The signal summary is withheld during preparation
+and no longer initializes the engine just to read the badge.
+
+Now Playing uses the shared loading state for the artwork spinner and all
+transport/mode buttons. Seek ignores changes and hit testing while loading;
+horizontal artwork track-changing gestures also reject actions. Album
+navigation remains available. A stale cache error cannot clear a newer
+preparation task. System playback is not gated on a DSP badge, which its
+protected playback path does not provide.
+
+Validation on iOS 26.2 SE (3rd generation) and 16 Pro Max simulators used an
+isolated production-view/model copy with external startup services disabled.
+A generated stereo 44.1 kHz WAV ran through the shipping local load method and
+engine with autoplay disabled. A three-second delay was inserted at the cache
+boundary solely to make the pending state observable.
+
+- Both devices: while selected but not prepared, `isLoading` was true, autoplay
+  flags were false, and the DSP summary was nil. At completion, the spinner
+  cleared, the 96 kHz / 24-bit / DSP badge appeared, and playback controls
+  became active while playback remained paused. Screenshots were inspected.
+- Missing file: failure cleared loading and published an error.
+- Cancel and replace: cancellation cleared loading; the replacement remained
+  loading until its own successful completion and then exposed the DSP badge.
+- Injected system-playback state: absent DSP summary did not leave loading
+  active or initialize the local engine. This is not a DRM service test.
+- iOS build, `run_playback_transport_regression.sh` and `git diff --check`
+  passed. The existing transport suite also covers protected startup error,
+  timeout and superseded-request policies.
+
+⭕️ [Pending] Confirm real-device startup restoration, slow remote files and
+protected Music playback, including physical button/seek gestures. Simulator
+screenshots and state checks do not establish live remote-service behavior.

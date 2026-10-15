@@ -96,6 +96,8 @@ struct EffectMatrixAudit {
 
     static func main() throws {
         setbuf(stdout, nil)
+        try EffectEQLifecycleAudit.run(iterations: CommandLine.arguments.contains("--eq-stress") ? 500 : 20)
+        if CommandLine.arguments.contains("--eq-only") { return }
         try parameterChecks()
         var individualCases = 0
         var largestFinalPeak = 0.0
@@ -148,16 +150,28 @@ struct EffectMatrixAudit {
             }
         }
         try behaviorChecks()
-        print("PASS checks=\(checks) individualCases=\(individualCases) finalCases=60 largestFinalPeak=\(largestFinalPeak)")
+        print("PASS checks=\(checks) individualCases=\(individualCases) finalCases=\(3 * AudioEffectPageTab.allCases.count * 2 * 5) largestFinalPeak=\(largestFinalPeak)")
     }
 
     static func parameterChecks() throws {
         for effect: AudioEffectNode in [OptoFETAudioEffect(), ExciterAudioEffect(), WarmAudioEffect()] {
             let engine = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            engine.attach(player)
             effect.attach(to: engine)
-            defer { effect.detach(from: engine) }
+            defer { engine.stop(); effect.detach(from: engine) }
+            let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+            effect.connectInternalNodes(engine: engine, format: format)
+            engine.connect(player, to: effect.inputNode, format: format)
+            engine.connect(effect.outputNode, to: engine.mainMixerNode, format: format)
+            try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 256)
             if effect.kind == .warm || effect.kind == .exciter {
-                check(effect.nodes.compactMap { $0 as? AVAudioUnitEQ }.allSatisfy { $0.bands.allSatisfy { !$0.bypass } }, "EQ bands enabled \(effect.kind)")
+                for (node, eq) in effect.nodes.enumerated().compactMap({ index, node in
+                    (node as? AVAudioUnitEQ).map { (index, $0) }
+                }) {
+                    let issues = EffectEQLifecycleAudit.issues(eq)
+                    check(issues.isEmpty, "EQ bands enabled \(effect.kind) connected node=\(node): \(issues)")
+                }
             }
             var setting = RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: true)
             setting.parameters["mode"] = 1
@@ -176,8 +190,6 @@ struct EffectMatrixAudit {
             }
             if let speed = effect.nodes.compactMap({ $0 as? AVAudioUnitVarispeed }).first {
                 check(speed.rate == 1, "zero flutter is stationary")
-                let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
-                effect.connectInternalNodes(engine: engine, format: format)
                 for bus in 0..<5 {
                     check(engine.inputConnectionPoint(for: effect.outputNode, inputBus: AVAudioNodeBus(bus)) != nil, "Warm independent bus \(bus)")
                 }

@@ -545,9 +545,12 @@ schedules. A paused quality upgrade does not start the engine.
   Audio Unit. The first unrestricted run failed at `EQ bands enabled exciter`.
   An isolated settings probe passed, and a second unrestricted full audit passed
   952 checks (300 individual cases and 60 final-chain cases), with largest final
-  sample peak 0.891247. The initial EQ failure remains unexplained; a passing
-  retry is not proof that the test or Audio Unit lifecycle is deterministic.
+  sample peak 0.891247. At that stage the initial EQ failure was unexplained;
+  a passing retry was not proof that the test or Audio Unit lifecycle was deterministic.
   No effect implementation or assertion was changed to make this audit pass.
+  Follow-up (2026-10-15): the same assertion failure was reproduced and traced
+  to inconsistent AVAudioUnitEQ wrapper bypass readback. See
+  [the EQ audit investigation and replacement checks](EFFECT_EQ_AUDIT_VALIDATION.md).
 
 ### Required device checks
 

@@ -10,9 +10,25 @@ swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$combined_dir
     audio/EffectMeterObservation.swift audio/PlaybackHandoffClock.swift audio/ImpulseResponseCatalog.swift \
     audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     "$combined_dir/ShippingDSPTransition.swift" "$combined_dir/ShippingSinc.swift" "$combined_dir/ShippingHRTF.swift" \
-    tests/MeterHandoffWaveformRegression.swift -o "$combined_dir/combined"
+    tests/ContinuousMeterHandoffRegression.swift tests/MeterHandoffWaveformRegression.swift -o "$combined_dir/combined"
 "$combined_dir/combined" "$@"
 if [[ $# -gt 0 ]] && [[ " ${*} " == *" --quick "* ]]; then exit 0; fi
+if [[ $# -gt 0 ]] && [[ " ${*} " == *" --continuous "* ]]; then
+    for fault in offset stamp mute limiter; do
+        if "$combined_dir/combined" --continuous --quick "--continuous-${fault}-fixture" > "$combined_dir/continuous-${fault}.log" 2>&1; then
+            echo "FAIL: continuous ${fault} escaped guards" >&2
+            exit 1
+        fi
+        case "$fault" in
+            offset) expected='Continuous source timeline mismatch' ;;
+            stamp|mute) expected='Continuous processed reference mismatch|Continuous gain feedback mismatch' ;;
+            limiter) expected='Overloaded safety output exceeds 0 dBFS' ;;
+        esac
+        rg -q "$expected" "$combined_dir/continuous-${fault}.log"
+    done
+    echo 'PASS: continuous feedback rejects source offset, delivery timestamps, muting and bypassed limiting'
+    exit 0
+fi
 for fault in stale offset mute handoff; do
     if "$combined_dir/combined" --quick "--${fault}-fixture" > "$combined_dir/${fault}.log" 2>&1; then
         echo "FAIL: ${fault} escaped combined waveform guards" >&2
