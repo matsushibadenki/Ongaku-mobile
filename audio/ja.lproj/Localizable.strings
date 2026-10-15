@@ -110,7 +110,7 @@
 "effects.tab.basic" = "Basic";
 "effects.tab.pro" = "Pro";
 "effects.tab.accessibility_label" = "エフェクトモード";
-"effects.tab.selected_only_footer" = "選択中のタブ内でオンになっているエフェクトだけが適用されます。";
+"effects.tab.selected_only_footer" = "OFFではエフェクト・自動DSP・音量補正・空間処理を停止します。Basic／Proに戻すと保存した設定を再び使用します。出力保護とサンプルレート変換は継続します。";
 "search.summary.placeholder" = "曲名、アーティスト名、アルバム名、プレイリスト名を横断して検索できます。";
 "search.summary.empty" = "一致する項目がありません。別の表記やキーワードでも試せます。";
 "error.song_not_found" = "この曲をライブラリから取得できませんでした。";
@@ -387,3 +387,6 @@
 "lyrics.web.title" = "日本語歌詞をWebで検索";
 "lyrics.web.open" = "%@をブラウザで検索";
 "lyrics.web.detail" = "各サイトをブラウザで開きます。歌ネットは曲名（空欄なら歌手名）、UtaTenは両方で検索します。サイト内での閲覧用で、Ongakuへの歌詞保存・同期表示には対応しません。";
+
+"effects.tab.off" = "OFF";
+"effects.preparing" = "エフェクトを準備中…";

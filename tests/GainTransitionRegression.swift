@@ -26,6 +26,7 @@ struct GainTransitionRegression {
                         host.recomputeInactiveGainForNegativeControl = CommandLine.arguments.contains("--inactive-gain-fixture")
                         host.duplicateGainForNegativeControl = CommandLine.arguments.contains("--duplicate-gain-fixture")
                         host.bypassMuteGateForNegativeControl = CommandLine.arguments.contains("--unprotected-fixture")
+                        host.forceMuteForNegativeControl = CommandLine.arguments.contains("--mute-fixture")
                         for node in [player, host.inputGainEQ, host.loudnessCompensationEQ, eq, host.outputSafetyEQ, output] as [AVAudioNode] {
                             engine.attach(node)
                         }
@@ -77,8 +78,8 @@ struct GainTransitionRegression {
                         output.outputVolume = restoreVolume
                         host.mutations.removeAll(); host.gainWrites.removeAll()
                         player.scheduleBuffer(source); try engine.start(); player.play()
-                        // Changes at 360/365 ms occur during the first 310–430 ms
-                        // restore; the second request supersedes the new fade-out.
+                        // A second gesture at 360/365 ms starts after the first
+                        // interpolation; its latest request replaces the target.
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             switch scenario {
                             case "restoreDSP": host.setAutomaticDSPStrength(1.5, effectSettings: initial)
@@ -128,6 +129,7 @@ struct GainTransitionRegression {
                         while samples[0].count < Int(outputRate * 0.8) {
                             DispatchQueue.main.advance(to: Double(engine.manualRenderingSampleTime) / outputRate)
                             let count = AVAudioFrameCount(min(256, Int(outputRate * 0.8) - samples[0].count))
+                            try Probe.require(abs(output.outputVolume - restoreVolume) < 1e-6, "Continuous controls changed output envelope")
                             try Probe.require(try engine.renderOffline(count, to: buffer) == .success && buffer.frameLength == count, "Gain transition render failed")
                             for ch in 0..<2 { samples[ch].append(contentsOf: UnsafeBufferPointer(start: buffer.floatChannelData![ch], count: Int(count))) }
                         }
@@ -140,8 +142,8 @@ struct GainTransitionRegression {
                             try Probe.require(inactiveSettings(0.65).allSatisfy { host.lastAppliedEffectSettings[$0.kind] == $0 },
                                               "Latest inactive parameters lost")
                         } else {
-                            try Probe.require(!liveMutations.isEmpty && liveMutations.allSatisfy { $0.2 <= 1e-6 }, "DSP/parameter/gain write escaped mute gate")
-                            try Probe.require(host.gainWrites.count == 2, "Gain planning repeated or missed during one commit")
+                            try Probe.require(!liveMutations.isEmpty && liveMutations.allSatisfy { abs($0.2 - restoreVolume) < 1e-6 && $0.1 >= 0.21 - 1e-8 }, "Continuous update bypassed interpolation")
+                            try Probe.require(host.gainWrites.count == 16, "Gain planning repeated or missed during one commit")
                         }
                         try Probe.require(host.gainWrites.allSatisfy { $0.1 >= -12 && $0.1 <= 6 && $0.2 <= 0 && $0.3 >= 0 && $0.3 <= 12 }, "Gain/audit bounds failed")
                         try Probe.require(abs(host.outputSafetyEQ.globalGain - min(0, host.plannedOutputTrimDB - EffectOutputSafety.ceilingDB)) < 1e-5,
@@ -166,6 +168,12 @@ struct GainTransitionRegression {
                             let settled = samples[ch][Int(outputRate * 0.65)..<Int(outputRate * 0.8)]
                             let rms = sqrt(settled.reduce(0.0) { $0 + pow(Double($1), 2) } / Double(settled.count))
                             try Probe.require(samples[ch].allSatisfy(\.isFinite) && peak > 0.001 && peak <= 0.895 && rms > 0.00001, "Gain-path nonfinite/silent/over-ceiling audio")
+                            let window = Int(outputRate * 0.01)
+                            let baseline = sqrt(samples[ch][Int(outputRate * 0.1)..<Int(outputRate * 0.18)].reduce(0.0) { $0 + Double($1 * $1) } / (outputRate * 0.08))
+                            for start in stride(from: Int(outputRate * 0.18), to: Int(outputRate * 0.55), by: window) {
+                                let energy = sqrt(samples[ch][start..<start + window].reduce(0.0) { $0 + Double($1 * $1) } / Double(window))
+                                try Probe.require(energy > min(baseline, rms) * 0.1, "Continuous control created a silent PCM window")
+                            }
                             print(String(format: "GAIN_TRANSITION output=%.0f tab=%@ amplitude=%.3f scenario=%@ channel=%d peak=%.6f rms=%.6f inputTrimDB=%.4f preLimiterTrimDB=%.4f plannedTrimDB=%.4f measuredBoostDB=%.4f restores=%.3f", outputRate, tab.rawValue, amplitude, scenario, ch, peak, rms, host.inputGainEQ.globalGain, host.outputSafetyEQ.globalGain, host.plannedOutputTrimDB, host.smoothedMeasuredEffectBoostDB, output.outputVolume))
                         }
                         player.stop(); engine.stop(); DispatchQueue.main.reset(); cases += 1

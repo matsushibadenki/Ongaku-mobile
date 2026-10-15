@@ -21,13 +21,13 @@ stop_body = block(source, '    func stop() {')
 if stop_body.index('cancelEffectTransitionForStop()') > stop_body.index('applyAutomaticDSPProfile(.neutral)'):
     raise RuntimeError('Stop cancellation must precede neutral DSP reset')
 methods = ['apply(effectSettings:', 'applyImmediate(effectSettings:', 'applyWithDeclick(effectSettings:',
-           'applyPendingEffectSettings()', 'cancelEffectTransitionForStop()',
-           'rampOutputVolume(to ', 'configureAutomaticDSP()',
+           'applyPendingEffectSettings(fraction:', 'cancelEffectTransitionForStop()',
+           'rampOutputVolume(to ', 'requiresProtectedEffectCommit(_ ', 'scheduleEffectParameterStep(remaining:', 'setEffectsBypassed(_ ', 'configureAutomaticDSP()',
            'applyAutomaticDSPProfile(_ ', 'commitPendingDSPChangesIfReady()',
-           'applyPendingAutomaticDSPProfile()', 'scaledAutomaticDSPProfile(_ ',
+           'applyPendingAutomaticDSPProfile(fraction:', 'scaledAutomaticDSPProfile(_ ',
            'setAutomaticDSPStrength(_ ', 'setAutomaticDSPVoicing(_ ',
            'configureLoudnessCompensation()', 'applyLoudnessCompensation(for ',
-           'applyPendingLoudnessCompensation()', 'applyImmediateLoudnessCompensation(for ',
+           'applyPendingLoudnessCompensation(fraction:', 'applyImmediateLoudnessCompensation(for ',
            'loudnessCompensationAmount(for ', 'applyGainStaging(effectSettings:',
            'applyOutputSafetyGain()', 'estimatedLoudnessCompensationBoostDB()',
            'measuredEffectBoostFromAudits(effectSettings:']
@@ -83,11 +83,14 @@ output.append('''
     var lastGainStagingDate = Date(timeIntervalSince1970: 0)
     var useRealGainPath = false
     var gainWrites: [(Double, Float, Float, Float)] = []
+    var effectsBypassed = false
+    var observedSystemOutputVolume: Float = 0.5
     var pendingLoudnessCompensationVolume: Float?
     var appliedLoudnessCompensationVolume: Float?
     var appliedLoudnessCompensationRoute: LoudnessCompensationRouteProfile?
     var loudnessCompensationRouteProfile: LoudnessCompensationRouteProfile = .speaker
     var memorySafetyMode = TransitionMemoryMode()
+    var latestRequestedEffectSettings: [RealtimeAudioEffectSetting]?
     var needsEffectReapplication = true
     var lastAppliedEffectSettings: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
     var estimatedPipelineLatencyFrames: AVAudioFramePosition = 0
@@ -101,6 +104,7 @@ output.append('''
     var pendingDeclickEffectSettings: [RealtimeAudioEffectSetting]?
     var effectDeclickRestoreVolume: Float?
     var bypassMuteGateForNegativeControl = false
+    var forceMuteForNegativeControl = false
     var duplicateGainForNegativeControl = false
     var recomputeInactiveGainForNegativeControl = false
     var hasTrack = true
@@ -122,7 +126,7 @@ for constant in ['floatPipelineTargetRMSDBFS', 'loudnessNormalizationTargetLUFS'
     if len(lines) != 1: raise RuntimeError(constant)
     output.append(lines[0])
 for name in methods:
-    anchor = ('func ' if name.startswith(('apply(effect', 'setAutomatic')) else 'private func ') + name
+    anchor = ('func ' if name.startswith(('apply(effect', 'setAutomatic', 'setEffects')) else 'private func ') + name
     text = block(source, anchor).replace('private func ', 'func ', 1)
     text = text.replace('            effect.apply(setting: setting)', '            if effect.isEnabled || setting.isEnabled || needsEffectReapplication { record("effect") }\n            effect.apply(setting: setting)')
     text = text.replace('        automaticDSPEQ.bypass = scaled.shouldBypass', '        record("automaticDSP")\n        automaticDSPEQ.bypass = scaled.shouldBypass')
@@ -133,6 +137,7 @@ for name in methods:
     text = text.replace('        applyOutputSafetyGain()', '        applyOutputSafetyGain()\n        gainWrites.append((DispatchQueue.main.seconds, inputGainEQ.globalGain, outputSafetyEQ.globalGain, smoothedMeasuredEffectBoostDB))')
     text = text.replace('&& !gainUpdated && hasTrack', '&& (!gainUpdated || duplicateGainForNegativeControl) && hasTrack')
     text = text.replace('if gainNeedsUpdate {', 'if gainNeedsUpdate || recomputeInactiveGainForNegativeControl {')
+    text = text.replace('return needsEffectReapplication || effectDeclickRestoreVolume', 'return forceMuteForNegativeControl || needsEffectReapplication || effectDeclickRestoreVolume')
     output.append(text)
 for anchor in ['nonisolated static func analyzeSignalLevels(',
                'nonisolated private static func emptySignalDiagnostics(',

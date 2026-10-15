@@ -46,6 +46,16 @@ struct PlaybackTransportRegression {
         precondition(!matches(73, "0", expectedStore: "0"))
         print("PASS: store identity tolerates library-ID changes without accepting another track")
 
+        let alert = PlaybackErrorPresentationRequest(message: "failure", isActive: true)
+        precondition(alert.shouldPresent(currentMessage: "failure", isActive: true, cancelled: false))
+        precondition(!alert.shouldPresent(currentMessage: nil, isActive: true, cancelled: false))
+        precondition(!alert.shouldPresent(currentMessage: "new failure", isActive: true, cancelled: false))
+        precondition(!alert.shouldPresent(currentMessage: "failure", isActive: false, cancelled: false))
+        precondition(!alert.shouldPresent(currentMessage: "failure", isActive: true, cancelled: true))
+        precondition(!PlaybackErrorPresentationRequest(message: "failure", isActive: false)
+            .shouldPresent(currentMessage: "failure", isActive: true, cancelled: false))
+        print("PASS: alert delivery rejects cleared, superseded, inactive and cancelled recovery errors")
+
         func action(ready: Bool = false, played: Bool = false, playing: Bool = false,
                     failed: Bool = false, expired: Bool = false) -> PlaybackTransportPolicy.SystemStartupAction {
             PlaybackTransportPolicy.systemStartupAction(confirmed: playing, prepared: ready,

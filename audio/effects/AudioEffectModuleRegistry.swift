@@ -1,6 +1,7 @@
 import Foundation
 
 enum AudioEffectPageTab: String, CaseIterable, Hashable, Identifiable, Sendable {
+    case off
     case basic
     case pro
 
@@ -8,6 +9,7 @@ enum AudioEffectPageTab: String, CaseIterable, Hashable, Identifiable, Sendable 
 
     var title: String {
         switch self {
+        case .off: return L10n.tr("effects.tab.off")
         case .basic: return L10n.tr("effects.tab.basic")
         case .pro: return L10n.tr("effects.tab.pro")
         }

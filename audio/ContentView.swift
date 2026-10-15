@@ -58,6 +58,7 @@ struct ContentView: View {
     private let player: AudioPlayerViewModel
     @State private var accentColor: Color
     @State private var errorMessage: String?
+    @State private var presentedErrorMessage: String?
     @State private var selectedTab: RootTab = .nowPlaying
     @State private var isShowingSettings = false
     @State private var isShowingDesktopSync = false
@@ -131,9 +132,9 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .tint(accentColor)
         .alert(L10n.tr("common.error"), isPresented: errorBinding) {
-            Button(L10n.tr("common.ok"), role: .cancel) { player.errorMessage = nil }
+            Button(L10n.tr("common.ok"), role: .cancel) { dismissPresentedError() }
         } message: {
-            Text(errorMessage ?? "")
+            Text(presentedErrorMessage ?? "")
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(player: player, isShowing: $isShowingSettings)
@@ -147,15 +148,27 @@ struct ContentView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             PlaybackDebugLogger.event("ui.navigation.tab selected=\(newValue)")
-            scheduleEffectsPresentationUpdate(refreshViewIdentity: newValue == .effects)
+            scheduleEffectsPresentationUpdate()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            scheduleEffectsPresentationUpdate(refreshViewIdentity: newPhase == .active && selectedTab == .effects)
+            scheduleEffectsPresentationUpdate()
         }
         .onReceive(player.$upsamplingMode.removeDuplicates()) { mode in
             accentColor = mode.isPrecisionSinc ? Theme.precisionSincAccent : Theme.accent
         }
-        .onReceive(player.$errorMessage.removeDuplicates()) { errorMessage = $0 }
+        .onReceive(player.$errorMessage.removeDuplicates()) { message in
+            errorMessage = message
+            if let message { PlaybackDebugLogger.warning("ui.playback.error received=\(message)") }
+        }
+        .task(id: PlaybackErrorPresentationRequest(message: errorMessage, isActive: scenePhase == .active)) {
+            presentedErrorMessage = nil
+            let request = PlaybackErrorPresentationRequest(message: errorMessage, isActive: scenePhase == .active)
+            guard request.isActive, request.message != nil else { return }
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard request.shouldPresent(currentMessage: player.errorMessage,
+                                        isActive: scenePhase == .active, cancelled: Task.isCancelled) else { return }
+            presentedErrorMessage = request.message
+        }
         .onChange(of: libraryPath) { _, path in
             PlaybackDebugLogger.event("ui.navigation.path source=library depth=\(path.count)")
         }
@@ -178,13 +191,10 @@ struct ContentView: View {
         }
     }
 
-    private func activateEffectsScreen(refreshViewIdentity: Bool = false) {
+    private func activateEffectsScreen() {
         guard selectedTab == .effects, scenePhase == .active else { return }
 
         player.setEffectScreenActive(true)
-        if refreshViewIdentity {
-            effectsControlsRenderID = UUID()
-        }
 
         if hasPreparedEffectsScreen {
             if !shouldRenderEffectsControls {
@@ -204,14 +214,14 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: workItem)
     }
 
-    private func scheduleEffectsPresentationUpdate(refreshViewIdentity: Bool = false) {
+    private func scheduleEffectsPresentationUpdate() {
         pendingEffectsActivationWorkItem?.cancel()
         pendingEffectsActivationWorkItem = nil
 
         let shouldActivate = selectedTab == .effects && scenePhase == .active
         if shouldActivate {
             DispatchQueue.main.async {
-                activateEffectsScreen(refreshViewIdentity: refreshViewIdentity)
+                activateEffectsScreen()
             }
         } else {
             if shouldRenderEffectsControls && !hasPreparedEffectsScreen {
@@ -238,8 +248,13 @@ struct ContentView: View {
         }
     }
 
+    private func dismissPresentedError() {
+        if player.errorMessage == presentedErrorMessage { player.errorMessage = nil }
+        presentedErrorMessage = nil
+    }
+
     private var errorBinding: Binding<Bool> {
-        Binding(get: { errorMessage != nil }, set: { if !$0 { player.errorMessage = nil; errorMessage = nil } })
+        Binding(get: { presentedErrorMessage != nil }, set: { if !$0 { dismissPresentedError() } })
     }
 }
 
@@ -849,6 +864,7 @@ private struct EffectsTabContent: View {
     @ObservedObject var player: AudioPlayerViewModel
     let shouldRenderControls: Bool
     let controlsRenderID: UUID
+    @State private var isShowingModeHelp = false
 
     var body: some View {
         ZStack {
@@ -897,7 +913,7 @@ private struct EffectsTabContent: View {
                             ProgressView()
                                 .tint(player.accentColor)
                                 .scaleEffect(0.8)
-                            Text("エフェクトを準備中...")
+                            Text(L10n.tr("effects.preparing"))
                                 .font(.system(size: 13, weight: .light))
                                 .foregroundStyle(Theme.textSecondary)
                         }
@@ -940,7 +956,7 @@ private struct EffectsTabContent: View {
                                 .font(.system(size: 12, weight: .regular))
                                 .foregroundStyle(Theme.textPrimary)
                             Spacer()
-                            Text("\(Int(player.automaticDSPStrength * 100))%")
+                            Text(player.selectedEffectPageTab == .off ? L10n.tr("effects.tab.off") : "\(Int(player.automaticDSPStrength * 100))%")
                                 .font(.system(size: 12, weight: .regular, design: .monospaced))
                                 .foregroundStyle(Theme.textSecondary)
                         }
@@ -953,7 +969,7 @@ private struct EffectsTabContent: View {
                             in: 0...1.5
                         )
                         .tint(player.accentColor)
-                        .disabled(!player.supportsRealtimeEffects)
+                        .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
 
                         Picker("DSP", selection: Binding(
                             get: { player.automaticDSPVoicing },
@@ -965,7 +981,7 @@ private struct EffectsTabContent: View {
                             Text("Safe").tag(AutomaticDSPVoicing.safe)
                         }
                         .pickerStyle(.segmented)
-                        .disabled(!player.supportsRealtimeEffects)
+                        .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
 
                         Button {
                             player.toggleABReferenceMode()
@@ -975,10 +991,11 @@ private struct EffectsTabContent: View {
                                 systemImage: player.isABReferenceMode ? "waveform" : "arrow.left.arrow.right"
                             )
                             .frame(maxWidth: .infinity)
+                            .padding(.horizontal)
                         }
                         .buttonStyle(.bordered)
                         .tint(player.isABReferenceMode ? player.accentColor : Theme.textSecondary)
-                        .disabled(!player.supportsRealtimeEffects)
+                        .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
 
                         Text(player.automaticDSPSummary)
                             .font(.system(size: 11, weight: .regular, design: .monospaced))
@@ -1009,25 +1026,29 @@ private struct EffectsTabContent: View {
 
     private var effectsControlsContent: some View {
         VStack(spacing: 20) {
-            VStack(spacing: 10) {
-                Picker(
-                    L10n.tr("effects.tab.accessibility_label"),
-                    selection: Binding(
-                        get: { player.selectedEffectPageTab },
-                        set: { player.selectEffectPageTab($0) }
-                    )
-                ) {
-                    ForEach(AudioEffectPageTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
+            HStack(spacing: 8) {
+                EffectModeSelector(
+                    selection: player.selectedEffectPageTab,
+                    accentColor: player.accentColor,
+                    onSelect: player.selectEffectPageTab
+                )
 
-                Text(L10n.tr("effects.tab.selected_only_footer"))
-                    .font(.appCaption())
-                    .foregroundStyle(Theme.textSecondary.opacity(0.75))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    isShowingModeHelp = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .frame(width: 44, height: 44)
+                }
+                .foregroundStyle(Theme.textSecondary)
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.tr("effects.tab.accessibility_label"))
+                .help(L10n.tr("effects.tab.selected_only_footer"))
+                .popover(isPresented: $isShowingModeHelp) {
+                    Text(L10n.tr("effects.tab.selected_only_footer"))
+                        .font(.body)
+                        .padding(20)
+                        .presentationCompactAdaptation(.popover)
+                }
             }
             .frame(width: Theme.maxContentWidth)
 
@@ -1045,7 +1066,6 @@ private struct EffectsTabContent: View {
                     },
                     accentColor: player.accentColor
                 )
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
 
             ForEach(player.visibleEffectSettings) { effect in
@@ -1060,10 +1080,10 @@ private struct EffectsTabContent: View {
                     },
                     accentColor: player.accentColor
                 )
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: player.selectedEffectPageTab)
+        // Keep hit targets and selection feedback stable during rapid taps.
+        // Audio processing has its own ramps; it does not need a UI transition.
     }
     
 }
@@ -2013,5 +2033,22 @@ private struct CustomTabBar_Previews: PreviewProvider {
                 CustomTabBar(selectedTab: .constant(.nowPlaying), accentColor: .orange)
             }
             .preferredColorScheme(.dark)
+    }
+}
+
+
+private struct EffectsTabContent_Previews: PreviewProvider {
+    static var previews: some View {
+        Group {
+            preview.previewDevice("iPhone SE (3rd generation)")
+            preview.previewDevice("iPhone 16 Pro Max")
+        }
+    }
+
+    private static var preview: some View {
+        NavigationStack {
+            EffectsTabContent(player: AudioPlayerViewModel(), shouldRenderControls: true, controlsRenderID: UUID())
+        }
+        .preferredColorScheme(.dark)
     }
 }

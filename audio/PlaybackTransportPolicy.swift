@@ -90,3 +90,15 @@ nonisolated enum PlaybackTransportPolicy {
             && !interrupted && !cancelled
     }
 }
+
+
+/// A suspended/recovering app may clear a transient error before its alert can
+/// be presented. Keep persistent failures visible; reject superseded requests.
+nonisolated struct PlaybackErrorPresentationRequest: Hashable {
+    let message: String?
+    let isActive: Bool
+
+    func shouldPresent(currentMessage: String?, isActive: Bool, cancelled: Bool) -> Bool {
+        self.isActive && isActive && !cancelled && message != nil && message == currentMessage
+    }
+}

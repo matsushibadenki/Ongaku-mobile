@@ -110,7 +110,7 @@
 "effects.tab.basic" = "Basic";
 "effects.tab.pro" = "Pro";
 "effects.tab.accessibility_label" = "Effect mode";
-"effects.tab.selected_only_footer" = "Only effects enabled in the selected tab are applied.";
+"effects.tab.selected_only_footer" = "OFF bypasses effects, automatic DSP, loudness compensation and spatial processing. Basic and Pro restore their saved settings. Output protection and sample-rate conversion remain active.";
 "search.summary.placeholder" = "Search across song titles, artist names, album names, and playlist names.";
 "search.summary.empty" = "No matching items found. Try a different spelling or keyword.";
 "error.song_not_found" = "This song could not be loaded from the library.";
@@ -387,3 +387,6 @@
 "lyrics.web.title" = "Japanese lyrics on the web";
 "lyrics.web.open" = "Search on %@ in your browser";
 "lyrics.web.detail" = "Opens each site in your browser. Uta-Net searches by title (or artist if the title is empty); UtaTen uses both fields. These sites provide viewing only, without saving or synchronized playback in Ongaku.";
+
+"effects.tab.off" = "OFF";
+"effects.preparing" = "Preparing effects…";

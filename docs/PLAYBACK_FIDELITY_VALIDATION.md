@@ -1,4 +1,17 @@
+## Spatial / HRTF transitions (2026-10-14)
+
+The active-player reschedule has been replaced with a clock-aligned two-player
+handoff. All 192 stereo spatial transition cases and deliberate timing/muting
+fault checks pass. See [spatial transition validation](SPATIAL_TRANSITION_VALIDATION.md)
+for cancellation/cache fixes, measurements and physical-device limits. Older
+sections below describe the implementation and follow-up status at their dates.
+
 ## Gain, loudness and fade-restoration transitions (2026-10-11)
+
+> Update, 2026-10-14: the parameter/DSP mute-gate measurements below document
+> the previous implementation. Continuous controls now interpolate without an
+> output fade; bypass changes retain a shorter 8/16 ms envelope. See
+> [current effect continuity tests and limitations](EFFECT_CONTINUITY_VALIDATION.md).
 
 Run `bash tests/run_dsp_transition_regression.sh --gain-path`. All 72 stereo
 cases passed (144 channel measurements). The existing 36 transition cases also

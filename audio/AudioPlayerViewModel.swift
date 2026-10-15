@@ -155,9 +155,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         engine.onPlaybackEnded = { [weak self] in
             self?.handleLocalPlaybackEnded()
         }
+        engine.setEffectsBypassed(selectedEffectPageTab == .off)
         engine.setSystemOutputVolume(AVAudioSession.sharedInstance().outputVolume)
         engine.refreshLoudnessCompensationRoute()
-        engine.setAutomaticDSPStrength(Float(automaticDSPStrength), effectSettings: playbackEffectSettings)
+        engine.setAutomaticDSPStrength(playbackAutomaticDSPStrength, effectSettings: playbackEffectSettings)
         engine.setAutomaticDSPVoicing(automaticDSPVoicing)
         hasInitializedHiResPlaybackEngine = true
         return engine
@@ -208,6 +209,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
+    private var playbackAutomaticDSPStrength: Float {
+        selectedEffectPageTab == .off || isABReferenceMode ? 0 : Float(automaticDSPStrength)
+    }
+
     private var playbackSpatialSettings: HeadphoneSpatialSettings {
         var selectedTabSettings = headphoneSpatialSettings
         if selectedEffectPageTab != .pro {
@@ -240,8 +245,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var effectAuditRefreshTimer: Timer?
     private var isEffectAuditRefreshPrimed = false
     private var isEffectScreenActive = false
-    private var hasAppliedInitialEffectScreenNoiseMask = false
-    private var hasPrewarmedEffectsInterface = false
+    private var spatialRequestID = UUID()
     private var headphoneSpatialApplyTimer: Timer?
     private var effectApplyTimer: Timer?
     private var reinforceTaskID = 0
@@ -346,6 +350,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     var realtimeEffectsStatusText: String {
+        if selectedEffectPageTab == .off { return L10n.tr("effects.tab.off") }
         if supportsRealtimeEffects {
             return L10n.tr("effects.status.active")
         }
@@ -1003,6 +1008,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         resumePendingInterruptionIfNeeded()
         guard hasInitializedHiResPlaybackEngine else { return }
         hiResPlaybackEngine.refreshLoudnessCompensationRoute()
+        applyHeadphoneSpatialSettingsIfNeeded(immediately: true)
         let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
         let reason = rawReason.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
         PlaybackDebugLogger.event(
@@ -1255,6 +1261,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
         effectApplyTimer?.invalidate()
         effectApplyTimer = nil
+        hiResPlaybackEngine.setEffectsBypassed(tab == .off)
+        hiResPlaybackEngine.setAutomaticDSPStrength(playbackAutomaticDSPStrength, effectSettings: playbackEffectSettings)
         applyRealtimeEffects(skipAutoPeakAdjustment: true)
 
         isSpatialProcessing = true
@@ -1262,8 +1270,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func setEffectParameter(_ value: Double, key: String, for kind: RealtimeAudioEffectKind) {
-        guard let index = effectSettings.firstIndex(where: { $0.kind == kind }) else { return }
-        
+        guard value.isFinite,
+              let index = effectSettings.firstIndex(where: { $0.kind == kind }) else { return }
+
         let oldValue = effectSettings[index].parameters[key] ?? value
         effectSettings[index].parameters[key] = value
         
@@ -1310,10 +1319,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func setAutomaticDSPStrength(_ value: Double) {
+        guard value.isFinite else { return }
         let clamped = min(max(value, 0.0), 1.5)
         guard abs(clamped - automaticDSPStrength) >= 0.001 else { return }
         automaticDSPStrength = clamped
-        hiResPlaybackEngine.setAutomaticDSPStrength(Float(clamped), effectSettings: playbackEffectSettings)
+        hiResPlaybackEngine.setAutomaticDSPStrength(playbackAutomaticDSPStrength, effectSettings: playbackEffectSettings)
         refreshPlaybackState()
         persistLibraryState()
     }
@@ -1329,7 +1339,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         isABReferenceMode.toggle()
         hiResPlaybackEngine.apply(effectSettings: playbackEffectSettings)
         hiResPlaybackEngine.setAutomaticDSPStrength(
-            isABReferenceMode ? 0 : Float(automaticDSPStrength),
+            playbackAutomaticDSPStrength,
             effectSettings: playbackEffectSettings
         )
         refreshEffectAuditSummary()
@@ -1750,20 +1760,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     func setEffectScreenActive(_ isActive: Bool) {
         isEffectScreenActive = isActive
         if isActive {
-            // 初回の不必要なマスクを抑制し、ノイズ対策をより洗練させる
-            if !hasAppliedInitialEffectScreenNoiseMask, playbackSource == .local, hiResPlaybackEngine.isPlaying {
-                // hasPrewarmedEffectsInterface が true の場合は既に裏で準備ができているため、アグレッシブなマスクは不要
-                hasAppliedInitialEffectScreenNoiseMask = true
-                hiResPlaybackEngine.maskTransitionNoiseIfNeeded(aggressive: false) 
-            }
             scheduleEffectAuditRefresh(after: 0.8)
         } else {
             stopEffectAuditRefreshTimer()
         }
-    }
-
-    func markEffectsInterfacePrewarmed() {
-        hasPrewarmedEffectsInterface = true
     }
 
     func songs(for artist: SystemArtist) -> [SystemSong] {
@@ -3557,6 +3557,12 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             guard !Task.isCancelled, self.interruptionGeneration == generation,
                   self.userPauseIntentToken == self.interruptionPauseIntentBaseline,
                   self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline else { return }
+            if self.actualPlaybackState == .playing {
+                self.clearInterruptionResumeState()
+                self.refreshPlaybackState()
+                self.startTimer()
+                return
+            }
             if let lastActivationError {
                 self.errorMessage = L10n.tr(
                     "error.playback_session_failed",
@@ -5077,14 +5083,19 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             isSpatialProcessing = false
             return
         }
+        let requestID = UUID()
+        spatialRequestID = requestID
+        let preparationToken = playbackPreparationToken
         hiResPlaybackEngine.updateHeadphoneSpatialSettings(playbackSpatialSettings, effectSettings: playbackEffectSettings) { [weak self] error in
-            guard let self else { return }
+            guard let self, self.spatialRequestID == requestID,
+                  self.playbackPreparationToken == preparationToken else { return }
             self.isSpatialProcessing = false
             if let error {
                 self.errorMessage = L10n.tr("error.playback_prepare_failed", error.localizedDescription)
                 return
             }
             self.refreshPlaybackState()
+            self.resumeAutomaticQualityUpgradeIfNeeded()
         }
     }
 

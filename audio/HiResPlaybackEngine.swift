@@ -447,6 +447,7 @@ final class HiResPlaybackEngine {
         let audioFile: AVAudioFile
         let baseBuffer: AVAudioPCMBuffer
         let playbackBuffer: AVAudioPCMBuffer
+        let spatialProcessingApplied: Bool
         let targetFormat: AVAudioFormat
         let formatDescription: HiResPlaybackFormat
         let upsamplingMode: UpsamplingMode
@@ -599,6 +600,7 @@ final class HiResPlaybackEngine {
     private var smoothedMeasuredEffectBoostDB: Float = 0
     private var plannedOutputTrimDB: Float = 0
     private var declickToken: UInt64 = 0
+    private var effectsBypassed = false
     private var pendingDeclickEffectSettings: [RealtimeAudioEffectSetting]?
     private var pendingAutomaticDSPProfile: AutomaticDSPProfile?
     private var pendingLoudnessCompensationVolume: Float?
@@ -607,9 +609,12 @@ final class HiResPlaybackEngine {
     private var appliedAutomaticDSPProfile: AutomaticDSPProfile = .neutral
     private var effectDeclickRestoreVolume: Float?
     private var headphoneSpatialSettings = HeadphoneSpatialSettings.default
+    private var headphoneSpatialProcessingApplied = false
     private var memorySafetyMode = AudioMemorySafetyMode.deviceDefault
     private var currentUpsamplingMode: UpsamplingMode = .avAudioConverter
     private var headphoneSpatialUpdateToken: UInt64 = 0
+    private var spatialPreparationCancellation: AudioPreparationCancellation?
+    private var latestRequestedEffectSettings: [RealtimeAudioEffectSetting]?
     private var lastGainStagingDate = Date()
     private var lastAppliedEffectSettings: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
     private var needsEffectReapplication = true
@@ -713,6 +718,13 @@ final class HiResPlaybackEngine {
             )
         }
         return result.snapshot
+    }
+
+    func setEffectsBypassed(_ bypassed: Bool) {
+        guard effectsBypassed != bypassed else { return }
+        effectsBypassed = bypassed
+        applyAutomaticDSPProfile(automaticDSPProfile)
+        applyLoudnessCompensation(for: observedSystemOutputVolume)
     }
 
     func setSystemOutputVolume(_ value: Float) {
@@ -879,6 +891,7 @@ final class HiResPlaybackEngine {
         duration = Double(audioFile.length) / sourceFormat.sampleRate
         isFastFilePlayback = true
         self.headphoneSpatialSettings = headphoneSpatialSettings
+        headphoneSpatialProcessingApplied = false
         signalDiagnostics = nil
         automaticDSPProfile = .neutral
         currentUpsamplingMode = .avAudioConverter
@@ -912,6 +925,9 @@ final class HiResPlaybackEngine {
         preparationGeneration &+= 1
         playbackGeneration &+= 1
         headphoneSpatialUpdateToken &+= 1
+        spatialPreparationCancellation?.cancel()
+        spatialPreparationCancellation = nil
+        headphoneSpatialProcessingApplied = false
         renderHealthMonitor.endMonitoring()
         pendingHandoff = nil
         playerNode.stop()
@@ -978,6 +994,9 @@ final class HiResPlaybackEngine {
     }
 
     func releaseBaseBufferForMemoryPressure() {
+        spatialPreparationCancellation?.cancel()
+        spatialPreparationCancellation = nil
+        headphoneSpatialUpdateToken &+= 1
         // The playback copy is required for the current track; the base copy is
         // only needed to rebuild spatial processing and can be discarded safely.
         baseConvertedBuffer = nil
@@ -1001,94 +1020,163 @@ final class HiResPlaybackEngine {
     func updateHeadphoneSpatialSettings(
         _ settings: HeadphoneSpatialSettings,
         effectSettings: [RealtimeAudioEffectSetting],
+        forceRebuild: Bool = false,
         completion: @escaping (Error?) -> Void
     ) {
-        let safeSettings = memorySafetyMode.safeSpatialSettings(settings)
-        let safeEffectSettings = memorySafetyMode.safeEffectSettings(effectSettings)
-        guard let baseConvertedBuffer, let convertedFormat else {
+        var resolved = memorySafetyMode.safeSpatialSettings(settings)
+        if effectsBypassed { resolved.isEnabled = false }
+        let safeSettings = resolved
+        spatialPreparationCancellation?.cancel()
+        let cancellation = AudioPreparationCancellation()
+        spatialPreparationCancellation = cancellation
+        headphoneSpatialUpdateToken &+= 1
+        let token = headphoneSpatialUpdateToken
+        // Its prepared spatial settings are now obsolete. Stop consuming CPU
+        // for a quality result that the token check would reject at handoff.
+        qualityUpgradeWorker?.cancel()
+        qualityUpgradeWorker = nil
+        qualityUpgradeWorkerGeneration &+= 1
+        let routeSupportsSpatial = Self.shouldApplyHeadphoneVirtualization
+        let needsSpatialProcessingCopy = safeSettings.isEnabled
+            && routeSupportsSpatial && (convertedFormat?.channelCount ?? 2) >= 2
+        guard forceRebuild || needsSpatialProcessingCopy != headphoneSpatialProcessingApplied
+            || (safeSettings != headphoneSpatialSettings
+                && (safeSettings.isEnabled || headphoneSpatialSettings.isEnabled)) else {
             headphoneSpatialSettings = safeSettings
             completion(nil)
             return
         }
-
-        headphoneSpatialUpdateToken &+= 1
-        let token = headphoneSpatialUpdateToken
+        guard let baseConvertedBuffer, let convertedFormat,
+              let audioFile = currentAudioFile, let url = currentAudioURL,
+              let formatDescription = currentFormat else {
+            // A file-backed stream has no prepared PCM yet. A later quality
+            // upgrade receives the latest requested settings from the view model.
+            headphoneSpatialSettings = safeSettings
+            completion(nil)
+            return
+        }
+        if !needsSpatialProcessingCopy, convertedBuffer === baseConvertedBuffer {
+            headphoneSpatialSettings = safeSettings
+            completion(nil)
+            return
+        }
         let baseBuffer = ImmutablePlaybackPCM(baseConvertedBuffer)
-        let cachedURL = currentAudioURL
-        let cachedUpsamplingMode = currentUpsamplingMode
-        let needsSpatialProcessingCopy = safeSettings.isEnabled
-            && Self.shouldApplyHeadphoneVirtualization
-            && convertedFormat.channelCount >= 2
+        let mode = currentUpsamplingMode
         guard !needsSpatialProcessingCopy || Self.canAllocatePlaybackCopy(of: baseBuffer.buffer) else {
             completion(HiResEngineError.offlineBufferTooLarge)
             return
         }
 
+        // One serial worker: obsolete queued requests never allocate another
+        // full-song buffer. In-flight HRTF work exits at a bounded frame interval.
         headphoneSpatialProcessingQueue.async { [weak self] in
-            guard let self else { return }
-            let baseBuffer = baseBuffer.buffer
-            
             do {
+                try cancellation.check()
                 let rebuiltBuffer: AVAudioPCMBuffer
                 if needsSpatialProcessingCopy {
-                    rebuiltBuffer = try Self.clonePlaybackBuffer(from: baseBuffer)
-                    Self.applyHeadphoneVirtualizationIfNeeded(to: rebuiltBuffer, settings: safeSettings)
+                    guard Self.canAllocatePlaybackCopy(of: baseBuffer.buffer) else {
+                        throw HiResEngineError.offlineBufferTooLarge
+                    }
+                    rebuiltBuffer = try Self.clonePlaybackBuffer(from: baseBuffer.buffer)
+                    try cancellation.check()
+                    try Self.applyHeadphoneVirtualizationIfNeeded(
+                        to: rebuiltBuffer, settings: safeSettings,
+                        routeSupportsSpatial: routeSupportsSpatial,
+                        checkCancellation: { try cancellation.check() }
+                    )
                 } else {
-                    // Disabling virtualization can return to the immutable base
-                    // allocation directly; a second full-song copy is needless.
-                    rebuiltBuffer = baseBuffer
+                    rebuiltBuffer = baseBuffer.buffer
                 }
+                try cancellation.check()
                 let cacheKey = Self.makeAnalysisCacheKey(
-                    url: cachedURL,
-                    targetSampleRate: convertedFormat.sampleRate,
-                    upsamplingMode: cachedUpsamplingMode,
-                    spatialSettings: safeSettings
+                    url: url, targetSampleRate: convertedFormat.sampleRate,
+                    upsamplingMode: mode, spatialSettings: safeSettings,
+                    spatialProcessingApplied: needsSpatialProcessingCopy
                 )
                 let diagnostics: SignalLevelDiagnostics
-                let automaticDSPProfile: AutomaticDSPProfile
+                let profile: AutomaticDSPProfile
                 let cacheHit: Bool
                 if let cached = Self.cachedAnalysis(for: cacheKey) {
                     diagnostics = cached.diagnostics
-                    automaticDSPProfile = cached.automaticDSPProfile
+                    profile = cached.automaticDSPProfile
                     cacheHit = true
                 } else {
                     diagnostics = Self.analyzeSignalLevels(in: rebuiltBuffer)
-                    automaticDSPProfile = Self.analyzeAutomaticDSP(in: rebuiltBuffer, diagnostics: diagnostics)
-                    Self.storeCachedAnalysis(.init(diagnostics: diagnostics, automaticDSPProfile: automaticDSPProfile), for: cacheKey)
+                    try cancellation.check()
+                    profile = Self.analyzeAutomaticDSP(in: rebuiltBuffer, diagnostics: diagnostics)
+                    try cancellation.check()
+                    Self.storeCachedAnalysis(.init(diagnostics: diagnostics, automaticDSPProfile: profile), for: cacheKey)
                     cacheHit = false
                 }
-
+                let prepared = PreparedPlaybackData(
+                    url: url, audioFile: audioFile, baseBuffer: baseBuffer.buffer,
+                    playbackBuffer: rebuiltBuffer, spatialProcessingApplied: needsSpatialProcessingCopy,
+                    targetFormat: convertedFormat,
+                    formatDescription: formatDescription, upsamplingMode: mode,
+                    diagnostics: diagnostics, automaticDSPProfile: profile,
+                    analysisCacheHit: cacheHit,
+                    duration: Double(rebuiltBuffer.frameLength) / convertedFormat.sampleRate
+                )
                 DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    guard self.headphoneSpatialUpdateToken == token else {
+                    self?.commitSpatialPlaybackData(prepared, settings: safeSettings,
+                        effectSettings: effectSettings, token: token,
+                        cancellation: cancellation, completion: completion)
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.headphoneSpatialUpdateToken == token,
+                          !(error is CancellationError) else {
                         completion(nil)
                         return
                     }
-
-                    self.headphoneSpatialSettings = safeSettings
-                    self.convertedBuffer = rebuiltBuffer
-                    self.signalDiagnostics = diagnostics
-                    self.automaticDSPProfile = automaticDSPProfile
-                    self.lastAutomaticDSPCacheHit = cacheHit
-                    self.applyAutomaticDSPProfile(automaticDSPProfile)
-                    self.duration = Double(rebuiltBuffer.frameLength) / convertedFormat.sampleRate
-
-                    do {
-                        let latestResumeTime = self.currentTime()
-                        let shouldResume = self.isPlaying
-                        self.apply(effectSettings: safeEffectSettings)
-                        try self.ensureEngineRunning()
-                        self.scheduleBuffer(from: min(latestResumeTime, self.duration), autoplay: shouldResume)
-                        completion(nil)
-                    } catch {
-                        completion(error)
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
                     completion(error)
                 }
             }
+        }
+    }
+
+    private func commitSpatialPlaybackData(
+        _ prepared: PreparedPlaybackData,
+        settings: HeadphoneSpatialSettings,
+        effectSettings: [RealtimeAudioEffectSetting],
+        token: UInt64,
+        cancellation: AudioPreparationCancellation,
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard headphoneSpatialUpdateToken == token,
+              (try? cancellation.check()) != nil,
+              currentAudioURL == prepared.url else {
+            completion(nil)
+            return
+        }
+        guard baseConvertedBuffer === prepared.baseBuffer else {
+            // A quality handoff may already have committed while this worker
+            // was rebuilding. Rebuild from its new base, never revert its SRC.
+            updateHeadphoneSpatialSettings(settings,
+                effectSettings: latestRequestedEffectSettings ?? effectSettings,
+                forceRebuild: true, completion: completion)
+            return
+        }
+        do {
+            // Let the old source finish its tail. Keep the latest candidate for
+            // a repeat/seek, or adopt it quietly once playback has paused at EOF.
+            if isPlaying && duration - currentTime() < 0.20 { throw CancellationError() }
+            try crossfadeToPreparedPlaybackData(prepared,
+                effectSettings: latestRequestedEffectSettings ?? effectSettings,
+                shouldResume: isPlaying)
+            headphoneSpatialSettings = settings
+            PlaybackDebugLogger.event("audio.spatial.committed preset=\(settings.preset.rawValue) enabled=\(settings.isEnabled)")
+            completion(nil)
+        } catch is CancellationError {
+            // Busy handoff, unavailable render clock or missed scheduling lead:
+            // retain the audible source and retry only the latest candidate.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.050) { [weak self] in
+                self?.commitSpatialPlaybackData(prepared, settings: settings,
+                    effectSettings: effectSettings, token: token,
+                    cancellation: cancellation, completion: completion)
+            }
+        } catch {
+            completion(error)
         }
     }
 
@@ -1152,6 +1240,7 @@ final class HiResPlaybackEngine {
     ) async throws {
         preparationGeneration &+= 1
         let generation = preparationGeneration
+        let spatialToken = headphoneSpatialUpdateToken
         // Background prepare
         let preloadKey = Self.makePreloadedPlaybackKey(
             url: url,
@@ -1193,7 +1282,8 @@ final class HiResPlaybackEngine {
         }
         
         try Task.checkCancellation()
-        guard preparationGeneration == generation else { throw CancellationError() }
+        guard preparationGeneration == generation,
+              headphoneSpatialUpdateToken == spatialToken else { throw CancellationError() }
         guard Self.preparedPlaybackData(prepared, matches: url) else {
             throw HiResEngineError.upconvertFailed
         }
@@ -1348,16 +1438,6 @@ final class HiResPlaybackEngine {
         return audits
     }
 
-    func maskTransitionNoiseIfNeeded(aggressive: Bool) {
-        let silentHoldDuration: TimeInterval = aggressive ? 0.080 : 0.015
-        
-        Task {
-            await fadeOutOutput(duration: aggressive ? 0.010 : 0.005)
-            try? await Task.sleep(nanoseconds: UInt64(silentHoldDuration * 1_000_000_000))
-            await fadeInOutput(duration: aggressive ? 0.080 : 0.040)
-        }
-    }
-
     func fadeOutOutput(duration: TimeInterval) async {
         applyPendingEffectSettings()
         effectDeclickRestoreVolume = nil
@@ -1385,7 +1465,15 @@ final class HiResPlaybackEngine {
     // MARK: - Effect Application
 
     func apply(effectSettings: [RealtimeAudioEffectSetting]) {
-        let safeEffectSettings = memorySafetyMode.safeEffectSettings(effectSettings)
+        // A background preparation may still carry settings captured before OFF.
+        // The current bypass intent wins over every delayed application.
+        let safeEffectSettings = memorySafetyMode.safeEffectSettings(effectSettings).map { setting in
+            guard effectsBypassed else { return setting }
+            var bypassed = setting
+            bypassed.isEnabled = false
+            return bypassed
+        }
+        latestRequestedEffectSettings = safeEffectSettings
         let requested = Dictionary(safeEffectSettings.map { ($0.kind, $0) }, uniquingKeysWith: { _, latest in latest })
         let changed = effectPipeline.contains { effect in
             let target = requested[effect.kind] ?? RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: false)
@@ -1395,8 +1483,8 @@ final class HiResPlaybackEngine {
         }
         let shouldDeclick = activePlayerNode.isPlaying && changed
 
-        // Coalesce updates during the fade-out. Otherwise the captured initial
-        // ON setting can resurrect an effect that the user has already disabled.
+        // Coalesce updates during interpolation or a protected fade. A captured
+        // ON setting must not resurrect an effect the user has already disabled.
         if pendingDeclickEffectSettings != nil {
             pendingDeclickEffectSettings = safeEffectSettings
             return
@@ -1445,33 +1533,68 @@ final class HiResPlaybackEngine {
         return false
     }
 
+    /// Bypass/latency changes still need a short protected commit. Ordinary
+    /// controls interpolate in place and never touch the output envelope.
+    private func requiresProtectedEffectCommit(_ settings: [RealtimeAudioEffectSetting]) -> Bool {
+        let requested = Dictionary(settings.map { ($0.kind, $0) }, uniquingKeysWith: { _, latest in latest })
+        return needsEffectReapplication || effectDeclickRestoreVolume != nil || effectPipeline.contains { effect in
+            let target = requested[effect.kind]?.isEnabled ?? false
+            return (lastAppliedEffectSettings[effect.kind]?.isEnabled ?? false) != target
+        }
+    }
+
     private func applyWithDeclick(effectSettings: [RealtimeAudioEffectSetting]) {
         declickToken &+= 1
         let token = declickToken
         pendingDeclickEffectSettings = effectSettings
+        guard requiresProtectedEffectCommit(effectSettings) else {
+            scheduleEffectParameterStep(remaining: 8, token: token)
+            return
+        }
         let originalOutput = effectDeclickRestoreVolume ?? declickMixer.outputVolume
         effectDeclickRestoreVolume = originalOutput
-        rampOutputVolume(to: 0.0, duration: 0.020, token: token) { [weak self] in
+        rampOutputVolume(to: 0.0, duration: 0.008, token: token) { [weak self] in
             guard let self, self.declickToken == token else { return }
-
             self.applyPendingEffectSettings()
-
-            self.declickMixer.outputVolume = 0.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.090) { [weak self] in
+            // No silent settling plateau: the old 90 ms hold was audible as
+            // a dropout, especially when a gesture repeatedly restarted it.
+            self.rampOutputVolume(to: originalOutput, duration: 0.016, token: token) { [weak self] in
                 guard let self, self.declickToken == token else { return }
-                self.rampOutputVolume(to: originalOutput, duration: 0.120, token: token) { [weak self] in
-                    guard let self, self.declickToken == token else { return }
-                    self.effectDeclickRestoreVolume = nil
-                }
+                self.effectDeclickRestoreVolume = nil
             }
         }
     }
 
-    private func applyPendingEffectSettings() {
-        guard let settings = pendingDeclickEffectSettings else { return }
-        pendingDeclickEffectSettings = nil
-        let dspChanged = applyPendingAutomaticDSPProfile()
-        let loudnessChanged = applyPendingLoudnessCompensation()
+    private func scheduleEffectParameterStep(remaining: Int, token: UInt64) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.010) { [weak self] in
+            guard let self, self.declickToken == token,
+                  let target = self.pendingDeclickEffectSettings else { return }
+            if self.requiresProtectedEffectCommit(target) {
+                self.applyWithDeclick(effectSettings: target)
+                return
+            }
+            self.applyPendingEffectSettings(fraction: 1 / Float(remaining))
+            if remaining > 1 {
+                self.scheduleEffectParameterStep(remaining: remaining - 1, token: token)
+            }
+        }
+    }
+
+    private func applyPendingEffectSettings(fraction: Float = 1) {
+        guard let target = pendingDeclickEffectSettings else { return }
+        if fraction == 1 { pendingDeclickEffectSettings = nil }
+        let settings = target.map { requested in
+            guard fraction < 1, requested.isEnabled,
+                  let previous = lastAppliedEffectSettings[requested.kind] else { return requested }
+            var interpolated = requested
+            for (key, value) in requested.parameters {
+                let start = previous.parameters[key] ?? value
+                interpolated.parameters[key] = start + (value - start) * Double(fraction)
+            }
+            return interpolated
+        }
+        let dspChanged = applyPendingAutomaticDSPProfile(fraction: fraction)
+        let loudnessChanged = applyPendingLoudnessCompensation(fraction: fraction)
         let gainUpdated = applyImmediate(effectSettings: settings)
         if (dspChanged || loudnessChanged) && !gainUpdated && hasTrack {
             applyGainStaging(effectSettings: settings)
@@ -1711,7 +1834,7 @@ final class HiResPlaybackEngine {
 
     private func applyLoudnessCompensation(for outputVolume: Float) {
         guard outputVolume.isFinite else { return }
-        let clamped = min(max(outputVolume, 0), 1)
+        let clamped: Float = effectsBypassed ? 1 : min(max(outputVolume, 0), 1)
         guard clamped != appliedLoudnessCompensationVolume
                 || loudnessCompensationRouteProfile != appliedLoudnessCompensationRoute
                 || pendingLoudnessCompensationVolume != nil else { return }
@@ -1719,9 +1842,11 @@ final class HiResPlaybackEngine {
         commitPendingDSPChangesIfReady()
     }
 
-    private func applyPendingLoudnessCompensation() -> Bool {
-        guard pendingHandoff == nil, let volume = pendingLoudnessCompensationVolume else { return false }
-        pendingLoudnessCompensationVolume = nil
+    private func applyPendingLoudnessCompensation(fraction: Float = 1) -> Bool {
+        guard pendingHandoff == nil, let target = pendingLoudnessCompensationVolume else { return false }
+        if fraction == 1 { pendingLoudnessCompensationVolume = nil }
+        let previous = appliedLoudnessCompensationVolume ?? target
+        let volume = previous + (target - previous) * fraction
         applyImmediateLoudnessCompensation(for: volume)
         appliedLoudnessCompensationVolume = volume
         appliedLoudnessCompensationRoute = loudnessCompensationRouteProfile
@@ -1816,9 +1941,16 @@ final class HiResPlaybackEngine {
     }
 
     @discardableResult
-    private func applyPendingAutomaticDSPProfile() -> Bool {
-        guard pendingHandoff == nil, let scaled = pendingAutomaticDSPProfile else { return false }
-        pendingAutomaticDSPProfile = nil
+    private func applyPendingAutomaticDSPProfile(fraction: Float = 1) -> Bool {
+        guard pendingHandoff == nil, let target = pendingAutomaticDSPProfile else { return false }
+        if fraction == 1 { pendingAutomaticDSPProfile = nil }
+        let previous = appliedAutomaticDSPProfile
+        let scaled = AutomaticDSPProfile(
+            lowShelfGainDB: previous.lowShelfGainDB + (target.lowShelfGainDB - previous.lowShelfGainDB) * fraction,
+            lowMidGainDB: previous.lowMidGainDB + (target.lowMidGainDB - previous.lowMidGainDB) * fraction,
+            presenceGainDB: previous.presenceGainDB + (target.presenceGainDB - previous.presenceGainDB) * fraction,
+            highShelfGainDB: previous.highShelfGainDB + (target.highShelfGainDB - previous.highShelfGainDB) * fraction
+        )
         automaticDSPEQ.bypass = scaled.shouldBypass
         automaticDSPEQ.bands[0].gain = scaled.lowShelfGainDB
         automaticDSPEQ.bands[1].gain = scaled.lowMidGainDB
@@ -1829,6 +1961,7 @@ final class HiResPlaybackEngine {
     }
 
     private func scaledAutomaticDSPProfile(_ profile: AutomaticDSPProfile? = nil) -> AutomaticDSPProfile {
+        guard !effectsBypassed else { return .neutral }
         let base = profile ?? automaticDSPProfile
         let voicingScale: Float
         switch automaticDSPVoicing {
@@ -2356,7 +2489,8 @@ final class HiResPlaybackEngine {
         url: URL?,
         targetSampleRate: Double,
         upsamplingMode: UpsamplingMode,
-        spatialSettings: HeadphoneSpatialSettings
+        spatialSettings: HeadphoneSpatialSettings,
+        spatialProcessingApplied: Bool? = nil
     ) -> AnalysisCacheKey {
         let sourceIdentity = url.map(sourceIdentityForCache) ?? "unknown"
         let fileSignature = fileSignatureForCache(url: url)
@@ -2365,6 +2499,8 @@ final class HiResPlaybackEngine {
             fileSize: fileSignature.fileSize,
             modificationTime: fileSignature.modificationTime,
             targetSampleRateRounded: Int(targetSampleRate.rounded()),
+            spatialProcessingApplied: spatialProcessingApplied
+                ?? (spatialSettings.isEnabled && shouldApplyHeadphoneVirtualization),
             upsamplingModeRaw: upsamplingMode.rawValue,
             hrtfPresetRaw: spatialSettings.preset.rawValue,
             spatialMilli: Int((spatialSettings.spatial * 1000).rounded()),
@@ -2382,6 +2518,7 @@ final class HiResPlaybackEngine {
             sourceIdentity: sourceIdentityForCache(url),
             fileSize: signature.fileSize,
             modificationTime: signature.modificationTime,
+            spatialProcessingApplied: spatialSettings.isEnabled && shouldApplyHeadphoneVirtualization,
             upsamplingModeRaw: upsamplingMode.rawValue,
             hrtfPresetRaw: spatialSettings.preset.rawValue,
             spatialMilli: Int((spatialSettings.spatial * 1000).rounded()),
@@ -2395,13 +2532,16 @@ final class HiResPlaybackEngine {
     private func awaitPreloadedPlaybackData(
         for key: PreloadedPlaybackKey
     ) async -> PreparedPlaybackData? {
-        if let prepared = preloadedPlaybackCache.removeValue(forKey: key) {
+        if let prepared = preloadedPlaybackCache.removeValue(forKey: key),
+           prepared.spatialProcessingApplied == key.spatialProcessingApplied {
             return prepared
         }
         if let task = preloadTasks[key] {
             await task.value
         }
-        return preloadedPlaybackCache.removeValue(forKey: key)
+        guard let prepared = preloadedPlaybackCache.removeValue(forKey: key),
+              prepared.spatialProcessingApplied == key.spatialProcessingApplied else { return nil }
+        return prepared
     }
 
     nonisolated private static func fileSignatureForCache(url: URL?) -> (fileSize: UInt64, modificationTime: Int64) {
@@ -2522,9 +2662,15 @@ final class HiResPlaybackEngine {
         Float(min(max(value ?? defaultValue, 0), 1))
     }
 
-    nonisolated static func applyHeadphoneVirtualizationIfNeeded(to buffer: AVAudioPCMBuffer, settings: HeadphoneSpatialSettings) {
+    nonisolated static func applyHeadphoneVirtualizationIfNeeded(
+        to buffer: AVAudioPCMBuffer,
+        settings: HeadphoneSpatialSettings,
+        routeSupportsSpatial: Bool? = nil,
+        checkCancellation: () throws -> Void = { try Task.checkCancellation() }
+    ) throws {
+        try checkCancellation()
         guard settings.isEnabled,
-              shouldApplyHeadphoneVirtualization,
+              routeSupportsSpatial ?? shouldApplyHeadphoneVirtualization,
               buffer.format.channelCount >= 2,
               let channelData = buffer.floatChannelData else {
             return
@@ -2607,6 +2753,7 @@ final class HiResPlaybackEngine {
         let right = channelData[1]
 
         for frame in 0..<frameCount {
+            if frame.isMultiple(of: 4096) { try checkCancellation() }
             let inputLeft = left[frame]
             let inputRight = right[frame]
 
@@ -3258,6 +3405,7 @@ final class HiResPlaybackEngine {
                 audioFile: sourceAudioFile,
                 baseBuffer: baseBuffer,
                 playbackBuffer: playbackBuffer,
+                spatialProcessingApplied: spatialProcessingApplied,
                 targetFormat: expectedTargetFormat,
                 formatDescription: formatDescription,
                 upsamplingMode: expectedUpsamplingMode,
@@ -3532,9 +3680,10 @@ final class HiResPlaybackEngine {
             // actually mutate samples. Otherwise both properties can safely
             // reference the same allocation, avoiding a full-song copy.
             playbackBuffer = try Self.clonePlaybackBuffer(from: convertedBuffer)
-            Self.applyHeadphoneVirtualizationIfNeeded(
+            try Self.applyHeadphoneVirtualizationIfNeeded(
                 to: playbackBuffer,
-                settings: headphoneSpatialSettings
+                settings: headphoneSpatialSettings,
+                routeSupportsSpatial: spatialProcessingApplied
             )
         } else {
             playbackBuffer = convertedBuffer
@@ -3548,7 +3697,8 @@ final class HiResPlaybackEngine {
             url: url,
             targetSampleRate: targetSampleRate,
             upsamplingMode: upsamplingMode,
-            spatialSettings: headphoneSpatialSettings
+            spatialSettings: headphoneSpatialSettings,
+            spatialProcessingApplied: spatialProcessingApplied
         )
         let diagnostics: SignalLevelDiagnostics
         let automaticDSPProfile: AutomaticDSPProfile
@@ -3590,6 +3740,7 @@ final class HiResPlaybackEngine {
             audioFile: audioFile,
             baseBuffer: convertedBuffer,
             playbackBuffer: playbackBuffer,
+            spatialProcessingApplied: spatialProcessingApplied,
             targetFormat: targetFormat,
             formatDescription: formatDescription,
             upsamplingMode: upsamplingMode,
@@ -3642,7 +3793,8 @@ final class HiResPlaybackEngine {
         playbackOffset = 0
         
         baseConvertedBuffer = prepared.baseBuffer
-        convertedBuffer = prepared.playbackBuffer
+        convertedBuffer = effectsBypassed ? prepared.baseBuffer : prepared.playbackBuffer
+        headphoneSpatialProcessingApplied = !effectsBypassed && prepared.spatialProcessingApplied
         convertedFormat = prepared.targetFormat
         signalDiagnostics = prepared.diagnostics
         automaticDSPProfile = prepared.automaticDSPProfile
@@ -3669,6 +3821,7 @@ final class HiResPlaybackEngine {
               graphFormat == prepared.targetFormat else {
             throw CancellationError()
         }
+        let playbackBuffer = effectsBypassed ? prepared.baseBuffer : prepared.playbackBuffer
         let oldNode = activePlayerNode
         let newNode = isUpgradePlayerNodeActive ? playerNode : upgradePlayerNode
         let oldOffset = playbackOffset
@@ -3683,7 +3836,14 @@ final class HiResPlaybackEngine {
             oldNode.stop()
             newNode.stop()
             adoptPreparedPlaybackMetadata(prepared, effectSettings: effectSettings)
-            scheduleBuffer(from: position, autoplay: false)
+            if position < duration {
+                scheduleBuffer(from: position, autoplay: false)
+            } else {
+                // Adopting new spatial settings at a paused EOF must not emit
+                // another track-ended callback or start the engine.
+                playbackOffset = duration
+                lastKnownPlaybackTime = duration
+            }
             return
         }
 
@@ -3708,8 +3868,8 @@ final class HiResPlaybackEngine {
             renderedFrames: playerTime.sampleTime,
             sourceSampleRate: playerTime.sampleRate,
             leadFromRenderTime: lead,
-            targetSampleRate: prepared.playbackBuffer.format.sampleRate,
-            targetFrameCount: Int64(prepared.playbackBuffer.frameLength)
+            targetSampleRate: playbackBuffer.format.sampleRate,
+            targetFrameCount: Int64(playbackBuffer.frameLength)
         ) else {
             PlaybackDebugLogger.event("audio.handoff.deferred reason=invalid_timeline_or_tail")
             throw CancellationError()
@@ -3718,7 +3878,7 @@ final class HiResPlaybackEngine {
         let nextGeneration = playbackGeneration &+ 1
         handoffScheduleToken &+= 1
         newNode.volume = 0
-        try schedulePreparedBuffer(prepared.playbackBuffer, startingFrame: plan.startFrame,
+        try schedulePreparedBuffer(playbackBuffer, startingFrame: plan.startFrame,
                                    on: newNode, generation: nextGeneration)
 
         // Buffer scheduling can take time under load. Do not commit a late
@@ -3755,7 +3915,8 @@ final class HiResPlaybackEngine {
         currentAudioFile = prepared.audioFile
         currentAudioURL = prepared.url
         baseConvertedBuffer = prepared.baseBuffer
-        convertedBuffer = prepared.playbackBuffer
+        convertedBuffer = effectsBypassed ? prepared.baseBuffer : prepared.playbackBuffer
+        headphoneSpatialProcessingApplied = !effectsBypassed && prepared.spatialProcessingApplied
         convertedFormat = prepared.targetFormat
         isFastFilePlayback = false
         signalDiagnostics = prepared.diagnostics
@@ -4833,6 +4994,7 @@ nonisolated private struct AnalysisCacheKey: Hashable, Sendable {
     let fileSize: UInt64
     let modificationTime: Int64
     let targetSampleRateRounded: Int
+    let spatialProcessingApplied: Bool
     let upsamplingModeRaw: String
     let hrtfPresetRaw: String
     let spatialMilli: Int
@@ -4843,6 +5005,7 @@ nonisolated private struct PreloadedPlaybackKey: Hashable, Sendable {
     let sourceIdentity: String
     let fileSize: UInt64
     let modificationTime: Int64
+    let spatialProcessingApplied: Bool
     let upsamplingModeRaw: String
     let hrtfPresetRaw: String
     let spatialMilli: Int

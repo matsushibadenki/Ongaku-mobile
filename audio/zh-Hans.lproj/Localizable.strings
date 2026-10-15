@@ -110,7 +110,7 @@
 "effects.tab.basic" = "Basic";
 "effects.tab.pro" = "Pro";
 "effects.tab.accessibility_label" = "效果模式";
-"effects.tab.selected_only_footer" = "仅应用当前标签页中已开启的效果。";
+"effects.tab.selected_only_footer" = "OFF关闭效果、自动DSP、响度补偿和空间处理。切回Basic或Pro即可恢复已保存的设置。输出保护和采样率转换继续运行。";
 "search.summary.placeholder" = "可跨歌曲名、艺术家名、专辑名和播放列表名进行搜索。";
 "search.summary.empty" = "没有找到匹配项。可以尝试其他写法或关键词。";
 "error.song_not_found" = "无法从资料库中加载这首歌曲。";
@@ -387,3 +387,6 @@
 "lyrics.web.title" = "在网站搜索日语歌词";
 "lyrics.web.open" = "在浏览器中使用 %@ 搜索";
 "lyrics.web.detail" = "在浏览器打开网站。歌网络按歌曲名搜索（为空时使用歌手名），UtaTen 使用两个字段。这些网站仅供浏览，不支持保存到 Ongaku 或同步显示。";
+
+"effects.tab.off" = "OFF";
+"effects.preparing" = "正在准备效果…";
