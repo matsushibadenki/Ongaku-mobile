@@ -112,3 +112,11 @@ cases and deliberate timing/muting faults pass; see
 🟠 [Next] Extend asynchronous meter/gain and clipping/true-peak probes. The current
 fixture supplies deterministic audit snapshots and does not validate device
 Audio Units, Bluetooth/DAC latency, or psychoacoustic click thresholds.
+
+Update, 2026-10-15: timestamped meter stores and shipping gain logic now have
+separate delayed/stale/reordered-delivery checks; see
+[meter delivery validation](METER_DELIVERY_VALIDATION.md). The subsequent
+[combined waveform fixture](METER_HANDOFF_WAVEFORM_VALIDATION.md) passes 42
+spatial/SRC handoffs with delayed PCM meter replay and fixes shared parameter/
+gain writes during the source fade. Continuous device tap feedback remains
+separate follow-up work.

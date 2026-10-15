@@ -20,7 +20,7 @@ def block(text, anchor):
 stop_body = block(source, '    func stop() {')
 if stop_body.index('cancelEffectTransitionForStop()') > stop_body.index('applyAutomaticDSPProfile(.neutral)'):
     raise RuntimeError('Stop cancellation must precede neutral DSP reset')
-methods = ['apply(effectSettings:', 'applyImmediate(effectSettings:', 'applyWithDeclick(effectSettings:',
+methods = ['invalidateEffectLevelAudits()', 'apply(effectSettings:', 'applyImmediate(effectSettings:', 'applyWithDeclick(effectSettings:',
            'applyPendingEffectSettings(fraction:', 'cancelEffectTransitionForStop()',
            'rampOutputVolume(to ', 'requiresProtectedEffectCommit(_ ', 'scheduleEffectParameterStep(remaining:', 'setEffectsBypassed(_ ', 'configureAutomaticDSP()',
            'applyAutomaticDSPProfile(_ ', 'commitPendingDSPChangesIfReady()',
@@ -79,6 +79,13 @@ output.append('''
     var plannedOutputTrimDB: Float = 0
     var signalDiagnostics: SignalLevelDiagnostics?
     var effectLevelAudits: [EffectLevelAudit] = []
+    var controlledEffectLevelAudits: [EffectLevelAudit] = []
+    var effectAuditsValidSince: TimeInterval = 0
+    var lastConsumedAuditTime: TimeInterval?
+    var useObservedMeters = false
+    var acceptStaleForNegativeControl = false
+    var ignoreHandoffForNegativeControl = false
+    var meterLevels: any MeterLevelStore = LegacyMeterLevelStore(count: AudioEffectModuleRegistry.activeKinds.count + 2)
     var smoothedMeasuredEffectBoostDB: Float = 0
     var lastGainStagingDate = Date(timeIntervalSince1970: 0)
     var useRealGainPath = false
@@ -112,13 +119,25 @@ output.append('''
     func record(_ kind: String) { mutations.append((kind, DispatchQueue.main.seconds, declickMixer.outputVolume, activePlayerNode.isPlaying)) }
     // Supply controlled meter snapshots; the real gain law and audit smoothing
     // run below. This is not an implementation of render-thread tap delivery.
-    func refreshEffectLevelAudits() -> [EffectLevelAudit] { effectLevelAudits }
+    func refreshEffectLevelAudits() -> [EffectLevelAudit] {
+        if useObservedMeters { return refreshObservedEffectLevelAudits() }
+        // Legacy gain fixtures supply a contemporaneous reading on each poll.
+        // Delayed deliveries instead exercise the real store/refresh method.
+        effectLevelAudits = controlledEffectLevelAudits.map {
+            var value = $0; value.renderedAt = DispatchQueue.main.seconds; return value
+        }
+        return effectLevelAudits
+    }
     init(player: AVAudioPlayerNode, eq: AVAudioUnitEQ, output: AVAudioMixerNode, effects: [AudioEffectNode]) {
         activePlayerNode = player; automaticDSPEQ = eq; declickMixer = output; effectPipeline = effects
         configureAutomaticDSP()
         configureLoudnessCompensation()
     }
 ''')
+refresh = block(source, '    func refreshEffectLevelAudits()').replace('func refreshEffectLevelAudits()', 'func refreshObservedEffectLevelAudits()')
+refresh = refresh.replace('AVAudioTime.seconds(forHostTime: mach_absolute_time())', 'DispatchQueue.main.seconds')
+refresh = refresh.replace('guard input.matches(output, now: now, validSince: effectAuditsValidSince)', 'guard acceptStaleForNegativeControl || input.matches(output, now: now, validSince: effectAuditsValidSince)')
+output.append(refresh)
 for constant in ['floatPipelineTargetRMSDBFS', 'loudnessNormalizationTargetLUFS',
                  'floatPipelinePeakCeilingDBFS', 'finalOutputCeilingDBFS',
                  'intersamplePeakReserveDB', 'maxInputBoostDB', 'maxInputCutDB']:
@@ -133,11 +152,15 @@ for name in methods:
     text = text.replace("let shouldDeclick = activePlayerNode.isPlaying && changed", "let shouldDeclick = activePlayerNode.isPlaying && changed && !bypassMuteGateForNegativeControl")
     text = text.replace('        loudnessCompensationEQ.bypass = amount < 0.02', '        record("loudness")\n        loudnessCompensationEQ.bypass = amount < 0.02')
     text = text.replace('        let sourceRMS = signalDiagnostics?', '        record("gain")\n        guard useRealGainPath else { return }\n        let sourceRMS = signalDiagnostics?')
+    text = text.replace('AVAudioTime.seconds(forHostTime: mach_absolute_time())', 'DispatchQueue.main.seconds')
+    text = text.replace('lastGainStagingDate = Date()', 'lastGainStagingDate = Date(timeIntervalSince1970: DispatchQueue.main.seconds)')
     text = text.replace('let now = Date()', 'let now = Date(timeIntervalSince1970: DispatchQueue.main.seconds)')
     text = text.replace('        applyOutputSafetyGain()', '        applyOutputSafetyGain()\n        gainWrites.append((DispatchQueue.main.seconds, inputGainEQ.globalGain, outputSafetyEQ.globalGain, smoothedMeasuredEffectBoostDB))')
     text = text.replace('&& !gainUpdated && hasTrack', '&& (!gainUpdated || duplicateGainForNegativeControl) && hasTrack')
     text = text.replace('if gainNeedsUpdate {', 'if gainNeedsUpdate || recomputeInactiveGainForNegativeControl {')
     text = text.replace('return needsEffectReapplication || effectDeclickRestoreVolume', 'return forceMuteForNegativeControl || needsEffectReapplication || effectDeclickRestoreVolume')
+    text = text.replace('if self.pendingHandoff != nil {', 'if self.pendingHandoff != nil && !self.ignoreHandoffForNegativeControl {')
+    text = text.replace('guard pendingHandoff == nil else { return }', 'guard pendingHandoff == nil || ignoreHandoffForNegativeControl else { return }')
     output.append(text)
 for anchor in ['nonisolated static func analyzeSignalLevels(',
                'nonisolated private static func emptySignalDiagnostics(',

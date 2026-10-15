@@ -147,90 +147,6 @@ private struct BiquadFilter {
     }
 }
 
-private protocol MeterLevelStore: Sendable {
-    var count: Int { get }
-    func snapshot() -> [(peakDBFS: Float, rmsDBFS: Float)]
-    func snapshotIfAvailable() -> [(peakDBFS: Float, rmsDBFS: Float)]?
-    func tryUpdate(index: Int, levels: (peakDBFS: Float, rmsDBFS: Float))
-    func clear()
-}
-
-private final class LegacyMeterLevelStore: MeterLevelStore, @unchecked Sendable {
-    let count: Int
-    private var levels: [(peakDBFS: Float, rmsDBFS: Float)]
-    private var lock = os_unfair_lock_s()
-
-    init(count: Int) {
-        self.count = count
-        self.levels = Array(repeating: (-120, -120), count: count)
-    }
-
-    func snapshot() -> [(peakDBFS: Float, rmsDBFS: Float)] {
-        os_unfair_lock_lock(&lock)
-        let snapshot = levels
-        os_unfair_lock_unlock(&lock)
-        return snapshot
-    }
-
-    func snapshotIfAvailable() -> [(peakDBFS: Float, rmsDBFS: Float)]? {
-        guard os_unfair_lock_trylock(&lock) else { return nil }
-        let snapshot = levels
-        os_unfair_lock_unlock(&lock)
-        return snapshot
-    }
-
-    func tryUpdate(index: Int, levels: (peakDBFS: Float, rmsDBFS: Float)) {
-        guard os_unfair_lock_trylock(&lock) else { return }
-        if index >= 0, index < self.levels.count {
-            self.levels[index] = levels
-        }
-        os_unfair_lock_unlock(&lock)
-    }
-
-    func clear() {
-        os_unfair_lock_lock(&lock)
-        for index in levels.indices {
-            levels[index] = (-120, -120)
-        }
-        os_unfair_lock_unlock(&lock)
-    }
-}
-
-@available(iOS 16.0, *)
-private final class ModernMeterLevelStore: MeterLevelStore, @unchecked Sendable {
-    let count: Int
-    private let lock: OSAllocatedUnfairLock<[(peakDBFS: Float, rmsDBFS: Float)]>
-
-    init(count: Int) {
-        self.count = count
-        self.lock = OSAllocatedUnfairLock(initialState: Array(repeating: (-120, -120), count: count))
-    }
-
-    func snapshot() -> [(peakDBFS: Float, rmsDBFS: Float)] {
-        lock.withLock { $0 }
-    }
-
-    func snapshotIfAvailable() -> [(peakDBFS: Float, rmsDBFS: Float)]? {
-        lock.withLockIfAvailable { $0 }
-    }
-
-    func tryUpdate(index: Int, levels: (peakDBFS: Float, rmsDBFS: Float)) {
-        _ = lock.withLockIfAvailable { storedLevels in
-            if index >= 0, index < storedLevels.count {
-                storedLevels[index] = levels
-            }
-        }
-    }
-
-    func clear() {
-        lock.withLock { storedLevels in
-            for index in storedLevels.indices {
-                storedLevels[index] = (-120, -120)
-            }
-        }
-    }
-}
-
 /// A non-blocking gate shared with audio-tap callbacks. Visual analysis is
 /// useful only while the app is visible; keeping FFT, true-peak estimation,
 /// and every effect meter active in the background wastes the audio render
@@ -377,6 +293,7 @@ struct EffectLevelAudit: Equatable {
     let inputRMSDBFS: Float
     let outputPeakDBFS: Float
     let outputRMSDBFS: Float
+    var renderedAt: TimeInterval = 0
     
     var peakDeltaDB: Float { outputPeakDBFS - inputPeakDBFS }
     var rmsDeltaDB: Float { outputRMSDBFS - inputRMSDBFS }
@@ -616,6 +533,8 @@ final class HiResPlaybackEngine {
     private var spatialPreparationCancellation: AudioPreparationCancellation?
     private var latestRequestedEffectSettings: [RealtimeAudioEffectSetting]?
     private var lastGainStagingDate = Date()
+    private var effectAuditsValidSince: TimeInterval = 0
+    private var lastConsumedAuditTime: TimeInterval?
     private var lastAppliedEffectSettings: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
     private var needsEffectReapplication = true
     private var automaticDSPProfile = AutomaticDSPProfile.neutral
@@ -680,7 +599,7 @@ final class HiResPlaybackEngine {
     var finalOutputLevels: (peakDBFS: Float, rmsDBFS: Float, spectrum: [Float]) {
         ensureEffectLevelMetersInstalled()
         let snapshot = meterLevels.snapshot()
-        let levels = snapshot.last ?? (-120, -120)
+        let levels = snapshot.last ?? .empty
         return (levels.peakDBFS, levels.rmsDBFS, currentSpectrum)
     }
 
@@ -740,6 +659,7 @@ final class HiResPlaybackEngine {
     /// still be diagnosed without paying for FFT and per-stage metering.
     func setRealtimeAnalysisEnabled(_ enabled: Bool) {
         guard realtimeAnalysisGate.setEnabled(enabled) else { return }
+        invalidateEffectLevelAudits()
         if !enabled {
             meterLevels.clear()
             spectrumAnalyzer.reset()
@@ -1407,21 +1327,22 @@ final class HiResPlaybackEngine {
     }
 
     func refreshEffectLevelAudits() -> [EffectLevelAudit] {
-        let snapshot: [(peakDBFS: Float, rmsDBFS: Float)]
-        if let availableSnapshot = meterLevels.snapshotIfAvailable() {
-            snapshot = availableSnapshot
-        } else if !effectLevelAudits.isEmpty {
-            return effectLevelAudits
-        } else {
-            snapshot = Array(repeating: (-120, -120), count: meterLevels.count)
+        // Contention must not make a previous observation authoritative again.
+        guard pendingHandoff == nil,
+              let snapshot = meterLevels.snapshotIfAvailable() else {
+            effectLevelAudits = []
+            return []
         }
-        
+        let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+
         var audits: [EffectLevelAudit] = []
         var previousIndex = 0
         for (index, effect) in effectPipeline.enumerated() {
             let currentIndex = index + 1
             let input = snapshot[previousIndex]
             let output = snapshot[currentIndex]
+            previousIndex = currentIndex
+            guard input.matches(output, now: now, validSince: effectAuditsValidSince) else { continue }
             audits.append(
                 EffectLevelAudit(
                     kind: effect.kind,
@@ -1429,13 +1350,21 @@ final class HiResPlaybackEngine {
                     inputPeakDBFS: input.peakDBFS,
                     inputRMSDBFS: input.rmsDBFS,
                     outputPeakDBFS: output.peakDBFS,
-                    outputRMSDBFS: output.rmsDBFS
+                    outputRMSDBFS: output.rmsDBFS,
+                    renderedAt: input.renderedAt
                 )
             )
-            previousIndex = currentIndex
         }
         effectLevelAudits = audits
         return audits
+    }
+
+    private func invalidateEffectLevelAudits() {
+        effectAuditsValidSince = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+        effectLevelAudits = []
+        smoothedMeasuredEffectBoostDB = 0
+        lastGainStagingDate = Date()
+        lastConsumedAuditTime = nil
     }
 
     func fadeOutOutput(duration: TimeInterval) async {
@@ -1513,6 +1442,9 @@ final class HiResPlaybackEngine {
                 continue
             }
             gainNeedsUpdate = gainNeedsUpdate || effect.isEnabled || setting.isEnabled
+            if effect.isEnabled || setting.isEnabled || needsEffectReapplication {
+                invalidateEffectLevelAudits()
+            }
             effect.apply(setting: setting)
             anyChanged = true
             lastAppliedEffectSettings[effect.kind] = setting
@@ -1547,6 +1479,12 @@ final class HiResPlaybackEngine {
         declickToken &+= 1
         let token = declickToken
         pendingDeclickEffectSettings = effectSettings
+        // Both sources share this effect graph and gain stage. Keep their
+        // sound stable through the scheduled lead and the entire crossfade.
+        if pendingHandoff != nil {
+            scheduleEffectParameterStep(remaining: 8, token: token)
+            return
+        }
         guard requiresProtectedEffectCommit(effectSettings) else {
             scheduleEffectParameterStep(remaining: 8, token: token)
             return
@@ -1569,6 +1507,10 @@ final class HiResPlaybackEngine {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.010) { [weak self] in
             guard let self, self.declickToken == token,
                   let target = self.pendingDeclickEffectSettings else { return }
+            if self.pendingHandoff != nil {
+                self.scheduleEffectParameterStep(remaining: remaining, token: token)
+                return
+            }
             if self.requiresProtectedEffectCommit(target) {
                 self.applyWithDeclick(effectSettings: target)
                 return
@@ -1854,6 +1796,7 @@ final class HiResPlaybackEngine {
     }
 
     private func applyImmediateLoudnessCompensation(for outputVolume: Float) {
+        invalidateEffectLevelAudits()
         let amount = loudnessCompensationAmount(for: outputVolume)
         let warmth = amount * amount
         let routeProfile = loudnessCompensationRouteProfile
@@ -1951,6 +1894,7 @@ final class HiResPlaybackEngine {
             presenceGainDB: previous.presenceGainDB + (target.presenceGainDB - previous.presenceGainDB) * fraction,
             highShelfGainDB: previous.highShelfGainDB + (target.highShelfGainDB - previous.highShelfGainDB) * fraction
         )
+        invalidateEffectLevelAudits()
         automaticDSPEQ.bypass = scaled.shouldBypass
         automaticDSPEQ.bands[0].gain = scaled.lowShelfGainDB
         automaticDSPEQ.bands[1].gain = scaled.lowMidGainDB
@@ -2027,6 +1971,7 @@ final class HiResPlaybackEngine {
     }
 
     private func applyGainStaging(effectSettings: [RealtimeAudioEffectSetting]) {
+        guard pendingHandoff == nil else { return }
         let sourceRMS = signalDiagnostics?.sourceRMSDBFS ?? Self.floatPipelineTargetRMSDBFS
         let sourceLoudness = signalDiagnostics?.sourceIntegratedLoudnessLUFS ?? sourceRMS
         let sourcePeak = signalDiagnostics?.sourcePeakDBFS ?? -12.0
@@ -2128,6 +2073,8 @@ final class HiResPlaybackEngine {
             meterLevels = LegacyMeterLevelStore(count: meterCount)
         }
         
+        // Retired graph callbacks retain their own store, never the new graph's.
+        let installedMeterLevels = meterLevels
         var installedNodeIDs: Set<ObjectIdentifier> = []
         for target in targets {
             let nodeID = ObjectIdentifier(target.node)
@@ -2138,7 +2085,7 @@ final class HiResPlaybackEngine {
                 onBus: 0,
                 bufferSize: spectrumAnalyzer.analysisFrameCount,
                 format: nil
-            ) { [weak self] buffer, _ in
+            ) { [weak self] buffer, time in
                 guard let self else { return }
                 let isFinal = target.index == meterCount - 1
                 if isFinal {
@@ -2149,7 +2096,13 @@ final class HiResPlaybackEngine {
                 }
                 guard self.realtimeAnalysisGate.enabledIfAvailable() else { return }
                 let levels = self.computeLevels(from: buffer, isFinalOutput: isFinal)
-                self.meterLevels.tryUpdate(index: target.index, levels: levels)
+                let renderedAt = time.isHostTimeValid
+                    ? AVAudioTime.seconds(forHostTime: time.hostTime) : -.infinity
+                installedMeterLevels.tryUpdate(index: target.index, levels: EffectMeterObservation(
+                    peakDBFS: levels.peakDBFS, rmsDBFS: levels.rmsDBFS,
+                    renderedAt: renderedAt,
+                    duration: Double(buffer.frameLength) / buffer.format.sampleRate
+                ))
             }
             tappedNodes.append(target.node)
         }
@@ -2164,6 +2117,7 @@ final class HiResPlaybackEngine {
     }
 
     private func clearEffectLevelMeters() {
+        invalidateEffectLevelAudits()
         renderHeartbeat = nil
         for node in tappedNodes {
             node.removeTap(onBus: 0)
@@ -2180,15 +2134,24 @@ final class HiResPlaybackEngine {
         }
 
         let enabledAudits = effectLevelAudits.filter { enabledKinds.contains($0.kind) }
-        guard !enabledAudits.isEmpty else { return nil }
+        guard enabledAudits.count == enabledKinds.count else { return nil }
+        guard let firstTime = enabledAudits.map(\.renderedAt).min(),
+              let lastTime = enabledAudits.map(\.renderedAt).max(),
+              lastTime - firstTime <= EffectMeterObservation.alignmentTolerance else { return nil }
 
         let validAudits = enabledAudits.filter {
-            $0.inputPeakDBFS > -100
+            $0.isEnabled && $0.inputPeakDBFS.isFinite && $0.inputRMSDBFS.isFinite
+                && $0.outputPeakDBFS.isFinite && $0.outputRMSDBFS.isFinite
+                && $0.inputPeakDBFS > -100
                 && $0.inputRMSDBFS > -100
                 && $0.outputPeakDBFS > -100
                 && $0.outputRMSDBFS > -100
         }
-        guard !validAudits.isEmpty else { return nil }
+        guard validAudits.count == enabledKinds.count else { return nil }
+        if let lastConsumedAuditTime, firstTime <= lastConsumedAuditTime {
+            return smoothedMeasuredEffectBoostDB
+        }
+        lastConsumedAuditTime = firstTime
 
         let peakLift = validAudits.reduce(Float(0)) { partial, audit in
             partial + max(0, audit.peakDeltaDB)
@@ -3085,6 +3048,7 @@ final class HiResPlaybackEngine {
     }
 
     private func scheduleBuffer(from time: TimeInterval, autoplay: Bool) {
+        invalidateEffectLevelAudits()
         cancelPendingHandoff()
         guard let sourceBuffer = convertedBuffer, let playbackFormat = convertedFormat else {
             scheduleFastFile(from: time, autoplay: autoplay)
@@ -3140,6 +3104,7 @@ final class HiResPlaybackEngine {
     }
 
     private func scheduleFastFile(from time: TimeInterval, autoplay: Bool) {
+        invalidateEffectLevelAudits()
         guard isFastFilePlayback, let audioFile = currentAudioFile else { return }
 
         cancelPendingHandoff()
@@ -3815,7 +3780,7 @@ final class HiResPlaybackEngine {
         effectSettings: [RealtimeAudioEffectSetting],
         shouldResume: Bool
     ) throws {
-        guard pendingHandoff == nil,
+        guard pendingHandoff == nil, effectDeclickRestoreVolume == nil,
               currentAudioURL == prepared.url,
               let graphFormat = configuredProcessingFormat,
               graphFormat == prepared.targetFormat else {
@@ -3910,6 +3875,7 @@ final class HiResPlaybackEngine {
         _ prepared: PreparedPlaybackData,
         effectSettings: [RealtimeAudioEffectSetting]
     ) {
+        invalidateEffectLevelAudits()
         // Keep the live graph/session intact; reconnecting either would interrupt
         // both streams. This method is called only after a handoff is committed.
         currentAudioFile = prepared.audioFile
@@ -3963,6 +3929,7 @@ final class HiResPlaybackEngine {
     }
 
     private func cancelPendingHandoff() {
+        if pendingHandoff != nil { invalidateEffectLevelAudits() }
         pendingHandoff = nil
         let inactiveNode = isUpgradePlayerNodeActive ? playerNode : upgradePlayerNode
         inactiveNode.stop()

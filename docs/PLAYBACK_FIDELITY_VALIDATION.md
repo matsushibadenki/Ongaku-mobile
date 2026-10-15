@@ -1,3 +1,16 @@
+## Meter delivery and measured gain (2026-10-15)
+
+The combined extension now passes 42 stereo HRTF/precision-sinc handoffs with
+delayed meter replay. It also reproduces and repairs shared effect/gain writes
+during a pending source handoff. See
+[combined waveform validation](METER_HANDOFF_WAVEFORM_VALIDATION.md).
+
+Effect audits now require fresh, aligned PCM timestamps and reject pre-change
+measurements. Duplicate observations no longer advance smoothing, and retired
+tap callbacks retain their original meter stores. See
+[meter delivery validation](METER_DELIVERY_VALIDATION.md) for the test contract
+and the remaining end-to-end/device checks.
+
 ## Spatial / HRTF transitions (2026-10-14)
 
 The active-player reschedule has been replaced with a clock-aligned two-player

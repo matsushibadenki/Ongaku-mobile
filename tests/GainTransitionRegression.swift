@@ -88,7 +88,7 @@ struct GainTransitionRegression {
                             case "inactiveParameters": host.apply(effectSettings: inactiveSettings(0.75))
                             default:
                                 if scenario == "audits" {
-                                    host.effectLevelAudits = AudioEffectModuleRegistry.activeKinds.map {
+                                    host.controlledEffectLevelAudits = AudioEffectModuleRegistry.activeKinds.map {
                                         EffectLevelAudit(kind: $0, isEnabled: true, inputPeakDBFS: -24, inputRMSDBFS: -36,
                                                          outputPeakDBFS: 0, outputRMSDBFS: -12)
                                     }
@@ -116,7 +116,7 @@ struct GainTransitionRegression {
                                 host.applyLoudnessCompensation(for: 0.8)
                             default:
                                 if scenario == "audits" {
-                                    host.effectLevelAudits = AudioEffectModuleRegistry.activeKinds.map {
+                                    host.controlledEffectLevelAudits = AudioEffectModuleRegistry.activeKinds.map {
                                         EffectLevelAudit(kind: $0, isEnabled: true, inputPeakDBFS: -120, inputRMSDBFS: -120,
                                                          outputPeakDBFS: -120, outputRMSDBFS: -120)
                                     }
@@ -162,7 +162,7 @@ struct GainTransitionRegression {
                             host.applyLoudnessCompensation(for: .nan)
                             try Probe.require(host.pendingLoudnessCompensationVolume == nil, "Nonfinite loudness was queued")
                         }
-                        if scenario == "audits" { try Probe.require(host.smoothedMeasuredEffectBoostDB > 0, "Valid audits did not influence gain planning") }
+                        if scenario == "audits" { try Probe.require(host.gainWrites.contains { $0.3 > 0 }, "Valid audits did not influence gain planning") }
                         for ch in 0..<2 {
                             let peak = samples[ch].map { abs($0) }.max()!
                             let settled = samples[ch][Int(outputRate * 0.65)..<Int(outputRate * 0.8)]
