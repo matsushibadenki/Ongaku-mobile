@@ -119,3 +119,77 @@ Artifacts from this run are under `/private/tmp`: `ongaku-render-health-tests.lo
 `ongaku-navigation-preview-{se,pro-max}.log`,
 `ongaku-nav-{se,pro-max}-unified.log`, and
 `ongaku-navigation-{se,pro-max}.png`.
+
+## Effects scroll position (2026-10-15)
+
+The reported symptom is an intermittently black Effects screen after returning
+from Now Playing, with controls reappearing when scrolled toward the top. The
+previous screen retained its offset, used a lazy outer stack containing one
+very tall controls stack, and added 132 pt of bottom padding despite the root
+reserving the custom tab bar through a safe-area inset. These are concrete
+layout risks; the report alone does not prove which caused the intermittent
+blank frame on the affected device.
+
+The bounded Effects content now uses a regular VStack so its actual height is
+available when restoring layout. A ScrollViewReader targets a stable header
+when the tab is presented and the deferred controls are ready. Its cancellable
+task yields before scrolling without animation. Control identity remains
+stable, and telemetry/model publications do not change the task's identity.
+Bottom padding is now 16 pt in addition to the existing vertical padding and
+root safe-area reservation. No audio-engine or effect-setting logic changed.
+
+Validation used an isolated copy of the production views on iOS 26.2 simulators
+for iPhone SE (3rd generation) and iPhone 16 Pro Max. External service startup
+was disabled and mode state was injected without running the audio engine.
+The host drove the root's actual tab state and set/read UIKit scroll offsets;
+these were programmatic interactions, not physical touch tests.
+
+| Scenario | SE | 16 Pro Max |
+| --- | ---: | ---: |
+| Leave during the initial 550 ms preparation, then re-enter | Pass | Pass |
+| Scroll Pro to the bottom | 4,905 pt | 4,640.67 pt |
+| Publish playback time while at the bottom | Offset unchanged | Offset unchanged |
+| Now Playing → Effects after scrolling to the bottom | 10 pt | 10 pt |
+| Scroll down, leave, shrink Pro → OFF, then return | 0 pt | 0 pt |
+| Display Basic after OFF | 0 pt | 0 pt |
+
+Offsets include the adjusted top inset; 10 pt aligns the header after its
+normal top padding. Final Basic screenshots showed the header, mode selector
+and effect controls on both sizes. The iOS app and simulator preview builds
+passed, as did `git diff --check`. The disposable host and screenshots live
+outside the application source and are not shipped.
+
+⭕️ [Pending] On the affected iPhone, repeat tab switches during playback from
+Pro's bottom, OFF and Basic; include rapid switches before first preparation
+finishes and background/foreground return. Confirm controls remain visible,
+normal scrolling does not snap back during playback, and there is no audible
+interruption. The simulator checks do not reproduce the original intermittent
+device-specific blank screen or validate live audio/gesture performance.
+
+## Artwork swipe album entrance (2026-10-15)
+
+The artwork's upward gesture now has a separate callback from the accessibility
+album action. Only that gesture stages the Library NavigationStack off the left
+edge, prepares the existing artist/album path without a forward push, and
+animates the stack to zero horizontal offset in 300 ms. The width comes from
+its actual container. The custom tab bar remains outside that transform.
+Normal library pushes/pops and the accessibility action keep their existing
+navigation. Reduce Motion skips the custom horizontal entrance. Leaving the
+Library tab clears both the pending request and the entrance offset.
+
+Validation:
+
+- The iOS build and `run_navigation_presentation_regression.sh` passed.
+- An isolated production-view host on iOS 26.2, SE (3rd generation) and
+  16 Pro Max, invoked the same root handler used by the swipe. Initial entry,
+  artist back-path restoration, repeated entry, cancellation by another tab,
+  and the standard non-swipe action all passed.
+- Frame inspection of an SE simulator recording confirmed the incoming album
+  content moving from left to right while the bottom tab bar stayed fixed.
+  Final screenshots on both sizes showed the album header and song rows
+  within the screen.
+
+The disposable host used fixed album/song data with external service startup
+and artwork queries disabled. These checks exercised the presentation handler
+and rendered transition, not a physical swipe or live audio playback. Confirm
+gesture feel on the affected iPhone; no audio processing code changed.

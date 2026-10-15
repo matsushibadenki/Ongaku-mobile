@@ -55,6 +55,7 @@ private extension View {
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let player: AudioPlayerViewModel
     @State private var accentColor: Color
     @State private var errorMessage: String?
@@ -65,6 +66,7 @@ struct ContentView: View {
     @State private var libraryPath: [LibraryRoute] = []
     @State private var searchPath: [LibraryRoute] = []
     @State private var pendingAlbumNavigation: SystemAlbum?
+    @State private var isAlbumEnteringFromLeading = false
     @State private var hasPreparedEffectsScreen = false
     @State private var shouldRenderEffectsControls = false
     @State private var effectsControlsRenderID = UUID()
@@ -87,27 +89,33 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             // NOW PLAYING
             NowPlayingView(player: player, onGoToAlbum: { album in
-                pendingAlbumNavigation = album
-                selectedTab = .library
+                openNowPlayingAlbum(album, fromArtworkSwipe: false)
+            }, onSwipeUpToAlbum: { album in
+                openNowPlayingAlbum(album, fromArtworkSwipe: true)
             })
                 .tag(RootTab.nowPlaying)
                 .toolbar(.hidden, for: .tabBar)
             
             // Navigation owners do not observe playback telemetry. Observed
             // content sits inside each stack, below destination registration.
-            NavigationStack(path: $libraryPath) {
-                LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
-                    .toolbar { settingsToolbar(for: .library) }
-                    .navigationDestination(for: LibraryRoute.self) { route in
-                        LibraryDestinationView(route: route, player: player,
-                                               onPlay: { selectedTab = .nowPlaying })
-                    }
+            GeometryReader { geometry in
+                NavigationStack(path: $libraryPath) {
+                    LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                        .toolbar { settingsToolbar(for: .library) }
+                        .navigationDestination(for: LibraryRoute.self) { route in
+                            LibraryDestinationView(route: route, player: player,
+                                                   onPlay: { selectedTab = .nowPlaying })
+                        }
+                }
+                .offset(x: isAlbumEnteringFromLeading ? -geometry.size.width : 0)
             }
+            .clipped()
             .tag(RootTab.library)
             .toolbar(.hidden, for: .tabBar)
 
             NavigationStack {
                 EffectsTabContent(player: player,
+                                  isPresented: selectedTab == .effects,
                                   shouldRenderControls: shouldRenderEffectsControls,
                                   controlsRenderID: effectsControlsRenderID)
                     .toolbar { settingsToolbar(for: .effects) }
@@ -148,6 +156,10 @@ struct ContentView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             PlaybackDebugLogger.event("ui.navigation.tab selected=\(newValue)")
+            if newValue != .library {
+                pendingAlbumNavigation = nil
+                isAlbumEnteringFromLeading = false
+            }
             scheduleEffectsPresentationUpdate()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -186,8 +198,34 @@ struct ContentView: View {
                 path.append(.artist(artist))
             }
             path.append(.album(album))
-            if libraryPath != path { libraryPath = path }
+            if isAlbumEnteringFromLeading {
+                // The artwork gesture moves up the hierarchy. Prepare the
+                // destination without the NavigationStack's forward push,
+                // then reveal the retained Library stack from the left.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    if libraryPath != path { libraryPath = path }
+                }
+                await Task.yield()
+                guard !Task.isCancelled, selectedTab == .library else { return }
+                withAnimation(.easeOut(duration: 0.3)) {
+                    isAlbumEnteringFromLeading = false
+                }
+            } else if libraryPath != path {
+                libraryPath = path
+            }
             pendingAlbumNavigation = nil
+        }
+    }
+
+    private func openNowPlayingAlbum(_ album: SystemAlbum, fromArtworkSwipe: Bool) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isAlbumEnteringFromLeading = fromArtworkSwipe && !reduceMotion
+            pendingAlbumNavigation = album
+            selectedTab = .library
         }
     }
 
@@ -862,6 +900,7 @@ private struct SearchTabContent: View {
 
 private struct EffectsTabContent: View {
     @ObservedObject var player: AudioPlayerViewModel
+    let isPresented: Bool
     let shouldRenderControls: Bool
     let controlsRenderID: UUID
     @State private var isShowingModeHelp = false
@@ -870,155 +909,173 @@ private struct EffectsTabContent: View {
         ZStack {
             Theme.background.ignoresSafeArea()
 
-            ScrollView {
-                LazyVStack(spacing: 32) {
-                    SectionHeader(
-                        title: L10n.tr("effects.realtime_processing"),
-                        subtitle: player.realtimeEffectsStatusText
-                    )
-                    .overlay(alignment: .topTrailing) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(player.accentColor)
-                            .padding(.trailing, 16)
-                            .padding(.top, 4)
-                            .opacity(
-                                player.isEffectProcessing || player.isSpatialProcessing
-                                    ? 1
-                                    : 0
-                            )
-                            .accessibilityLabel(L10n.tr("effects.realtime_processing"))
-                            .accessibilityHidden(
-                                !(player.isEffectProcessing || player.isSpatialProcessing)
-                            )
-                            .animation(
-                                .easeInOut(duration: 0.15),
-                                value: player.isEffectProcessing || player.isSpatialProcessing
-                            )
-                    }
-
-                    if !player.supportsRealtimeEffects {
-                        Text(player.realtimeEffectsAvailabilityDetail)
-                            .font(.appCaption())
-                            .foregroundStyle(Color.orange.opacity(0.9))
-                            .frame(width: Theme.maxContentWidth, alignment: .leading)
-                            .padding(.horizontal, 20)
-                    }
-
-                    if shouldRenderControls {
-                        effectsControlsContent
-                            .id(controlsRenderID)
-                    } else {
-                        VStack(spacing: 14) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // This is a bounded set of controls, including a tall nested
+                    // stack. Measure its actual height instead of restoring an
+                    // offset against LazyVStack's estimates after tab changes.
+                    VStack(spacing: 32) {
+                        SectionHeader(
+                            title: L10n.tr("effects.realtime_processing"),
+                            subtitle: player.realtimeEffectsStatusText
+                        )
+                        .overlay(alignment: .topTrailing) {
                             ProgressView()
+                                .controlSize(.small)
                                 .tint(player.accentColor)
-                                .scaleEffect(0.8)
-                            Text(L10n.tr("effects.preparing"))
-                                .font(.system(size: 13, weight: .light))
-                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.trailing, 16)
+                                .padding(.top, 4)
+                                .opacity(
+                                    player.isEffectProcessing || player.isSpatialProcessing
+                                        ? 1
+                                        : 0
+                                )
+                                .accessibilityLabel(L10n.tr("effects.realtime_processing"))
+                                .accessibilityHidden(
+                                    !(player.isEffectProcessing || player.isSpatialProcessing)
+                                )
+                                .animation(
+                                    .easeInOut(duration: 0.15),
+                                    value: player.isEffectProcessing || player.isSpatialProcessing
+                                )
                         }
-                        .frame(width: Theme.maxContentWidth)
-                        .padding(.vertical, 36)
+                        .id("effects.top")
+
+                        if !player.supportsRealtimeEffects {
+                            Text(player.realtimeEffectsAvailabilityDetail)
+                                .font(.appCaption())
+                                .foregroundStyle(Color.orange.opacity(0.9))
+                                .frame(width: Theme.maxContentWidth, alignment: .leading)
+                                .padding(.horizontal, 20)
+                        }
+
+                        if shouldRenderControls {
+                            effectsControlsContent
+                                .id(controlsRenderID)
+                        } else {
+                            VStack(spacing: 14) {
+                                ProgressView()
+                                    .tint(player.accentColor)
+                                    .scaleEffect(0.8)
+                                Text(L10n.tr("effects.preparing"))
+                                    .font(.system(size: 13, weight: .light))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            .frame(width: Theme.maxContentWidth)
+                            .padding(.vertical, 36)
+                            .background(Theme.secondaryBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+                        }
+
+                        if !player.isLoading {
+                            Text(player.localPlaybackFormatDescription)
+                                .font(.appCaption())
+                                .foregroundStyle(Theme.textSecondary.opacity(0.4))
+                                .padding(.top, 10)
+                                .frame(width: Theme.maxContentWidth)
+                                .lineLimit(1)
+                        }
+
+                        Text(player.signalDiagnosticsSummary)
+                            .font(.appCaption())
+                            .foregroundStyle(Theme.textSecondary.opacity(0.55))
+                            .frame(width: Theme.maxContentWidth)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+
+                        Text(player.audioRenderHealthSummary)
+                            .font(.appCaption())
+                            .foregroundStyle(
+                                player.audioRenderHealth.isStalled
+                                    ? Color.red
+                                    : Theme.textSecondary.opacity(0.55)
+                            )
+                            .frame(width: Theme.maxContentWidth)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(L10n.tr("effects.auto_dsp.title"))
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Spacer()
+                                Text(player.selectedEffectPageTab == .off ? L10n.tr("effects.tab.off") : "\(Int(player.automaticDSPStrength * 100))%")
+                                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+
+                            Slider(
+                                value: Binding(
+                                    get: { player.automaticDSPStrength },
+                                    set: { player.setAutomaticDSPStrength($0) }
+                                ),
+                                in: 0...1.5
+                            )
+                            .tint(player.accentColor)
+                            .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
+
+                            Picker("DSP", selection: Binding(
+                                get: { player.automaticDSPVoicing },
+                                set: { player.setAutomaticDSPVoicing($0) }
+                            )) {
+                                Text("Natural").tag(AutomaticDSPVoicing.natural)
+                                Text("Reference").tag(AutomaticDSPVoicing.reference)
+                                Text("Immersive").tag(AutomaticDSPVoicing.immersive)
+                                Text("Safe").tag(AutomaticDSPVoicing.safe)
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
+
+                            Button {
+                                player.toggleABReferenceMode()
+                            } label: {
+                                Label(
+                                    player.isABReferenceMode ? "Reference" : "A/B Compare",
+                                    systemImage: player.isABReferenceMode ? "waveform" : "arrow.left.arrow.right"
+                                )
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(player.isABReferenceMode ? player.accentColor : Theme.textSecondary)
+                            .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
+
+                            Text(player.automaticDSPSummary)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .foregroundStyle(Theme.textSecondary.opacity(0.58))
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .padding(12)
+                        .frame(width: Theme.maxContentWidth, alignment: .leading)
                         .background(Theme.secondaryBackground)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                    }
 
-                    if !player.isLoading {
-                        Text(player.localPlaybackFormatDescription)
-                            .font(.appCaption())
-                            .foregroundStyle(Theme.textSecondary.opacity(0.4))
-                            .padding(.top, 10)
-                            .frame(width: Theme.maxContentWidth)
-                            .lineLimit(1)
-                    }
-
-                    Text(player.signalDiagnosticsSummary)
-                        .font(.appCaption())
-                        .foregroundStyle(Theme.textSecondary.opacity(0.55))
-                        .frame(width: Theme.maxContentWidth)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-
-                    Text(player.audioRenderHealthSummary)
-                        .font(.appCaption())
-                        .foregroundStyle(
-                            player.audioRenderHealth.isStalled
-                                ? Color.red
-                                : Theme.textSecondary.opacity(0.55)
-                        )
-                        .frame(width: Theme.maxContentWidth)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(L10n.tr("effects.auto_dsp.title"))
-                                .font(.system(size: 12, weight: .regular))
-                                .foregroundStyle(Theme.textPrimary)
-                            Spacer()
-                            Text(player.selectedEffectPageTab == .off ? L10n.tr("effects.tab.off") : "\(Int(player.automaticDSPStrength * 100))%")
-                                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-
-                        Slider(
-                            value: Binding(
-                                get: { player.automaticDSPStrength },
-                                set: { player.setAutomaticDSPStrength($0) }
-                            ),
-                            in: 0...1.5
-                        )
-                        .tint(player.accentColor)
-                        .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
-
-                        Picker("DSP", selection: Binding(
-                            get: { player.automaticDSPVoicing },
-                            set: { player.setAutomaticDSPVoicing($0) }
-                        )) {
-                            Text("Natural").tag(AutomaticDSPVoicing.natural)
-                            Text("Reference").tag(AutomaticDSPVoicing.reference)
-                            Text("Immersive").tag(AutomaticDSPVoicing.immersive)
-                            Text("Safe").tag(AutomaticDSPVoicing.safe)
-                        }
-                        .pickerStyle(.segmented)
-                        .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
-
-                        Button {
-                            player.toggleABReferenceMode()
-                        } label: {
-                            Label(
-                                player.isABReferenceMode ? "Reference" : "A/B Compare",
-                                systemImage: player.isABReferenceMode ? "waveform" : "arrow.left.arrow.right"
-                            )
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(player.isABReferenceMode ? player.accentColor : Theme.textSecondary)
-                        .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
-
-                        Text(player.automaticDSPSummary)
+                        Text(player.effectAuditSummaryText)
                             .font(.system(size: 11, weight: .regular, design: .monospaced))
                             .foregroundStyle(Theme.textSecondary.opacity(0.58))
+                            .frame(width: Theme.maxContentWidth, alignment: .leading)
                             .lineLimit(nil)
                             .multilineTextAlignment(.leading)
                     }
-                    .padding(12)
-                    .frame(width: Theme.maxContentWidth, alignment: .leading)
-                    .background(Theme.secondaryBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-
-                    Text(player.effectAuditSummaryText)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary.opacity(0.58))
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
-                        .lineLimit(nil)
-                        .multilineTextAlignment(.leading)
+                    .padding(.horizontal, Theme.horizontalPadding)
+                    .padding(.vertical, 10)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, Theme.horizontalPadding)
-                .padding(.vertical, 10)
-                .padding(.bottom, 132)
-                .frame(maxWidth: .infinity)
+                .task(id: isPresented && shouldRenderControls) {
+                    guard isPresented, shouldRenderControls else { return }
+                    // Run after the retained tab (or initial deferred controls)
+                    // mounts. Never recreate controls or reset on meter updates.
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo("effects.top", anchor: .top)
+                    }
+                }
             }
         }
         .navigationTitle(L10n.tr("effects.title"))
@@ -2047,7 +2104,7 @@ private struct EffectsTabContent_Previews: PreviewProvider {
 
     private static var preview: some View {
         NavigationStack {
-            EffectsTabContent(player: AudioPlayerViewModel(), shouldRenderControls: true, controlsRenderID: UUID())
+            EffectsTabContent(player: AudioPlayerViewModel(), isPresented: true, shouldRenderControls: true, controlsRenderID: UUID())
         }
         .preferredColorScheme(.dark)
     }

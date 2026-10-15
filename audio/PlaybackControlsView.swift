@@ -18,7 +18,7 @@ struct PlaybackControlsView: View {
             ControlFlatButton(
                 iconName: "backward.fill",
                 size: Theme.controlButtonSize,
-                isDisabled: !player.canGoToPreviousTrack
+                isDisabled: player.isLoading || !player.canGoToPreviousTrack
             ) {
                 player.playPreviousTrack()
             }
@@ -29,7 +29,7 @@ struct PlaybackControlsView: View {
             ControlFlatButton(
                 iconName: "gobackward.15",
                 size: Theme.controlButtonSize,
-                isDisabled: !player.hasTrack
+                isDisabled: player.isLoading || !player.hasTrack
             ) {
                 player.skip(by: -15)
             }
@@ -53,7 +53,7 @@ struct PlaybackControlsView: View {
             ControlFlatButton(
                 iconName: "goforward.15",
                 size: Theme.controlButtonSize,
-                isDisabled: !player.hasTrack
+                isDisabled: player.isLoading || !player.hasTrack
             ) {
                 player.skip(by: 15)
             }
@@ -64,7 +64,7 @@ struct PlaybackControlsView: View {
             ControlFlatButton(
                 iconName: "forward.fill",
                 size: Theme.controlButtonSize,
-                isDisabled: !player.canGoToNextTrack
+                isDisabled: player.isLoading || !player.canGoToNextTrack
             ) {
                 player.playNextTrack()
             }

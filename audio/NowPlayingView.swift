@@ -14,6 +14,7 @@ enum ArtworkMode: Int, CaseIterable {
 struct NowPlayingView: View {
     @ObservedObject var player: AudioPlayerViewModel
     var onGoToAlbum: (SystemAlbum) -> Void
+    var onSwipeUpToAlbum: (SystemAlbum) -> Void
     
     @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.5, dampingFraction: 0.7)))
     private var dragTranslation: CGSize = .zero
@@ -109,10 +110,11 @@ struct NowPlayingView: View {
                                     // Read this gesture's final direction. A drag cancelled
                                     // by an app switch must not lock the next gesture's axis.
                                     if abs(h) > abs(v) {
+                                        guard !player.isLoading else { return }
                                         if h > 40 { player.playNextTrack() }
                                         else if h < -40 { player.playPreviousTrack() }
                                     } else if v < -60, let album = player.nowPlayingAlbum {
-                                        onGoToAlbum(album)
+                                        onSwipeUpToAlbum(album)
                                     } else if v > 60, canUseVisualizationModes {
                                         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                                             let nextRaw = (artworkMode.rawValue + 1) % ArtworkMode.allCases.count
@@ -173,7 +175,8 @@ struct NowPlayingView: View {
                                 ),
                                 accentColor: player.accentColor
                             )
-                            .disabled(!player.hasTrack)
+                            .disabled(player.isLoading || !player.hasTrack)
+                            .opacity(player.isLoading ? 0.35 : 1)
                             .frame(width: Theme.maxContentWidth, height: 12)
 
                             HStack {
@@ -235,7 +238,7 @@ private struct PlaybackModeButtonsView: View {
                 ModeIconButton(
                     iconName: "repeat.1",
                     isActive: player.isSingleTrackRepeatEnabled,
-                    isDisabled: !player.hasTrack,
+                    isDisabled: player.isLoading || !player.hasTrack,
                     accentColor: player.accentColor
                 ) {
                     player.toggleSingleTrackRepeat()
@@ -244,7 +247,7 @@ private struct PlaybackModeButtonsView: View {
                 ModeIconButton(
                     iconName: "repeat",
                     isActive: player.isAlbumRepeatEnabled,
-                    isDisabled: !player.canUseAlbumScopedPlaybackModes,
+                    isDisabled: player.isLoading || !player.canUseAlbumScopedPlaybackModes,
                     accentColor: player.accentColor
                 ) {
                     player.toggleAlbumRepeat()
@@ -253,7 +256,7 @@ private struct PlaybackModeButtonsView: View {
                 ModeIconButton(
                     iconName: "shuffle",
                     isActive: player.isAlbumShuffleEnabled,
-                    isDisabled: !player.canUseAlbumScopedPlaybackModes,
+                    isDisabled: player.isLoading || !player.canUseAlbumScopedPlaybackModes,
                     accentColor: player.accentColor
                 ) {
                     player.toggleAlbumShuffle()
@@ -262,14 +265,14 @@ private struct PlaybackModeButtonsView: View {
                 ModeIconButton(
                     iconName: "shuffle",
                     isActive: player.isLibraryShuffleEnabled,
-                    isDisabled: !player.canUseLibraryShuffle,
+                    isDisabled: player.isLoading || !player.canUseLibraryShuffle,
                     accentColor: player.accentColor
                 ) {
                     player.toggleLibraryShuffle()
                 }
                 ModeIconButton(
                     iconName: "text.quote", isActive: false,
-                    isDisabled: player.lyricsPlaybackSong == nil, accentColor: player.accentColor,
+                    isDisabled: player.isLoading || player.lyricsPlaybackSong == nil, accentColor: player.accentColor,
                     action: onLyrics
                 )
                 .accessibilityLabel(L10n.tr("lyrics.title"))

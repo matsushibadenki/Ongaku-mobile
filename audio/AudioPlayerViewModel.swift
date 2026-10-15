@@ -250,7 +250,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var effectApplyTimer: Timer?
     private var reinforceTaskID = 0
     private var upsamplingReloadTask: Task<Void, Never>?
-    private var localPlaybackLoadTask: Task<Void, Never>?
+    @Published private var isPreparingLocalPlayback = false
+    private var localPlaybackLoadTask: Task<Void, Never>? {
+        didSet {
+            // Paused startup restoration also prepares PCM/format/DSP, but
+            // does not set the autoplay flags. Publish readiness with the
+            // task lifetime so the spinner and controls change together.
+            isPreparingLocalPlayback = localPlaybackLoadTask != nil
+        }
+    }
     private var cacheMaintenanceTask: Task<Void, Never>?
     private var precisionUpgradeTask: Task<Void, Never>?
     private var precisionUpgradeSkippedSongID: UInt64?
@@ -321,7 +329,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     var isLoading: Bool {
-        isProcessing || isPlaybackStarting || isChangingUpsamplingMode || isEffectProcessing || isSpatialProcessing
+        isProcessing || isPlaybackStarting || isPreparingLocalPlayback
+            || isChangingUpsamplingMode || isEffectProcessing || isSpatialProcessing
             || (isInitialLibraryLoading && !hasTrack)
     }
 
@@ -465,7 +474,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             count += 1
         }
         // ローカル再生時は常にアップサンプリングが適用されているため+1
-        if playbackSource == .local && hiResPlaybackEngine.hasTrack {
+        if playbackSource == .local && hasInitializedHiResPlaybackEngine && hiResPlaybackEngine.hasTrack {
             count += 1
         }
         return count
@@ -474,7 +483,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     /// 再生信号経路のサマリーテキスト
     /// 例: "192kHz / 24bit ・ DSP: 3"
     var playbackSignalSummary: String? {
-        guard playbackSource == .local && hiResPlaybackEngine.hasTrack else { return nil }
+        guard !isPreparingLocalPlayback, playbackSource == .local,
+              hasInitializedHiResPlaybackEngine, hiResPlaybackEngine.hasTrack else { return nil }
         
         // フォーマット情報 (例: "192kHz / 24bit")
         let format = hiResPlaybackEngine.currentFormat?.description ?? ""
@@ -4661,6 +4671,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled,
+                      self.playbackPreparationToken == preparationToken,
+                      self.selectedSystemSongID == song.id,
+                      self.playbackSource == .local else { return }
                 self.errorMessage = L10n.tr("error.playback_prepare_failed", error.localizedDescription)
                 self.isPlaying = false
                 self.isProcessing = false
