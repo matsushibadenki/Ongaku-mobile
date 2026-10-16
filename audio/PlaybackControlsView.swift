@@ -131,7 +131,7 @@ private struct PrimaryControlFlatButton: View {
         Button(action: action) {
             ZStack {
                 if Theme.isRealistic {
-                    HardwareDial(accent: accentColor, active: !isDisabled, isPressed: isPressed,
+                    HardwareDial(accent: accentColor, active: true, isPressed: isPressed,
                                  isBreathing: isPlaying && !isProcessing && !isDisabled,
                                  outerInset: 2)
                         .frame(width: size, height: size)

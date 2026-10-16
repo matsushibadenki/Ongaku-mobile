@@ -413,3 +413,22 @@
 "playback.control.pause" = "暂停";
 
 "library.various_artists" = "群星";
+
+"lyrics.timing.title" = "歌词时间调整";
+"lyrics.timing.earlier" = "歌词提前0.1秒";
+"lyrics.timing.later" = "歌词延后0.1秒";
+"lyrics.timing.reset" = "重置时间调整";
+"lyrics.timing.value" = "时间偏移：%+.1f秒";
+"lyrics.timing.info" = "正值延后歌词，负值提前歌词。仅对此歌曲保存，不修改原始歌词和音频。";
+"error.remote_range.content" = "服务器返回了不同范围的数据，请稍后重试。";
+"error.remote_range.changed" = "远程音频已更改或验证失败，请刷新资料库后重试。";
+"error.remote_audio_busy" = "缓存正在使用中，请停止播放或等待传输完成后重试。";
+
+"effects.availability.preparing" = "正在准备可应用音效的音频，播放会继续。";
+
+"playback.shuffle.album" = "随机播放当前专辑";
+"playback.shuffle.library" = "随机播放整个资料库";
+
+"effects.availability.source_unavailable" = "App 无法获取此音频。请在“音乐”中下载后重试。";
+"effects.availability.preparation_failed" = "无法准备可应用音效的音频，播放会继续。";
+"effects.preparation.retry" = "重试音频准备";

@@ -2,6 +2,11 @@ import Foundation
 
 /// UI state is an observation, never a request to stop a recovering player.
 nonisolated enum PlaybackTransportPolicy {
+    /// Expensive quality/effect work never blocks a ready native transport.
+    static func controlsBlocked(nativeReady: Bool, preparing: Bool, initialLibraryLoading: Bool) -> Bool {
+        !nativeReady && (preparing || initialLibraryLoading)
+    }
+
     enum InterruptionEvent {
         case began
         case ended
@@ -101,4 +106,19 @@ nonisolated struct PlaybackErrorPresentationRequest: Hashable {
     func shouldPresent(currentMessage: String?, isActive: Bool, cancelled: Bool) -> Bool {
         self.isActive && isActive && !cancelled && message != nil && message == currentMessage
     }
+}
+
+/// One preparation attempt per observed track/selection generation. Repeated
+/// Music notifications must not restart failed exports; explicit retry and
+/// cancelled work reset the gate, while automatic queue advancement gets a new key.
+nonisolated struct SystemAssetRecoveryGate {
+    private var attempt: (songID: UInt64, generation: UInt64)?
+
+    mutating func begin(songID: UInt64, generation: UInt64) -> Bool {
+        if let attempt, attempt.songID == songID, attempt.generation == generation { return false }
+        attempt = (songID, generation)
+        return true
+    }
+
+    mutating func reset() { attempt = nil }
 }

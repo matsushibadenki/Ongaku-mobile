@@ -43,6 +43,7 @@ nonisolated enum GoogleDriveAudioError: LocalizedError {
 /// so OAuth credentials and refresh policy remain outside the media layer.
 nonisolated struct GoogleDriveAudioClient: Sendable {
     let tokenProvider: any GoogleOAuthAccessTokenProvider
+    var http: RemoteAudioHTTP = RemoteAudioHTTP()
 
     func listAudioFiles(pageToken: String? = nil) async throws -> GoogleDriveAudioPage {
         var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
@@ -68,7 +69,16 @@ nonisolated struct GoogleDriveAudioClient: Sendable {
     }
 
     func byteSource(for file: GoogleDriveAudioFile) -> GoogleDriveAudioByteSource {
-        GoogleDriveAudioByteSource(file: file, tokenProvider: tokenProvider)
+        GoogleDriveAudioByteSource(file: file, tokenProvider: tokenProvider, http: http)
+    }
+
+    func audioFile(id: String) async throws -> GoogleDriveAudioFile {
+        var components = URLComponents(string: "https://www.googleapis.com")!
+        components.path = "/drive/v3/files/\(id)"
+        components.queryItems = [.init(name: "fields", value: "id,name,mimeType,size,modifiedTime,md5Checksum")]
+        let data = try await authorizedData(for: URLRequest(url: components.url!))
+        guard let file = try JSONDecoder.googleDrive.decode(DriveFile.self, from: data).audioFile else { throw GoogleDriveAudioError.malformedFile }
+        return file
     }
 
     private func authorizedData(for baseRequest: URLRequest) async throws -> Data {
@@ -77,13 +87,10 @@ nonisolated struct GoogleDriveAudioClient: Sendable {
             let token = try await tokenProvider.accessToken(forceRefresh: forceRefresh)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.timeoutInterval = 30
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw GoogleDriveAudioError.invalidResponse
-            }
-            if http.statusCode == 401, !forceRefresh { continue }
-            guard (200..<300).contains(http.statusCode) else {
-                throw GoogleDriveAudioError.requestFailed(http.statusCode)
+            let (data, response) = try await http.data(for: request, maximumBytes: 8_000_000)
+            if response.statusCode == 401, !forceRefresh { continue }
+            guard (200..<300).contains(response.statusCode) else {
+                throw GoogleDriveAudioError.requestFailed(response.statusCode)
             }
             return data
         }
@@ -94,6 +101,7 @@ nonisolated struct GoogleDriveAudioClient: Sendable {
 nonisolated struct GoogleDriveAudioByteSource: RemoteAudioByteSource {
     let file: GoogleDriveAudioFile
     let tokenProvider: any GoogleOAuthAccessTokenProvider
+    var http: RemoteAudioHTTP = RemoteAudioHTTP()
 
     func descriptor() async throws -> RemoteAudioResourceDescriptor {
         guard file.size > 0 else { throw GoogleDriveAudioError.malformedFile }
@@ -101,8 +109,16 @@ nonisolated struct GoogleDriveAudioByteSource: RemoteAudioByteSource {
             stableID: "google-drive:\(file.id)",
             fileName: file.name,
             contentLength: file.size,
-            revision: file.revision
+            revision: file.revision,
+            checksumMD5: file.md5Checksum
         )
+    }
+
+    func validate(resource: RemoteAudioResourceDescriptor) async throws {
+        let current = try await GoogleDriveAudioClient(tokenProvider: tokenProvider, http: http).audioFile(id: file.id)
+        guard current.revision == resource.revision, current.size == resource.contentLength else {
+            throw RemoteAudioByteSourceError.resourceChanged
+        }
     }
 
     func read(bytes range: Range<Int64>) async throws -> Data {
@@ -124,13 +140,13 @@ nonisolated struct GoogleDriveAudioByteSource: RemoteAudioByteSource {
             )
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.timeoutInterval = 30
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw GoogleDriveAudioError.invalidResponse
+            request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+            let (data, response) = try await http.data(for: request, maximumBytes: Int(range.count)) {
+                try RemoteAudioHTTP.validateRange($0, range: range, length: file.size)
             }
-            if http.statusCode == 401, !forceRefresh { continue }
-            guard http.statusCode == 206 else {
-                throw GoogleDriveAudioError.requestFailed(http.statusCode)
+            if response.statusCode == 401, !forceRefresh { continue }
+            guard response.statusCode == 206 else {
+                throw GoogleDriveAudioError.requestFailed(response.statusCode)
             }
             let expected = Int(range.count)
             guard data.count == expected else {
@@ -176,7 +192,15 @@ nonisolated private struct DriveFile: Decodable {
 private extension JSONDecoder {
     nonisolated static var googleDrive: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: text) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: text) { return date }
+            throw DecodingError.dataCorruptedError(in: try decoder.singleValueContainer(), debugDescription: "Invalid Drive timestamp")
+        }
         return decoder
     }
 }

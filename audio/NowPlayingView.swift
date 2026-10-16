@@ -256,21 +256,27 @@ struct PlaybackModeButtonsView: View {
 
                 ModeIconButton(
                     iconName: "shuffle",
+                    scopeIconName: "opticaldisc",
                     isActive: player.isAlbumShuffleEnabled,
                     isDisabled: player.isLoading || !player.canUseAlbumScopedPlaybackModes,
                     accentColor: player.accentColor
                 ) {
                     player.toggleAlbumShuffle()
                 }
+                .accessibilityLabel(L10n.tr("playback.shuffle.album"))
+                .help(L10n.tr("playback.shuffle.album"))
 
                 ModeIconButton(
                     iconName: "shuffle",
+                    scopeIconName: "square.stack",
                     isActive: player.isLibraryShuffleEnabled,
                     isDisabled: player.isLoading || !player.canUseLibraryShuffle,
                     accentColor: player.accentColor
                 ) {
                     player.toggleLibraryShuffle()
                 }
+                .accessibilityLabel(L10n.tr("playback.shuffle.library"))
+                .help(L10n.tr("playback.shuffle.library"))
                 ModeIconButton(
                     iconName: "text.quote", isActive: false,
                     isDisabled: player.isLoading || player.lyricsPlaybackSong == nil, accentColor: player.accentColor,
@@ -286,6 +292,7 @@ struct PlaybackModeButtonsView: View {
 
 private struct ModeIconButton: View {
     let iconName: String
+    var scopeIconName: String? = nil
     let isActive: Bool
     let isDisabled: Bool
     let accentColor: Color
@@ -293,8 +300,15 @@ private struct ModeIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: iconName)
-                .font(.system(size: 11, weight: .medium))
+            HStack(spacing: 2) {
+                if let scopeIconName {
+                    Image(systemName: scopeIconName)
+                        .font(.system(size: 10, weight: .medium))
+                        .frame(width: 10)
+                }
+                Image(systemName: iconName)
+                    .font(.system(size: scopeIconName == nil ? 11 : 9, weight: .medium))
+            }
                 .foregroundStyle(
                     isDisabled
                         ? Theme.textSecondary.opacity(0.5)
@@ -308,6 +322,7 @@ private struct ModeIconButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 

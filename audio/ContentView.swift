@@ -146,6 +146,12 @@ struct ContentView: View {
                     .tag(RootTab.search)
                     .toolbar(.hidden, for: .tabBar)
                 }
+                // The custom menu owns tab navigation. Hide the native bar on
+                // its container from the first layout, before a selected page
+                // publishes its own toolbar preference (which can flash a
+                // glass capsule above the transport during a cold launch).
+                .toolbar(.hidden, for: .tabBar)
+                .toolbarBackground(.hidden, for: .tabBar)
                 // Give TabView the actual remaining height; a bottom safe-area inset
                 // can overlay its child GeometryReader instead of reducing its size.
                 VStack(spacing: 16) {
@@ -211,9 +217,6 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             scheduleEffectsPresentationUpdate()
-        }
-        .onReceive(player.$upsamplingMode.removeDuplicates()) { mode in
-            accentColor = mode.isPrecisionSinc ? Theme.precisionSincAccent : Theme.accent
         }
         .onReceive(player.$errorMessage.removeDuplicates()) { message in
             errorMessage = message
@@ -995,11 +998,23 @@ private struct EffectsTabContent: View {
                         .id("effects.top")
 
                         if !player.supportsRealtimeEffects {
-                            Text(player.realtimeEffectsAvailabilityDetail)
-                                .font(.appCaption())
-                                .foregroundStyle(Color.orange.opacity(0.9))
-                                .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
-                                .padding(.horizontal, 20)
+                            HStack(spacing: 8) {
+                                Text(player.realtimeEffectsAvailabilityDetail)
+                                    .font(.appCaption())
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if player.canRetrySystemAssetRecovery {
+                                    Button(action: player.retrySystemAssetRecovery) {
+                                        Image(systemName: "arrow.clockwise")
+                                            .frame(width: 44, height: 44)
+                                    }
+                                    .tint(player.accentColor)
+                                    .accessibilityLabel(L10n.tr("effects.preparation.retry"))
+                                    .help(L10n.tr("effects.preparation.retry"))
+                                }
+                            }
+                            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
+                            .padding(.horizontal, 20)
                         }
 
                         if shouldRenderControls {

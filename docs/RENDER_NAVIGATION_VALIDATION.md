@@ -233,3 +233,14 @@ boundary solely to make the pending state observable.
 ⭕️ [Pending] Confirm real-device startup restoration, slow remote files and
 protected Music playback, including physical button/seek gestures. Simulator
 screenshots and state checks do not establish live remote-service behavior.
+
+
+## Cold-launch native tab-bar suppression — 2026-10-16
+
+The reported brief capsule between the progress area and transport is consistent with the native TabView bar: the custom transport is immediately below TabView, whose pages previously supplied all tab-bar visibility preferences. Declare both native tab-bar and tab-bar-background visibility on TabView itself so they are hidden before a page's preference is resolved. Retain page-level hiding for later navigation.
+
+- 🟢 [Done] Debug simulator build succeeded.
+- 🟢 [Done] An isolated host using production ContentView and disabled external-service/bootstrap work sampled the first 120 display-link frames after first install/launch on iOS 26.2, iPhone SE (3rd generation) and iPhone 16 Pro Max. The UITabBar existed in all 120 samples per device, but was hidden with alpha 0 in every sample (0 visible frames). Final screenshots also show no extra capsule between progress and transport.
+- ⭕️ [Pending] Confirm the original brief flash is absent on the affected physical device. The host verifies the corrected container's initial visibility, not the original device's library/bootstrap timing or frames preceding the first display-link callback.
+
+Disposable host: `/private/tmp/OngakuStartupAudit`; screenshots: `/private/tmp/OngakuStartupSE.png`, `/private/tmp/OngakuStartupProMax.png`.

@@ -1,10 +1,12 @@
 import Foundation
+import CryptoKit
 
 nonisolated struct RemoteAudioResourceDescriptor: Sendable {
     let stableID: String
     let fileName: String
     let contentLength: Int64
     let revision: String
+    var checksumMD5: String? = nil
 }
 
 /// Provider adapters expose random byte reads without leaking OAuth, HTTP, or
@@ -12,15 +14,27 @@ nonisolated struct RemoteAudioResourceDescriptor: Sendable {
 nonisolated protocol RemoteAudioByteSource: Sendable {
     func descriptor() async throws -> RemoteAudioResourceDescriptor
     func read(bytes range: Range<Int64>) async throws -> Data
+    func validate(resource: RemoteAudioResourceDescriptor) async throws
+}
+
+extension RemoteAudioByteSource {
+    func validate(resource: RemoteAudioResourceDescriptor) async throws {
+        let current = try await descriptor()
+        guard current.stableID == resource.stableID, current.revision == resource.revision,
+              current.contentLength == resource.contentLength else { throw RemoteAudioByteSourceError.resourceChanged }
+    }
 }
 
 nonisolated enum RemoteAudioByteSourceError: LocalizedError {
     case invalidRange
     case invalidResponse(Int)
     case incompleteRange(expected: Int, actual: Int)
+    case invalidContentRange, resourceChanged
 
     var errorDescription: String? {
         switch self {
+        case .invalidContentRange: return L10n.tr("error.remote_range.content")
+        case .resourceChanged: return L10n.tr("error.remote_range.changed")
         case .invalidRange:
             return L10n.tr("error.remote_range.invalid")
         case .invalidResponse(let statusCode):
@@ -37,6 +51,7 @@ nonisolated struct HTTPRangeAudioByteSource: RemoteAudioByteSource {
     let resource: RemoteAudioResourceDescriptor
     let contentURL: URL
     let requestHeaders: [String: String]
+    var http: RemoteAudioHTTP = RemoteAudioHTTP()
 
     func descriptor() async throws -> RemoteAudioResourceDescriptor {
         resource
@@ -57,16 +72,15 @@ nonisolated struct HTTPRangeAudioByteSource: RemoteAudioByteSource {
         for (field, value) in requestHeaders {
             request.setValue(value, forHTTPHeaderField: field)
         }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw RemoteAudioByteSourceError.invalidResponse(-1)
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        let (data, response) = try await http.data(for: request, maximumBytes: Int(range.count)) {
+            try RemoteAudioHTTP.validateRange($0, range: range, length: resource.contentLength)
         }
         let permitsWholeResponse = range.lowerBound == 0
             && Int64(data.count) == resource.contentLength
-            && http.statusCode == 200
-        guard http.statusCode == 206 || permitsWholeResponse else {
-            throw RemoteAudioByteSourceError.invalidResponse(http.statusCode)
+            && range.upperBound == resource.contentLength && response.statusCode == 200
+        guard response.statusCode == 206 || permitsWholeResponse else {
+            throw RemoteAudioByteSourceError.invalidResponse(response.statusCode)
         }
         let expected = Int(range.count)
         guard data.count == expected || permitsWholeResponse else {
@@ -88,15 +102,26 @@ actor RemoteRangeDownloadCoordinator {
     private let chunkSize: Int64 = 4 * 1_024 * 1_024
     // Actor methods re-enter at network awaits. Keep staging-file writers serial.
     private var isMaterializing = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var waiting: [(UUID, CheckedContinuation<Void, Error>)] = []
 
-    private func acquireWriter() async {
+    private func acquireWriter() async throws {
+        try Task.checkCancellation()
         if !isMaterializing { isMaterializing = true; return }
-        await withCheckedContinuation { waiting.append($0) }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { waiting.append((id, continuation)) }
+            }
+        } onCancel: { Task { await self.cancelWaiter(id) } }
+    }
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.0 == id }) else { return }
+        waiting.remove(at: index).1.resume(throwing: CancellationError())
     }
 
     private func releaseWriter() {
-        if waiting.isEmpty { isMaterializing = false } else { waiting.removeFirst().resume() }
+        if waiting.isEmpty { isMaterializing = false } else { waiting.removeFirst().1.resume() }
     }
 
     func materialize(
@@ -104,7 +129,7 @@ actor RemoteRangeDownloadCoordinator {
         directory: URL,
         resource: RemoteAudioResourceDescriptor? = nil
     ) async throws -> URL {
-        await acquireWriter()
+        try await acquireWriter()
         defer { releaseWriter() }
         try Task.checkCancellation()
         let descriptor: RemoteAudioResourceDescriptor
@@ -148,6 +173,7 @@ actor RemoteRangeDownloadCoordinator {
         defer { try? output.close() }
         try output.truncate(atOffset: UInt64(completed))
         try output.seek(toOffset: UInt64(completed))
+        try await source.validate(resource: descriptor)
 
         while completed < descriptor.contentLength {
             try Task.checkCancellation()
@@ -172,6 +198,23 @@ actor RemoteRangeDownloadCoordinator {
         try output.close()
         try Task.checkCancellation()
         try RemoteAudioReadiness.validate(url: partial, expectedBytes: descriptor.contentLength, allowStagingFile: true)
+        do {
+            try await source.validate(resource: descriptor)
+            if let expected = descriptor.checksumMD5 {
+                let input = try FileHandle(forReadingFrom: partial)
+                defer { try? input.close() }
+                var hash = Insecure.MD5()
+                while let bytes = try input.read(upToCount: 1024 * 1024), !bytes.isEmpty {
+                    try Task.checkCancellation(); hash.update(data: bytes)
+                }
+                let actual = hash.finalize().map { String(format: "%02x", $0) }.joined()
+                guard actual.caseInsensitiveCompare(expected) == .orderedSame else { throw RemoteAudioByteSourceError.resourceChanged }
+            }
+        } catch RemoteAudioByteSourceError.resourceChanged {
+            try? fileManager.removeItem(at: partial); try? fileManager.removeItem(at: metadataURL)
+            throw RemoteAudioByteSourceError.resourceChanged
+        }
+        try Task.checkCancellation()
         try? fileManager.removeItem(at: destination)
         try fileManager.moveItem(at: partial, to: destination)
         try? fileManager.removeItem(at: metadataURL)

@@ -413,3 +413,22 @@
 "playback.control.pause" = "一時停止";
 
 "library.various_artists" = "さまざまなアーティスト";
+
+"lyrics.timing.title" = "歌詞のタイミング";
+"lyrics.timing.earlier" = "歌詞を0.1秒早める";
+"lyrics.timing.later" = "歌詞を0.1秒遅らせる";
+"lyrics.timing.reset" = "タイミングをリセット";
+"lyrics.timing.value" = "タイミング補正：%+.1f秒";
+"lyrics.timing.info" = "プラスで歌詞を遅らせ、マイナスで早めます。この曲にだけ保存され、元の歌詞や音源は変更しません。";
+"error.remote_range.content" = "サーバーから異なる範囲のデータが返されました。時間をおいて再試行してください。";
+"error.remote_range.changed" = "リモートの音源が変更されたか、検証に失敗しました。ライブラリを更新して再試行してください。";
+"error.remote_audio_busy" = "キャッシュが使用中です。再生を停止するか取得完了を待ってから再試行してください。";
+
+"effects.availability.preparing" = "エフェクト用の音源を準備しています。再生はそのまま続きます。";
+
+"playback.shuffle.album" = "アルバム内をシャッフル";
+"playback.shuffle.library" = "ライブラリ全体をシャッフル";
+
+"effects.availability.source_unavailable" = "この曲の音源を取得できません。Musicでダウンロード後、再試行してください。";
+"effects.availability.preparation_failed" = "エフェクト用の音源を準備できませんでした。再生は続きます。";
+"effects.preparation.retry" = "音源の準備を再試行";

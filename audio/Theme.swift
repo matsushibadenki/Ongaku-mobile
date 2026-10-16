@@ -11,10 +11,6 @@ import UIKit
 enum Theme {
     // MARK: - Colors
     static var accent: Color { appearance == .original ? .orange : appearance.palette.signal }
-    static var precisionSincAccent: Color {
-        appearance == .original ? Color(red: 0.68, green: 0.9, blue: 0.1)
-            : (appearance == .light ? Color(red: 0.34, green: 0.42, blue: 0.15) : Color(red: 0.61, green: 0.68, blue: 0.39))
-    }
     static let onAccent = Color.black
     static var appearance: AppAppearance { AppearanceSettings.shared.selection }
     static var isRealistic: Bool { appearance.isRealistic }

@@ -3,6 +3,26 @@ import Foundation
 @main
 struct PlaybackTransportRegression {
     static func main() {
+        var recovery = SystemAssetRecoveryGate()
+        precondition(recovery.begin(songID: 42, generation: 1))
+        for _ in 0..<500 { precondition(!recovery.begin(songID: 42, generation: 1)) }
+        precondition(recovery.begin(songID: 43, generation: 1)) // Music advances without a new app selection.
+        precondition(!recovery.begin(songID: 43, generation: 1))
+        precondition(recovery.begin(songID: 43, generation: 2)) // Explicit re-selection of the same track.
+        recovery.reset() // Pause/background cancellation or explicit retry.
+        precondition(recovery.begin(songID: 43, generation: 2))
+        print("PASS: observed starts run once; automatic advancement, re-selection and cancellation/retry re-arm recovery")
+        for preparing in [false, true] {
+            for libraryLoading in [false, true] {
+                precondition(!PlaybackTransportPolicy.controlsBlocked(nativeReady: true,
+                    preparing: preparing, initialLibraryLoading: libraryLoading))
+            }
+        }
+        precondition(PlaybackTransportPolicy.controlsBlocked(nativeReady: false, preparing: true, initialLibraryLoading: false))
+        precondition(PlaybackTransportPolicy.controlsBlocked(nativeReady: false, preparing: false, initialLibraryLoading: true))
+        precondition(!PlaybackTransportPolicy.controlsBlocked(nativeReady: false, preparing: false, initialLibraryLoading: false))
+        print("PASS: native readiness unlocks controls before quality work and playback observation finish")
+
         var interrupted = PlaybackTransportPolicy.interruptionRemainsActive(after: .began)
         precondition(interrupted)
         precondition(!PlaybackTransportPolicy.requestIsCurrent(pauseToken: 1, currentPauseToken: 1,

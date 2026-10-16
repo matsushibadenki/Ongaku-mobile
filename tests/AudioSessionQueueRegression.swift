@@ -8,7 +8,9 @@ final class AVAudioSession: @unchecked Sendable {
     struct Options: OptionSet, Sendable {
         let rawValue: Int
         static let notifyOthersOnDeactivation = Options(rawValue: 1)
+        static let mixWithOthers = Options(rawValue: 2)
     }
+    typealias CategoryOptions = Options
     static let instance = AVAudioSession()
     static func sharedInstance() -> AVAudioSession { instance }
     var category = Category.ambient
@@ -115,5 +117,31 @@ struct AudioSessionQueueRegression {
         catch is CancellationError {}
         precondition(session.snapshot().filter { $0 == "deactivate" }.count == deactivations)
         print("PASS: cancelled Music handoff cannot deactivate newer local playback")
+        let handoffID = UUID()
+        let beforeMix = session.snapshot()
+        try await worker.activate(preferredSampleRate: 192_000, mixedHandoff: handoffID)
+        precondition(session.categoryOptions == .mixWithOthers)
+        precondition(session.snapshot().filter { $0 == "rate" }.count == beforeMix.filter { $0 == "rate" }.count)
+        precondition(session.snapshot().filter { $0 == "buffer" }.count == beforeMix.filter { $0 == "buffer" }.count)
+        let beforeFinish = session.snapshot()
+        try await worker.finishMixedHandoff(handoffID)
+        precondition(session.categoryOptions.isEmpty)
+        precondition(session.snapshot().filter { $0 == "deactivate" }.count == beforeFinish.filter { $0 == "deactivate" }.count)
+        precondition(session.snapshot().filter { $0 == "activate.begin" }.count == beforeFinish.filter { $0 == "activate.begin" }.count)
+        print("PASS: provisional mixing leaves hardware preferences alone; commit restores exclusive playback without reactivation")
+        let obsoleteID = UUID()
+        try await worker.activate(mixedHandoff: obsoleteID)
+        try await worker.activate() // A newer player now owns the session.
+        let beforeCancel = session.snapshot().filter { $0 == "deactivate" }.count
+        worker.cancelMixedHandoff(obsoleteID)
+        try await worker.activate() // Queue barrier.
+        precondition(session.snapshot().filter { $0 == "deactivate" }.count == beforeCancel)
+        let cancelledID = UUID()
+        try await worker.activate(mixedHandoff: cancelledID)
+        worker.cancelMixedHandoff(cancelledID)
+        try await worker.activate() // Queue barrier.
+        precondition(session.snapshot().filter { $0 == "deactivate" }.count == beforeCancel + 1)
+        print("PASS: cancelled provisional session is released; stale cleanup leaves newer playback active")
+
     }
 }

@@ -413,3 +413,22 @@
 "playback.control.pause" = "Pause";
 
 "library.various_artists" = "Various Artists";
+
+"lyrics.timing.title" = "Lyrics timing";
+"lyrics.timing.earlier" = "Show lyrics 0.1 seconds earlier";
+"lyrics.timing.later" = "Show lyrics 0.1 seconds later";
+"lyrics.timing.reset" = "Reset timing";
+"lyrics.timing.value" = "Timing offset: %+.1f seconds";
+"lyrics.timing.info" = "Positive values delay lyrics; negative values show them earlier. Saved for this song only. Original lyrics and audio stay intact.";
+"error.remote_range.content" = "The server returned a different byte range. Try again later.";
+"error.remote_range.changed" = "The remote file changed or failed verification. Refresh the library and try again.";
+"error.remote_audio_busy" = "The cache is in use. Stop playback or wait for the current transfer, then try again.";
+
+"effects.availability.preparing" = "Preparing audio for effects. Playback continues.";
+
+"playback.shuffle.album" = "Shuffle album";
+"playback.shuffle.library" = "Shuffle library";
+
+"effects.availability.source_unavailable" = "The audio is unavailable to the app. Download the track in Music, then retry.";
+"effects.availability.preparation_failed" = "Could not prepare this track for effects. Playback continues.";
+"effects.preparation.retry" = "Retry audio preparation";

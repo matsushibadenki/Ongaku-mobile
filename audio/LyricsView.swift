@@ -41,9 +41,12 @@ struct SongLyricsView: View {
     @State private var showingSearch = false
     @State private var following = true
     @State private var canEmbed = false
+    @State private var showingTiming = false
+    @State private var showingTimingInfo = false
 
     private var activeID: Int? {
-        currentTime.flatMap { LRCParser.activeLine(in: model.lines, at: $0) }
+        currentTime.flatMap { LRCParser.activeLine(in: model.lines,
+            at: LyricsTiming.displayClock($0, offset: model.timingOffsetMilliseconds)) }
     }
 
     var body: some View {
@@ -104,6 +107,13 @@ struct SongLyricsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                if !model.lines.isEmpty {
+                    Button { showingTiming = true } label: { Image(systemName: "clock.arrow.circlepath") }
+                        .accessibilityLabel(L10n.tr("lyrics.timing.title"))
+                        .popover(isPresented: $showingTiming) { timingControls.presentationCompactAdaptation(.popover) }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { showingSearch = true } label: { Image(systemName: "magnifyingglass") }
                     .accessibilityLabel(L10n.tr("lyrics.search.title"))
                     .disabled(model.loading || model.saving)
@@ -117,6 +127,37 @@ struct SongLyricsView: View {
         .sheet(isPresented: $showingSearch) { LyricsSearchView(song: song, model: model) }
     }
 
+    private var timingControls: some View {
+        VStack(spacing: 12) {
+            Text(L10n.tr("lyrics.timing.title")).font(.headline)
+            HStack(spacing: 8) {
+                Button { model.setTimingOffset(model.timingOffsetMilliseconds - 100) } label: {
+                    Image(systemName: "minus").frame(width: 44, height: 44)
+                }.accessibilityLabel(L10n.tr("lyrics.timing.earlier"))
+                    .disabled(model.timingOffsetMilliseconds <= -LyricsTiming.limit)
+                Text(String(format: "%+.1f s", Double(model.timingOffsetMilliseconds) / 1000))
+                    .monospacedDigit().frame(minWidth: 80)
+                    .accessibilityLabel(L10n.tr("lyrics.timing.value", Double(model.timingOffsetMilliseconds) / 1000))
+                Button { model.setTimingOffset(model.timingOffsetMilliseconds + 100) } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44)
+                }.accessibilityLabel(L10n.tr("lyrics.timing.later"))
+                    .disabled(model.timingOffsetMilliseconds >= LyricsTiming.limit)
+            }
+            HStack {
+                Button { model.setTimingOffset(0) } label: { Image(systemName: "arrow.counterclockwise").frame(width: 44, height: 44) }
+                    .accessibilityLabel(L10n.tr("lyrics.timing.reset"))
+                Spacer()
+                Button { showingTimingInfo = true } label: { Image(systemName: "info.circle").frame(width: 44, height: 44) }
+                    .accessibilityLabel(L10n.tr("lyrics.timing.info"))
+                    .help(L10n.tr("lyrics.timing.info"))
+            }
+        }
+        .frame(width: 256).padding(16)
+        .alert(L10n.tr("lyrics.timing.title"), isPresented: $showingTimingInfo) {
+            Button(L10n.tr("common.ok"), role: .cancel) {}
+        } message: { Text(L10n.tr("lyrics.timing.info")) }
+    }
+
     private var syncedLyrics: some View {
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
@@ -124,7 +165,10 @@ struct SongLyricsView: View {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         ForEach(model.lines) { line in
                             Button {
-                                if let seek { following = true; seek(line.time) }
+                                if let seek {
+                                    following = true
+                                    seek(LyricsTiming.playbackTime(for: line.time, offset: model.timingOffsetMilliseconds))
+                                }
                             } label: {
                                 Text(line.text.isEmpty ? "♪" : line.text)
                                     .font(.title3.weight(line.id == activeID ? .bold : .regular))

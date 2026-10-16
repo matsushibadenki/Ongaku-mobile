@@ -793,6 +793,28 @@ final class HiResPlaybackEngine {
         }
     }
 
+    /// The source was opened/validated before handing audio back from Music.
+    /// Session/graph ownership changes only after this expensive I/O completes.
+    func loadOpenedFile(
+        url: URL, opened: StreamingAudioFilePreparation.OpenedFile,
+        effectSettings: [RealtimeAudioEffectSetting],
+        headphoneSpatialSettings: HeadphoneSpatialSettings,
+        mixedHandoff: UUID? = nil
+    ) async throws {
+        stop()
+        let generation = preparationGeneration
+        if let mixedHandoff {
+            try await PlaybackAudioSession.shared.activate(mixedHandoff: mixedHandoff)
+        } else {
+            try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate)
+        }
+        try Task.checkCancellation()
+        guard preparationGeneration == generation else { throw CancellationError() }
+        try loadFastFile(url: url, audioFile: opened.file,
+            effectSettings: memorySafetyMode.safeEffectSettings(effectSettings),
+            headphoneSpatialSettings: memorySafetyMode.safeSpatialSettings(headphoneSpatialSettings))
+    }
+
     /// Starts the source file directly. This avoids decoding the entire song
     /// before the user hears anything; the offline high-quality buffer is
     /// prepared separately by the background upgrade task.
@@ -841,10 +863,40 @@ final class HiResPlaybackEngine {
         scheduleBuffer(from: 0, autoplay: false)
     }
 
-    func play() throws {
+    func play(fadeInDuration: TimeInterval = 0) throws {
         ensureEffectLevelMetersInstalled()
         try ensureEngineRunning()
+        if fadeInDuration > 0 {
+            declickToken &+= 1
+            declickMixer.outputVolume = 0
+        }
         scheduleBuffer(from: playbackOffset, autoplay: true)
+        if fadeInDuration > 0 {
+            rampOutputVolume(to: 1, duration: fadeInDuration, token: declickToken, completion: nil)
+        }
+    }
+
+    /// A play request alone is not evidence of render output. Keep the old
+    /// source audible until the new node has advanced through the DSP pipeline.
+    func waitForSystemHandoffRender() async throws {
+        let generation = playbackGeneration
+        let rate = configuredProcessingFormat?.sampleRate ?? Self.preferredSampleRate
+        let minimumRenderedSeconds = max(0.02,
+            Double(estimatedPipelineLatencyFrames) / rate + AVAudioSession.sharedInstance().ioBufferDuration * 2)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
+            guard playbackGeneration == generation, engine.isRunning, activePlayerNode.isPlaying else {
+                throw CancellationError()
+            }
+            if let stamp = activePlayerNode.lastRenderTime,
+               let time = activePlayerNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid,
+               time.sampleRate > 0, Double(time.sampleTime) / time.sampleRate >= minimumRenderedSeconds {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(4))
+        }
+        throw HiResEngineError.upconvertFailed
     }
 
     func pause() {
@@ -1170,6 +1222,8 @@ final class HiResPlaybackEngine {
 
     func seamlessUpgrade(
         url: URL,
+        preparationURL: URL? = nil,
+        latestEffectSettings: (() -> [RealtimeAudioEffectSetting])? = nil,
         effectSettings: [RealtimeAudioEffectSetting],
         headphoneSpatialSettings: HeadphoneSpatialSettings,
         upsamplingMode: UpsamplingMode,
@@ -1201,7 +1255,8 @@ final class HiResPlaybackEngine {
                     )
                 }
                 return try Self.preparePlaybackData(
-                    url: url,
+                    url: preparationURL ?? url,
+                    identityURL: url,
                     headphoneSpatialSettings: headphoneSpatialSettings,
                     upsamplingMode: upsamplingMode
                 )
@@ -1234,12 +1289,34 @@ final class HiResPlaybackEngine {
         // and committing the handoff (a pause/seek can otherwise slip between).
         try crossfadeToPreparedPlaybackData(
             prepared,
-            effectSettings: effectSettings,
+            effectSettings: latestEffectSettings?() ?? effectSettings,
             shouldResume: shouldResumeAtHandoff
         )
         // A completed conversion alone is not a handoff: a missing clock or
         // late scheduling deadline can still defer it. Notify only on commit.
         onHandoffReady?()
+    }
+
+    nonisolated static func prepareDiskCache(
+        url: URL,
+        headphoneSpatialSettings: HeadphoneSpatialSettings,
+        upsamplingMode: UpsamplingMode
+    ) async throws {
+        let snapshot = url.isFileURL ? nil : try await MusicAssetPreparation.playableSnapshot(url: url)
+        let input = snapshot?.url ?? url
+        defer { withExtendedLifetime(snapshot) {} }
+        let worker = Task.detached(priority: .background) {
+            try Task.checkCancellation()
+            guard Self.canPrepareOffline(url: input, upsamplingMode: upsamplingMode) else {
+                throw HiResEngineError.offlineBufferTooLarge
+            }
+            _ = try Self.preparePlaybackData(url: input, identityURL: url,
+                headphoneSpatialSettings: headphoneSpatialSettings,
+                upsamplingMode: upsamplingMode, storeSynchronously: true)
+        }
+        try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: { worker.cancel() }
     }
 
     func preloadTrack(
@@ -3362,7 +3439,8 @@ final class HiResPlaybackEngine {
                   metadata.upsamplingModeRaw == expectedUpsamplingMode.rawValue,
                   metadata.spatialProcessingApplied == spatialProcessingApplied,
                   abs(metadata.targetSampleRate - expectedTargetFormat.sampleRate) < 0.1,
-                  metadata.targetChannelCount == expectedTargetFormat.channelCount else {
+                  metadata.targetChannelCount == expectedTargetFormat.channelCount,
+                  abs(metadata.sourceSampleRate - sourceAudioFile.processingFormat.sampleRate) < 0.1 else {
                 throw HiResEngineError.upconvertFailed
             }
 
@@ -3374,7 +3452,9 @@ final class HiResPlaybackEngine {
             guard baseBuffer.frameLength > 0,
                   playbackBuffer.frameLength > 0,
                   abs(playbackBuffer.format.sampleRate - expectedTargetFormat.sampleRate) < 0.1,
-                  playbackBuffer.format.channelCount == expectedTargetFormat.channelCount else {
+                  playbackBuffer.format.channelCount == expectedTargetFormat.channelCount,
+                  abs(Double(playbackBuffer.frameLength) / expectedTargetFormat.sampleRate
+                      - Double(sourceAudioFile.length) / sourceAudioFile.processingFormat.sampleRate) < 0.05 else {
                 throw HiResEngineError.upconvertFailed
             }
 
@@ -3613,9 +3693,11 @@ final class HiResPlaybackEngine {
 
     nonisolated private static func preparePlaybackData(
         url: URL,
+        identityURL: URL? = nil,
         headphoneSpatialSettings: HeadphoneSpatialSettings,
         upsamplingMode: UpsamplingMode,
-        skipDSPAnalysis: Bool = false
+        skipDSPAnalysis: Bool = false,
+        storeSynchronously: Bool = false
     ) throws -> PreparedPlaybackData {
         migratePreparedAudioDiskCacheIfNeeded()
         let audioFile = try AVAudioFile(forReading: url)
@@ -3629,7 +3711,10 @@ final class HiResPlaybackEngine {
             channels: targetChannelCount,
             interleaved: false
         )!
-        let sourceSignature = Self.fileSignatureForCache(url: url)
+        let logicalURL = identityURL ?? url
+        let sourceSignature = logicalURL.isFileURL
+            ? Self.fileSignatureForCache(url: logicalURL)
+            : (fileSize: Self.fileSignatureForCache(url: url).fileSize, modificationTime: Int64(0))
         let spatialProcessingApplied = headphoneSpatialSettings.isEnabled
             && Self.shouldApplyHeadphoneVirtualization
             && targetChannelCount >= 2
@@ -3653,7 +3738,7 @@ final class HiResPlaybackEngine {
         if upsamplingMode.isPrecisionSinc,
            !skipDSPAnalysis,
            let cached = Self.loadPreparedPlaybackDataFromDisk(
-               sourceURL: url,
+               sourceURL: logicalURL,
                sourceAudioFile: audioFile,
                sourceFileSize: sourceSignature.fileSize,
                sourceModificationTime: sourceSignature.modificationTime,
@@ -3700,7 +3785,7 @@ final class HiResPlaybackEngine {
             }
         }
         let cacheKey = Self.makeAnalysisCacheKey(
-            url: url,
+            url: logicalURL,
             targetSampleRate: targetSampleRate,
             upsamplingMode: upsamplingMode,
             spatialSettings: headphoneSpatialSettings,
@@ -3742,7 +3827,7 @@ final class HiResPlaybackEngine {
         )
 
         let prepared = PreparedPlaybackData(
-            url: url,
+            url: logicalURL,
             audioFile: audioFile,
             baseBuffer: convertedBuffer,
             playbackBuffer: playbackBuffer,
@@ -3756,13 +3841,19 @@ final class HiResPlaybackEngine {
             duration: duration
         )
         if upsamplingMode.isPrecisionSinc, !skipDSPAnalysis {
-            Self.schedulePreparedPlaybackDataDiskStore(
-                prepared,
-                sourceFileSize: sourceSignature.fileSize,
-                sourceModificationTime: sourceSignature.modificationTime,
-                spatialSettings: headphoneSpatialSettings,
-                spatialProcessingApplied: spatialProcessingApplied
-            )
+            if storeSynchronously {
+                Self.storePreparedPlaybackDataOnDisk(prepared,
+                    sourceFileSize: sourceSignature.fileSize,
+                    sourceModificationTime: sourceSignature.modificationTime,
+                    spatialSettings: headphoneSpatialSettings,
+                    spatialProcessingApplied: spatialProcessingApplied)
+            } else {
+                Self.schedulePreparedPlaybackDataDiskStore(prepared,
+                    sourceFileSize: sourceSignature.fileSize,
+                    sourceModificationTime: sourceSignature.modificationTime,
+                    spatialSettings: headphoneSpatialSettings,
+                    spatialProcessingApplied: spatialProcessingApplied)
+            }
         }
         return prepared
     }

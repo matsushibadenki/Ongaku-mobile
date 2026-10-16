@@ -147,4 +147,27 @@ actor LyricsStore {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(record).write(to: url(for: key), options: .atomic)
     }
+    func loadTiming(key: String) throws -> Int {
+        let file = url(for: key).deletingPathExtension().appendingPathExtension("timing.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return 0 }
+        return LyricsTiming.normalized(try JSONDecoder().decode(Int.self, from: Data(contentsOf: file)))
+    }
+    func saveTiming(_ milliseconds: Int, key: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(LyricsTiming.normalized(milliseconds)).write(
+            to: url(for: key).deletingPathExtension().appendingPathExtension("timing.json"), options: .atomic)
+    }
+}
+
+/// Positive offset delays display; original LRC timestamps and embedded tags stay intact.
+nonisolated enum LyricsTiming {
+    static let limit = 10_000
+    static func normalized(_ milliseconds: Int) -> Int { min(limit, max(-limit, milliseconds)) }
+    static func displayClock(_ playbackTime: TimeInterval, offset: Int) -> TimeInterval {
+        playbackTime - Double(normalized(offset)) / 1000
+    }
+    static func playbackTime(for lineTime: TimeInterval, offset: Int) -> TimeInterval {
+        guard lineTime.isFinite else { return 0 }
+        return max(0, lineTime + Double(normalized(offset)) / 1000)
+    }
 }
