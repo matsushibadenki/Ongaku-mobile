@@ -172,3 +172,10 @@
 - ⭕️ [Pending] Verify Uta-Net search navigation in a normal iPhone browser: this environment receives HTTP 403 on direct requests. Verify real-device M4A/ALAC embedding during playback and downstream player compatibility. Unsupported MP4 layouts retain the original file and app-local lyrics.
 - 🟢 [Done] Add per-track lyric timing adjustment (−10 to +10 seconds in 100 ms steps), persistence, reset, adjusted highlighting and seeking, without rewriting original lyrics. Verify Japanese on SE (3rd generation) and Simplified Chinese on 16 Pro Max simulator hosts; parser/persistence regressions pass.
 - 🔴 [Later] Extend embedding to additional ID3/MP4 metadata layouts with equivalent preservation tests and add desktop lyric synchronization. Consider licensed Japanese lyric API integration if available.
+
+
+## 1.0.6 distribution — 2026-10-16
+
+- 🟢 [Done] Publish GitHub source release [v1.0.6](https://github.com/matsushibadenki/Ongaku-mobile/releases/tag/v1.0.6) at `f8c9305` and push main.
+- 🟢 [Done] Archive and sign 1.0.6 (2), verify the distribution IPA, upload to App Store Connect, and confirm the TestFlight processing row. Save Japanese, English and Simplified Chinese release notes and current review instructions.
+- ⭕️ [Pending] Select the processed build and submit for App Review. App Store Connect subsequently returned a page-load error on both the app list and version editor despite retries; no App Store submission or public release is claimed. See [deployment record](DEPLOYMENT_READINESS_2026-10-16.md).
