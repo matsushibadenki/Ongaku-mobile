@@ -48,7 +48,7 @@ Apple Audio UnitをAVAudioEngineのoffline renderingで実行。アプリの実�
 
 ## 確認範囲の限界
 
-- [Next] iPhone実機で実曲を使った音量を合わせた試聴と、再生中の連続ON/OFF・Basic/Pro切り替え。今回の音声測定はmacOS版Apple Audio Unitで、iOSはReleaseビルドによる検証。
-- [Later] DAC／Bluetoothなど出力変換後の波形、オーバーサンプリングによるtrue-peak保護、エイリアシング量と知覚音量の定量評価。−1 dBのサンプル余裕は再構成波形の絶対的な上限保証ではない。
+- ⭕️ [Pending] iPhone実機で実曲を使った音量を合わせた試聴と、再生中の連続ON/OFF・Basic/Pro切り替え。今回の音声測定はmacOS版Apple Audio Unitで、iOSはReleaseビルドによる検証。
+- 🔴 [Later] DAC／Bluetoothなど出力変換後の波形、オーバーサンプリングによるtrue-peak保護、エイリアシング量と知覚音量の定量評価。−1 dBのサンプル余裕は再構成波形の絶対的な上限保証ではない。
 
 Simulation／BBE等は独自EQとApple Audio Unitの組み合わせで、名称に含まれる実機との音響測定上の一致を保証するものではない。

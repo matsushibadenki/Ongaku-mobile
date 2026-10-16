@@ -84,8 +84,10 @@ nonisolated final class RemoteAudioCache: @unchecked Sendable {
         }
         let result = try await rangeDownloadCoordinator.materialize(
             source: source,
-            directory: directory
+            directory: directory,
+            resource: descriptor
         )
+        try RemoteAudioReadiness.validate(url: result, expectedBytes: descriptor.contentLength)
         try lock.withLock {
             try evictIfNeeded(in: directory, bytesNeeded: 0, preserving: [result])
         }
@@ -210,6 +212,7 @@ nonisolated final class RemoteAudioCache: @unchecked Sendable {
             do {
                 try copyResult.get()
                 try Task.checkCancellation()
+                try RemoteAudioReadiness.validate(url: temporary, expectedBytes: fileSize, allowStagingFile: true)
                 try fileManager.moveItem(at: temporary, to: destination)
                 try evictIfNeeded(in: directory, bytesNeeded: 0, preserving: [destination])
                 PlaybackDebugLogger.event(

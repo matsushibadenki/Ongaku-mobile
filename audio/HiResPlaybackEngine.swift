@@ -443,6 +443,15 @@ final class HiResPlaybackEngine {
     private let outputSafetyEQ = AVAudioUnitEQ(numberOfBands: 1)
     private let outputLimiter: AVAudioUnit?
     private let outputCeilingEQ = AVAudioUnitEQ(numberOfBands: 0)
+    // Device enablement is held until real-time validation, as with the custom
+    // handoff AU. Qualification builds opt in without changing release defaults.
+    private let finalPeakProtector: AVAudioUnitEffect? = {
+        #if ONGAKU_ENABLE_TRUE_PEAK
+        return OngakuTruePeakAudioUnit.makeNode()
+        #else
+        return nil
+        #endif
+    }()
 
     private(set) var currentAudioFile: AVAudioFile?
     private(set) var currentAudioURL: URL?
@@ -451,6 +460,7 @@ final class HiResPlaybackEngine {
     private(set) var effectLevelAudits: [EffectLevelAudit] = []
     private(set) var duration: TimeInterval = 0
     private(set) var estimatedPipelineLatencyFrames: AVAudioFramePosition = 0
+    private var finalOutputProtectionLatencyFrames: AVAudioFramePosition = 0
     private var baseConvertedBuffer: AVAudioPCMBuffer?
     private var convertedBuffer: AVAudioPCMBuffer?
     private var convertedFormat: AVAudioFormat?
@@ -1462,7 +1472,7 @@ final class HiResPlaybackEngine {
         if !anyChanged {
             return false
         }
-        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames }
+        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames } + finalOutputProtectionLatencyFrames
         
         // Editing an inactive module must not re-sample audits and change
         // normalization on the audible path.
@@ -1653,6 +1663,7 @@ final class HiResPlaybackEngine {
         }
         engine.attach(outputSafetyEQ)
         engine.attach(outputCeilingEQ)
+        if let finalPeakProtector { engine.attach(finalPeakProtector) }
         if let outputLimiter {
             engine.attach(outputLimiter)
         }
@@ -1693,6 +1704,7 @@ final class HiResPlaybackEngine {
             engine.disconnectNodeOutput(outputLimiter)
         }
         engine.disconnectNodeOutput(declickMixer)
+        if let finalPeakProtector { engine.disconnectNodeOutput(finalPeakProtector) }
         
         for effect in effectPipeline {
             effect.connectInternalNodes(engine: engine, format: format)
@@ -1719,9 +1731,30 @@ final class HiResPlaybackEngine {
             engine.connect(outputSafetyEQ, to: outputCeilingEQ, format: format)
         }
         engine.connect(outputCeilingEQ, to: declickMixer, format: format)
-        engine.connect(declickMixer, to: engine.mainMixerNode, format: format)
+        if let finalPeakProtector,
+           let finalFormat = finalOutputProtectionFormat() {
+            // The mixer performs the final SRC before protection. The main mixer
+            // stays at this rate with unity volume, so there is no later SRC.
+            engine.connect(declickMixer, to: finalPeakProtector, format: finalFormat)
+            engine.connect(finalPeakProtector, to: engine.mainMixerNode, format: finalFormat)
+            let inputRate = format?.sampleRate ?? sourceMixer.outputFormat(forBus: 0).sampleRate
+            let delay = finalPeakProtector.auAudioUnit.latency
+            finalOutputProtectionLatencyFrames = AVAudioFramePosition((delay * inputRate).rounded())
+            PlaybackDebugLogger.event("audio.pipeline.final_peak rate=\(finalFormat.sampleRate) latency=\(delay)")
+        } else {
+            finalOutputProtectionLatencyFrames = 0
+            engine.connect(declickMixer, to: engine.mainMixerNode, format: format)
+        }
+        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames } + finalOutputProtectionLatencyFrames
         playerNode.volume = isUpgradePlayerNodeActive ? 0.0 : 1.0
         upgradePlayerNode.volume = isUpgradePlayerNodeActive ? 1.0 : 0.0
+    }
+
+    private func finalOutputProtectionFormat() -> AVAudioFormat? {
+        let device = engine.outputNode.inputFormat(forBus: 0)
+        guard device.sampleRate.isFinite, (8000...384000).contains(device.sampleRate),
+              (1...8).contains(device.channelCount) else { return nil }
+        return AVAudioFormat(standardFormatWithSampleRate: device.sampleRate, channels: device.channelCount)
     }
 
     private func configureAutomaticDSP() {
@@ -3775,7 +3808,7 @@ final class HiResPlaybackEngine {
         currentUpsamplingMode = prepared.upsamplingMode
         applyAutomaticDSPProfile(prepared.automaticDSPProfile)
         duration = prepared.duration
-        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames }
+        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames } + finalOutputProtectionLatencyFrames
         configureProcessingFormat(prepared.targetFormat)
         currentFormat = prepared.formatDescription
         apply(effectSettings: effectSettings)
@@ -3899,7 +3932,7 @@ final class HiResPlaybackEngine {
         currentUpsamplingMode = prepared.upsamplingMode
         applyAutomaticDSPProfile(prepared.automaticDSPProfile)
         duration = prepared.duration
-        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames }
+        estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames } + finalOutputProtectionLatencyFrames
         currentFormat = prepared.formatDescription
         apply(effectSettings: effectSettings)
     }

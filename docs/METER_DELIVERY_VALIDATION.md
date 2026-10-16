@@ -66,9 +66,11 @@ gain-range assertions remain enabled.
 PCM meter replay and shared effect/gain stages. Fix parameter/gain writes
 during pending handoffs; see [combined validation](METER_HANDOFF_WAVEFORM_VALIDATION.md).
 
-🟠 [Next] Extend to continuously collected meter feedback, overloaded/true-peak
-signals and nonlinear/latency-changing effects. Preserve the distinction between
-source timeline alignment and intended phase/latency changes.
+🟢 [Done] Added continuously collected feedback, overload/reconstructed-peak
+probes and nonlinear/latency-changing effects in the [continuous combined suite](METER_HANDOFF_WAVEFORM_VALIDATION.md).
+The [final-output contract](FINAL_OUTPUT_PEAK_CONTRACT.md) adds adversarial
+output probes; the implemented [protector](TRUE_PEAK_PROTECTION_VALIDATION.md) remains
+qualification-only until device/meter-alignment checks pass.
 
 ⭕️ [Pending] Validate host timestamp availability, inter-stage window alignment,
 audit availability and audibility on physical iPhone routes, including Bluetooth,

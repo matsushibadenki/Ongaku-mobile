@@ -85,8 +85,9 @@ Check wired/Bluetooth connection changes and sustained UI/thermal/memory load.
 Use `audio.spatial.committed` and `audio.handoff.*` alongside render diagnostics.
 Offline results do not establish device host-clock behavior or audibility.
 
-🟠 [Next] Extend asynchronous meter-driven gain convergence and overloaded /
-true-peak probes. Spatial waveform tests isolate the source handoff; shared
+🟢 [Done] Extended asynchronous meter-driven gain convergence and overloaded /
+reconstructed-peak probes in the [continuous combined suite](METER_HANDOFF_WAVEFORM_VALIDATION.md)
+and [final-output contract](FINAL_OUTPUT_PEAK_CONTRACT.md). The earlier spatial waveform tests isolate the source handoff; shared
 downstream effects have separate coverage, not every combined spatial/effect
 setting. Full-track clones and analysis still consume memory and CPU. The
 control-rate fade can stretch under main-queue load, and general effect bypass

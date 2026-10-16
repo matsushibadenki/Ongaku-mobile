@@ -109,7 +109,9 @@ handoff, with cancellation and stale-result guards. All 192 stereo waveform
 cases and deliberate timing/muting faults pass; see
 [spatial transition validation](SPATIAL_TRANSITION_VALIDATION.md).
 
-🟠 [Next] Extend asynchronous meter/gain and clipping/true-peak probes. The current
+🟢 [Done] Extended asynchronous meter/gain and overloaded/reconstructed-peak
+probes; see [continuous measurements](METER_HANDOFF_WAVEFORM_VALIDATION.md) and
+[final-output contract](FINAL_OUTPUT_PEAK_CONTRACT.md). The original continuity
 fixture supplies deterministic audit snapshots and does not validate device
 Audio Units, Bluetooth/DAC latency, or psychoacoustic click thresholds.
 

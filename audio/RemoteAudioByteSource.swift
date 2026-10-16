@@ -86,12 +86,30 @@ actor RemoteRangeDownloadCoordinator {
 
     private let fileManager = FileManager.default
     private let chunkSize: Int64 = 4 * 1_024 * 1_024
+    // Actor methods re-enter at network awaits. Keep staging-file writers serial.
+    private var isMaterializing = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    private func acquireWriter() async {
+        if !isMaterializing { isMaterializing = true; return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private func releaseWriter() {
+        if waiting.isEmpty { isMaterializing = false } else { waiting.removeFirst().resume() }
+    }
 
     func materialize(
         source: any RemoteAudioByteSource,
-        directory: URL
+        directory: URL,
+        resource: RemoteAudioResourceDescriptor? = nil
     ) async throws -> URL {
-        let descriptor = try await source.descriptor()
+        await acquireWriter()
+        defer { releaseWriter() }
+        try Task.checkCancellation()
+        let descriptor: RemoteAudioResourceDescriptor
+        if let resource { descriptor = resource } else { descriptor = try await source.descriptor() }
+        try Task.checkCancellation()
         guard descriptor.contentLength > 0 else { throw RemoteAudioCacheError.sourceUnavailable }
 
         let digest = RemoteAudioCache.cacheDigest(
@@ -124,7 +142,8 @@ actor RemoteRangeDownloadCoordinator {
         let actualPartialSize = Int64(
             (try? partial.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         )
-        var completed = min(metadata?.completedBytes ?? actualPartialSize, actualPartialSize)
+        let recorded = metadata?.completedBytes ?? 0
+        var completed = recorded >= 0 && recorded <= descriptor.contentLength ? min(recorded, actualPartialSize) : 0
         let output = try FileHandle(forWritingTo: partial)
         defer { try? output.close() }
         try output.truncate(atOffset: UInt64(completed))
@@ -135,6 +154,9 @@ actor RemoteRangeDownloadCoordinator {
             let upper = min(completed + chunkSize, descriptor.contentLength)
             let data = try await source.read(bytes: completed..<upper)
             try Task.checkCancellation()
+            guard Int64(data.count) == upper - completed else {
+                throw RemoteAudioByteSourceError.incompleteRange(expected: Int(upper - completed), actual: data.count)
+            }
             try output.write(contentsOf: data)
             completed += Int64(data.count)
             let updated = ResumeMetadata(
@@ -148,6 +170,8 @@ actor RemoteRangeDownloadCoordinator {
 
         try output.synchronize()
         try output.close()
+        try Task.checkCancellation()
+        try RemoteAudioReadiness.validate(url: partial, expectedBytes: descriptor.contentLength, allowStagingFile: true)
         try? fileManager.removeItem(at: destination)
         try fileManager.moveItem(at: partial, to: destination)
         try? fileManager.removeItem(at: metadataURL)

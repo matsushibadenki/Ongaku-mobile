@@ -10,7 +10,7 @@ swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$combined_dir
     audio/EffectMeterObservation.swift audio/PlaybackHandoffClock.swift audio/ImpulseResponseCatalog.swift \
     audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     "$combined_dir/ShippingDSPTransition.swift" "$combined_dir/ShippingSinc.swift" "$combined_dir/ShippingHRTF.swift" \
-    tests/ContinuousMeterHandoffRegression.swift tests/MeterHandoffWaveformRegression.swift -o "$combined_dir/combined"
+    tests/ReconstructedPeak.swift tests/ContinuousMeterHandoffRegression.swift tests/MeterHandoffWaveformRegression.swift -o "$combined_dir/combined"
 "$combined_dir/combined" "$@"
 if [[ $# -gt 0 ]] && [[ " ${*} " == *" --quick "* ]]; then exit 0; fi
 if [[ $# -gt 0 ]] && [[ " ${*} " == *" --continuous "* ]]; then

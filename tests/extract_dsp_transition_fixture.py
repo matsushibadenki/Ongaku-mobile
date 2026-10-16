@@ -101,6 +101,7 @@ output.append('''
     var needsEffectReapplication = true
     var lastAppliedEffectSettings: [RealtimeAudioEffectKind: RealtimeAudioEffectSetting] = [:]
     var estimatedPipelineLatencyFrames: AVAudioFramePosition = 0
+    var finalOutputProtectionLatencyFrames: AVAudioFramePosition = 0
     var pendingHandoff: Bool?
     var automaticDSPProfile: AutomaticDSPProfile = .neutral
     var automaticDSPStrength: Float = 1

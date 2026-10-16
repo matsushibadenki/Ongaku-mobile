@@ -1,0 +1,530 @@
+{
+  "policy": "complete immutable file required for every current codec",
+  "cases": [
+    {
+      "format": "mp3",
+      "fraction": 1,
+      "bytes": 32852,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "mp3",
+      "fraction": 0.1,
+      "bytes": 3285,
+      "completedProbe": false,
+      "decodedFrames": 7488,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "stage": "decode",
+      "opened": true
+    },
+    {
+      "format": "mp3",
+      "fraction": 0.5,
+      "bytes": 16426,
+      "stage": "decode",
+      "opened": true,
+      "completedProbe": false,
+      "decodedFrames": 43200,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\""
+    },
+    {
+      "format": "mp3",
+      "fraction": 0.9,
+      "bytes": 29566,
+      "decodedFrames": 80064,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "opened": true,
+      "completedProbe": false,
+      "stage": "decode"
+    },
+    {
+      "format": "m4a",
+      "fraction": 1,
+      "bytes": 33470,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "m4a",
+      "fraction": 0.1,
+      "bytes": 3347,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "opened": false,
+      "stage": "open",
+      "completedProbe": false,
+      "decodedFrames": 0
+    },
+    {
+      "format": "m4a",
+      "fraction": 0.5,
+      "bytes": 16735,
+      "opened": false,
+      "stage": "open",
+      "decodedFrames": 0,
+      "completedProbe": false,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}"
+    },
+    {
+      "format": "m4a",
+      "fraction": 0.9,
+      "bytes": 30123,
+      "opened": false,
+      "stage": "open",
+      "completedProbe": false,
+      "decodedFrames": 0,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}"
+    },
+    {
+      "format": "fast.m4a",
+      "fraction": 1,
+      "bytes": 33470,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "fast.m4a",
+      "fraction": 0.1,
+      "bytes": 3347,
+      "stage": "open",
+      "decodedFrames": 0,
+      "completedProbe": false,
+      "opened": false,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=2003334207 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}"
+    },
+    {
+      "format": "fast.m4a",
+      "fraction": 0.5,
+      "bytes": 16735,
+      "completedProbe": false,
+      "stage": "open",
+      "decodedFrames": 0,
+      "opened": false,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=2003334207 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}"
+    },
+    {
+      "format": "fast.m4a",
+      "fraction": 0.9,
+      "bytes": 30123,
+      "opened": false,
+      "completedProbe": false,
+      "stage": "open",
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=2003334207 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "decodedFrames": 0
+    },
+    {
+      "format": "flac",
+      "fraction": 1,
+      "bytes": 231819,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "flac",
+      "fraction": 0.1,
+      "bytes": 23181,
+      "opened": true,
+      "stage": "decode",
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "completedProbe": false,
+      "decodedFrames": 4608
+    },
+    {
+      "format": "flac",
+      "fraction": 0.5,
+      "bytes": 115909,
+      "opened": true,
+      "completedProbe": false,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "stage": "decode",
+      "decodedFrames": 41472
+    },
+    {
+      "format": "flac",
+      "fraction": 0.9,
+      "bytes": 208637,
+      "stage": "decode",
+      "completedProbe": false,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "opened": true,
+      "decodedFrames": 78336
+    },
+    {
+      "format": "wav",
+      "fraction": 1,
+      "bytes": 352878,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "wav",
+      "fraction": 0.1,
+      "bytes": 35287,
+      "completedProbe": true,
+      "declaredFrames": 8802,
+      "decodedFrames": 8802,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        881
+      ]
+    },
+    {
+      "format": "wav",
+      "fraction": 0.5,
+      "bytes": 176439,
+      "completedProbe": true,
+      "declaredFrames": 44090,
+      "decodedFrames": 44090,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "wav",
+      "fraction": 0.9,
+      "bytes": 317590,
+      "completedProbe": true,
+      "declaredFrames": 79378,
+      "decodedFrames": 79378,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "aif",
+      "fraction": 1,
+      "bytes": 352854,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "aif",
+      "fraction": 0.1,
+      "bytes": 35285,
+      "opened": true,
+      "decodedFrames": 8807,
+      "completedProbe": false,
+      "stage": "decode",
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\""
+    },
+    {
+      "format": "aif",
+      "fraction": 0.5,
+      "bytes": 176427,
+      "decodedFrames": 44093,
+      "opened": true,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "completedProbe": false,
+      "stage": "decode"
+    },
+    {
+      "format": "aif",
+      "fraction": 0.9,
+      "bytes": 317568,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "completedProbe": false,
+      "decodedFrames": 79378,
+      "opened": true,
+      "stage": "decode"
+    },
+    {
+      "format": "aiff",
+      "fraction": 1,
+      "bytes": 352854,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "aiff",
+      "fraction": 0.1,
+      "bytes": 35285,
+      "opened": true,
+      "decodedFrames": 8807,
+      "stage": "decode",
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "completedProbe": false
+    },
+    {
+      "format": "aiff",
+      "fraction": 0.5,
+      "bytes": 176427,
+      "opened": true,
+      "completedProbe": false,
+      "stage": "decode",
+      "decodedFrames": 44093,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\""
+    },
+    {
+      "format": "aiff",
+      "fraction": 0.9,
+      "bytes": 317568,
+      "decodedFrames": 79378,
+      "opened": true,
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "stage": "decode",
+      "completedProbe": false
+    },
+    {
+      "format": "caf",
+      "fraction": 1,
+      "bytes": 705729,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "caf",
+      "fraction": 0.1,
+      "bytes": 70572,
+      "decodedFrames": 8805,
+      "stage": "decode",
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "completedProbe": false,
+      "opened": true
+    },
+    {
+      "format": "caf",
+      "fraction": 0.5,
+      "bytes": 352864,
+      "opened": true,
+      "decodedFrames": 44091,
+      "completedProbe": false,
+      "stage": "decode",
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\""
+    },
+    {
+      "format": "caf",
+      "fraction": 0.9,
+      "bytes": 635156,
+      "stage": "decode",
+      "error": "Error Domain=NSOSStatusErrorDomain Code=-39 \"eofErr: End of file\"",
+      "completedProbe": false,
+      "decodedFrames": 79378,
+      "opened": true
+    },
+    {
+      "format": "aac",
+      "fraction": 1,
+      "bytes": 32928,
+      "completedProbe": true,
+      "declaredFrames": 90112,
+      "decodedFrames": 90112,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "aac",
+      "fraction": 0.1,
+      "bytes": 3292,
+      "completedProbe": true,
+      "declaredFrames": 8192,
+      "decodedFrames": 8192,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        820
+      ]
+    },
+    {
+      "format": "aac",
+      "fraction": 0.5,
+      "bytes": 16464,
+      "completedProbe": true,
+      "declaredFrames": 44032,
+      "decodedFrames": 44032,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "aac",
+      "fraction": 0.9,
+      "bytes": 29635,
+      "completedProbe": true,
+      "declaredFrames": 79872,
+      "decodedFrames": 79872,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "alac",
+      "fraction": 1,
+      "bytes": 334321,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "alac",
+      "fraction": 0.1,
+      "bytes": 33432,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "decodedFrames": 0,
+      "stage": "open",
+      "opened": false,
+      "completedProbe": false
+    },
+    {
+      "format": "alac",
+      "fraction": 0.5,
+      "bytes": 167160,
+      "stage": "open",
+      "decodedFrames": 0,
+      "opened": false,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "completedProbe": false
+    },
+    {
+      "format": "alac",
+      "fraction": 0.9,
+      "bytes": 300888,
+      "stage": "open",
+      "completedProbe": false,
+      "decodedFrames": 0,
+      "opened": false,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}"
+    },
+    {
+      "format": "alac.m4a",
+      "fraction": 1,
+      "bytes": 334321,
+      "completedProbe": true,
+      "declaredFrames": 88200,
+      "decodedFrames": 88200,
+      "opened": true,
+      "sampleRate": 44100,
+      "seekFrames": [
+        1024,
+        1024,
+        1024
+      ]
+    },
+    {
+      "format": "alac.m4a",
+      "fraction": 0.1,
+      "bytes": 33432,
+      "completedProbe": false,
+      "decodedFrames": 0,
+      "stage": "open",
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "opened": false
+    },
+    {
+      "format": "alac.m4a",
+      "fraction": 0.5,
+      "bytes": 167160,
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "completedProbe": false,
+      "opened": false,
+      "decodedFrames": 0,
+      "stage": "open"
+    },
+    {
+      "format": "alac.m4a",
+      "fraction": 0.9,
+      "bytes": 300888,
+      "stage": "open",
+      "error": "Error Domain=com.apple.coreaudio.avfaudio Code=1685348671 \"(null)\" UserInfo={failed call=ExtAudioFileOpenURL((__bridge CFURLRef)fileURL, &_extAudioFile)}",
+      "opened": false,
+      "completedProbe": false,
+      "decodedFrames": 0
+    }
+  ]
+}

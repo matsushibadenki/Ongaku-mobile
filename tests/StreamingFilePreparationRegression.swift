@@ -27,6 +27,17 @@ import Foundation
             }
         }
         print("PASS: worker-opened stereo PCM preserves all 8,192 samples and format")
+        for suffix in ["partial", "range-partial"] {
+            let staging = directory.appendingPathComponent("source.\(suffix)")
+            try FileManager.default.copyItem(at: url, to: staging)
+            do {
+                _ = try await StreamingAudioFilePreparation.open(url: staging) { _ in
+                    preconditionFailure("Staging data reached AVAudioFile")
+                }
+                preconditionFailure("Staging file accepted")
+            } catch is CocoaError {}
+        }
+        print("PASS: incomplete staging files never reach the audio decoder")
 
         var ticks = 0
         let heartbeat = Task { @MainActor in

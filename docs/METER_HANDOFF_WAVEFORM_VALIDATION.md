@@ -202,13 +202,12 @@ extension.
 
 ## Remaining validation
 
-🟠 [Next] Establish final-output true-peak protection requirements and test more
-adversarial bandwidth/phase/transient combinations before claiming a -1 dBTP
-ceiling. The existing -1 dB **internal sample** margin does not guarantee -1 dB
-at final output after sample-rate conversion or between samples. Coordinate this
-measurement contract with the separate Ongaku desktop signal path.
+🟢 [Done] Established final-output requirements and expanded to 84 adversarial
+stage-level probes for both shipping iOS and desktop protection classes. The
+new signals expose reconstructed output above unity; the internal sample trim
+is insufficient. See [shared contract and results](FINAL_OUTPUT_PEAK_CONTRACT.md).
 
-⭕️ [Pending] On physical iPhone routes, verify tap timestamp availability and
-window alignment, actual host-clock scheduling, sustained UI/thermal load,
-Bluetooth, pause/seek during handoff and foreground return. The user's original
-audible interruptions cannot be fully reproduced by this offline fixture.
+🟢 [Done] Implemented a qualification-only final-output protector, passing the
+84-case ceiling gate, independent-meter cross-check and 18 protected DSP/handoff
+pairs. See [validation and activation limits](TRUE_PEAK_PROTECTION_VALIDATION.md).
+Ordinary-build enablement remains pending physical-device qualification.
