@@ -53,4 +53,16 @@ Appleのネイティブ再生準備とバックグラウンドの高音質処理
 
 🟢 [Done] 公開前に再生トランスポート、音声セッション移譲、Music音源準備、リモート取得・キャッシュ、歌詞タイミングの回帰テストを再実行して成功。plist/3言語構文と差分の空白エラーも確認。直前の実エンジン監査と216ケースの波形テスト結果は[通常再生先行の検証記録](NATIVE_FIRST_PLAYBACK_VALIDATION.md)を参照。
 
-⭕️ [Pending] App Store Connectのログイン、提出用書き出し・アップロード、バージョン情報設定、審査提出。GitHub公開結果も完了後に追記する。
+🟢 [Done] GitHubのmainへソースを反映し、v1.0.6を公開。ソースコミットは`f8c93051826be3a8440a17459342763ae9829489`。公開URL: https://github.com/matsushibadenki/Ongaku-mobile/releases/tag/v1.0.6
+
+🟢 [Done] ユーザーがApp Store ConnectとXcodeを再認証。既存のAppleクラウド署名でApp Store配布用IPAの書き出しに成功し、codesignの厳格な検証も成功。Homebrew rsyncと標準rsyncのオプション非互換は、書き出しプロセスだけ`PATH=/usr/bin:/bin:/usr/sbin:/sbin`にして解消。システム設定は変更していない。
+
+🟢 [Done] App Store Connectに1.0.6を作成し、日本語・英語・简体中文の更新情報を保存。審査メモを現在の再生経路・任意のGoogle Drive/歌詞連携・ローカルネットワーク利用に合わせて更新。既存の承認後自動リリース設定を維持。
+
+🟢 [Done] アーカイブと配布用IPAをGit管理外の`build/releases/1.0.6/`に保存。書き出しIPAのSHA-256: `0a572e69b9bab29409a748ec548693a541fb7e0891fa213b5fe3d2dcc898215a`。アップロード時の再署名成果物とは別ファイル。
+
+🟢 [Done] 2026-10-16 22:25 JST、Xcodeが`Upload succeeded` / `EXPORT SUCCEEDED`を返し、App Store Connectへのアップロードに成功。アップロードID: `89d0913e-9990-478c-a41c-14d1cf0ebfa5`。
+
+書き出しログには事前検証時の認証期限切れによる検証スキップ警告が残ったため、「OrganizerのValidate成功」とは扱わない。アップロード成功とは区別し、Apple側のビルド処理と審査提出可否を別途確認する。
+
+⭕️ [Pending] Apple側のビルド処理完了後、1.0.6に選択して審査へ提出。
