@@ -418,6 +418,7 @@ nonisolated struct SystemAlbum: Identifiable, Hashable, Codable, Sendable {
     let title: String
     let artist: String
     let songCount: Int
+    var localIdentity: String? = nil
     var normalizedSearchTerms: [String] = []
     nonisolated func getNormalizedSearchTerms() -> [String] { normalizedSearchTerms }
 }

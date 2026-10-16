@@ -65,7 +65,7 @@ struct StartupLoadingIndicator: View {
                         let position = dotPosition(for: index, time: time)
                         let intensity = dotIntensity(for: index, time: time)
                         Circle()
-                            .fill(Color.white.opacity(0.22 + intensity * 0.78))
+                            .fill(Theme.textPrimary.opacity(0.22 + intensity * 0.78))
                             .frame(width: 4 + intensity * 7, height: 4 + intensity * 7)
                             .shadow(color: Color.white.opacity(intensity * 0.45), radius: 5)
                             .position(position)
@@ -165,22 +165,9 @@ struct SongRowView: View {
     private var playbackContent: some View {
         HStack(spacing: 12) {
             ZStack {
-                if let artwork {
-                    Image(uiImage: artwork)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                } else {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Theme.secondaryBackground)
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Image(systemName: isPlaying && isActive ? "waveform" : "music.note")
-                                .font(.system(size: 14, weight: .thin))
-                                .foregroundStyle(isActive ? accentColor : Theme.textSecondary)
-                        )
-                }
+                LibraryArtworkImage(fallback: artwork, urls: song.url.map { [$0] } ?? [], placeholder: "music.note")
+                    .frame(width: 40, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                 if isProcessing && isActive {
                     ZStack {
@@ -427,7 +414,7 @@ struct TrackCapabilityDetailView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(AppBackground().ignoresSafeArea())
             .navigationTitle(L10n.tr("library.track_info.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -436,7 +423,7 @@ struct TrackCapabilityDetailView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
         .tint(accentColor)
         .onAppear {
             tagsText = overlay?.displayTags.joined(separator: ", ") ?? ""
@@ -497,52 +484,25 @@ struct TrackCapabilityDetailView: View {
 struct AlbumTileView: View {
     let album: SystemAlbum
     let artwork: UIImage?
+    var artworkURLs: [URL] = []
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                if let artwork {
-                    Color.clear
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay(
-                            Image(uiImage: artwork)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                        )
-                } else {
-                    RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                        .fill(Theme.secondaryBackground)
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay(
-                            Image(systemName: "opticaldisc")
-                                .font(.system(size: 30, weight: .thin))
-                                .foregroundStyle(Theme.textSecondary)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
-                                .stroke(Theme.border, lineWidth: 1)
-                        )
-                }
-            }
-            
+            LibraryArtworkImage(fallback: artwork, urls: artworkURLs)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.cornerRadius).stroke(Theme.border, lineWidth: 1))
+
             VStack(alignment: .leading, spacing: 2) {
                 MarqueeView(
                     text: album.title,
                     font: .system(size: 14, weight: .regular),
-                    color: Theme.textPrimary,
-                    maxWidth: (Theme.maxContentWidth / 2) - 16
+                    color: Theme.textPrimary
                 )
                 
                 MarqueeView(
                     text: album.artist,
                     font: .system(size: 12, weight: .light),
-                    color: Theme.textSecondary,
-                    maxWidth: (Theme.maxContentWidth / 2) - 16
+                    color: Theme.textSecondary
                 )
             }
             .padding(.horizontal, 4)
@@ -605,8 +565,8 @@ struct SongRowView_Previews: PreviewProvider {
             )
         }
         .padding(.horizontal, 16)
-        .background(Theme.background)
-        .preferredColorScheme(.dark)
+        .background(AppBackground().ignoresSafeArea())
+        .preferredColorScheme(Theme.appearance.colorScheme)
     }
 }
 #endif
@@ -649,10 +609,10 @@ struct EffectCard: View {
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 12)
-                Toggle("", isOn: Binding(get: { isEnabled }, set: onToggle))
-                    .toggleStyle(SwitchToggleStyle(tint: accentColor))
+                Toggle(kind.displayName, isOn: Binding(get: { isEnabled }, set: onToggle))
+                    .toggleStyle(AppearanceToggleStyle(accent: accentColor))
                     .labelsHidden()
-                    .scaleEffect(0.9)
+                    .scaleEffect(Theme.isRealistic ? 1 : 0.9)
                     .disabled(!isInteractive)
             }
             
@@ -693,14 +653,15 @@ struct EffectCard: View {
                                     .foregroundStyle(Theme.textPrimary)
                             }
                             
-                            Slider(
+                            AppearanceSlider(
                                 value: Binding(
                                     get: { parameters[def.key] ?? def.defaultValue },
                                     set: { onParameterChange(def.key, $0) }
                                 ),
-                                in: def.range
+                                in: def.range, accent: accentColor
                             )
                             .tint(isEnabled ? accentColor : Theme.textSecondary.opacity(0.3))
+                            .accessibilityLabel(def.name)
                             .disabled(!isEnabled || !isInteractive)
                         }
                     }
@@ -708,13 +669,13 @@ struct EffectCard: View {
             }
         }
         .padding(Theme.innerPadding)
-        .background(Theme.secondaryBackground)
+        .background(HardwarePanel())
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
                 .stroke(isEnabled ? accentColor.opacity(0.3) : Theme.border, lineWidth: 1)
         )
-        .frame(width: Theme.maxContentWidth)
+        .frame(maxWidth: Theme.maxContentWidth)
         .opacity(isInteractive ? (isEnabled ? 1.0 : 0.6) : 0.35)
     }
 
@@ -735,7 +696,7 @@ struct EffectCard: View {
 
     private func exciterModeButton(for option: ExciterMode) -> some View {
         let isSelected = option == exciterMode
-        let textColor: Color = isSelected ? .black : Theme.textPrimary
+        let textColor: Color = isSelected ? Theme.onAccent : Theme.textPrimary
 
         return Button {
             onParameterChange("mode", option.parameterValue)
@@ -776,7 +737,7 @@ struct EffectCard: View {
 
     private func exciterOpenToneButton(for option: ExciterOpenTone) -> some View {
         let isSelected = option == exciterOpenTone
-        let textColor: Color = isSelected ? .black : Theme.textPrimary
+        let textColor: Color = isSelected ? Theme.onAccent : Theme.textPrimary
 
         return Button {
             onParameterChange("openTone", option.parameterValue)
@@ -817,7 +778,7 @@ struct EffectCard: View {
 
     private func maximizerModeButton(for option: MaximizerMode) -> some View {
         let isSelected = option == maximizerMode
-        let textColor: Color = isSelected ? .black : Theme.textPrimary
+        let textColor: Color = isSelected ? Theme.onAccent : Theme.textPrimary
 
         return Button {
             onParameterChange("mode", option.parameterValue)
@@ -869,10 +830,10 @@ struct HeadphoneSpatialCard: View {
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 12)
-                Toggle("", isOn: Binding(get: { isEnabled }, set: onToggle))
-                    .toggleStyle(SwitchToggleStyle(tint: accentColor))
+                Toggle(L10n.tr("headphone_spatial.title"), isOn: Binding(get: { isEnabled }, set: onToggle))
+                    .toggleStyle(AppearanceToggleStyle(accent: accentColor))
                     .labelsHidden()
-                    .scaleEffect(0.9)
+                    .scaleEffect(Theme.isRealistic ? 1 : 0.9)
                     .disabled(!isInteractive)
             }
 
@@ -903,13 +864,13 @@ struct HeadphoneSpatialCard: View {
             }
         }
         .padding(Theme.innerPadding)
-        .background(Theme.secondaryBackground)
+        .background(HardwarePanel())
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
                 .stroke(isEnabled ? accentColor.opacity(0.3) : Theme.border, lineWidth: 1)
         )
-        .frame(width: Theme.maxContentWidth)
+        .frame(maxWidth: Theme.maxContentWidth)
         .opacity(isInteractive ? (isEnabled ? 1.0 : 0.6) : 0.35)
     }
 
@@ -925,14 +886,15 @@ struct HeadphoneSpatialCard: View {
                     .foregroundStyle(Theme.textPrimary)
             }
 
-            Slider(
+            AppearanceSlider(
                 value: Binding(
                     get: { value },
                     set: { onParameterChange(key, $0) }
                 ),
-                in: 0...1
+                in: 0...1, accent: accentColor
             )
             .tint(isEnabled ? accentColor : Theme.textSecondary.opacity(0.3))
+            .accessibilityLabel(title)
             .disabled(!isEnabled || !isInteractive)
         }
     }
@@ -952,7 +914,7 @@ struct HeadphoneSpatialCard: View {
 
     private func presetButton(for option: HeadphoneHRTFPreset) -> some View {
         let isSelected = option == preset
-        let textColor: Color = isSelected ? .black : Theme.textPrimary
+        let textColor: Color = isSelected ? Theme.onAccent : Theme.textPrimary
         let backgroundColor: Color = isSelected ? accentColor : Theme.secondaryBackground
         let borderColor: Color = isSelected ? accentColor.opacity(0.35) : Theme.border
 

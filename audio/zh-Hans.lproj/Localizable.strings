@@ -390,3 +390,26 @@
 
 "effects.tab.off" = "OFF";
 "effects.preparing" = "正在准备效果…";
+
+// Appearance
+"appearance.title" = "外观";
+"appearance.original" = "原始";
+"appearance.light" = "拟物浅色";
+"appearance.dark" = "拟物深色";
+"appearance.info.title" = "关于外观";
+"appearance.info.message" = "选择整个应用的外观，所选模式会自动保存。示例控件仅用于预览外观，不会影响播放。";
+"search.open_music" = "打开音乐";
+"appearance.preview" = "控件预览";
+"appearance.preview.level" = "预览电平";
+"appearance.preview.power" = "预览电源";
+"appearance.on" = "开";
+"appearance.off" = "关";
+"appearance.playback_position" = "播放位置";
+"playback.control.backward.fill" = "上一首";
+"playback.control.gobackward.15" = "后退15秒";
+"playback.control.goforward.15" = "前进15秒";
+"playback.control.forward.fill" = "下一首";
+"playback.control.play" = "播放";
+"playback.control.pause" = "暂停";
+
+"library.various_artists" = "群星";

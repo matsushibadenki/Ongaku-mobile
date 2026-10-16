@@ -390,3 +390,26 @@
 
 "effects.tab.off" = "OFF";
 "effects.preparing" = "Preparing effects…";
+
+// Appearance
+"appearance.title" = "Appearance";
+"appearance.original" = "Original";
+"appearance.light" = "Realistic Light";
+"appearance.dark" = "Realistic Dark";
+"appearance.info.title" = "About appearance";
+"appearance.info.message" = "Choose a finish for the entire app. Your choice is saved automatically. The sample controls only preview the appearance; they do not change playback.";
+"search.open_music" = "Open Music";
+"appearance.preview" = "Control preview";
+"appearance.preview.level" = "Preview level";
+"appearance.preview.power" = "Preview power";
+"appearance.on" = "On";
+"appearance.off" = "Off";
+"appearance.playback_position" = "Playback position";
+"playback.control.backward.fill" = "Previous track";
+"playback.control.gobackward.15" = "Rewind 15 seconds";
+"playback.control.goforward.15" = "Forward 15 seconds";
+"playback.control.forward.fill" = "Next track";
+"playback.control.play" = "Play";
+"playback.control.pause" = "Pause";
+
+"library.various_artists" = "Various Artists";

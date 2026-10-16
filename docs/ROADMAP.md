@@ -1,5 +1,29 @@
 # #Ongaku Roadmap
 
+
+## Appearance
+
+- 🟢 [Done] Add luminous multicolor 3D spectrum ribbons, perspective grid, signal-driven glow and bounded peak particles. Retain a fixed camera, limit rendering to 30 fps / 24 layers / 96 samples, pause hidden/inactive playback and respect Reduce Motion. Simulator build and Light SE / Dark Pro Max / paused visual checks pass.
+- ⭕️ [Pending] Measure the enhanced 3D spectrum's GPU/energy usage and live signal response on a physical iPhone.
+- 🟢 [Done] Generate and integrate white-studio VU images for Light in orange and green. Aspect-fit the complete images, blend empty backdrop into the shared glossy surface, retain needle alignment and use dark status indicators. Simulator build and SE / Pro Max production-view host checks pass; Dark/Original retain their assets.
+- 🟢 [Done] Unify screen-space backgrounds across tabs, fixed playback controls and library navigation; remove status-area clipping. Give Light a smooth #f4f4f4 → #fbfbfb → #ffffff finish with an upper-left highlight. Simulator build and SE player / Pro Max navigation-fixture visual checks pass.
+- ⭕️ [Pending] Verify the continuous background during library navigation transitions on the physical iPhone.
+- 🟢 [Done] Expand the 2D spectrum reflection into the available space above the title, preserving the main-bar baseline and control layout. Fade the reflection naturally and retain visibility in Light and Dark. Simulator build and SE / Pro Max visual checks pass.
+- 🟢 [Done] Increase Dark slider-thumb contrast with a lighter metallic face, bright rim and dark grip marks. Animate only the primary transport's illuminated ring on a 3.6-second breathing cycle during playback; pause/preparation, inactive scenes and Reduce Motion use a static ring. Simulator build and playing/paused visual checks pass.
+- 🟢 [Done] Reduce thumbnail rendering by 15% without moving track or transport controls. Show the uncropped VU portrait across the full screen behind the interface, share image/needle coordinates across tab and footer backgrounds, and keep status/track labels legible. Simulator build and isolated visual checks pass.
+- 🟢 [Done] Restore the entire VU portrait image with aspect-fit sizing and source-image needle coordinates. Halve the 2D baseline-to-title gap, including unused space below the artwork square, and double bar-height gain while containing strong peaks. Simulator build and SE / Pro Max visual checks pass.
+- 🟢 [Done] Reduce seek-to-transport spacing by 48 pt while preserving bottom controls and slider hit area. Place the album hint inside the time row. Render VU, 2D spectrum and 3D spectrum in the shared artwork viewport; align the VU needle to its image and center the projected 3D envelope. Simulator build and SE / Pro Max visual checks pass.
+- 🟢 [Done] Allocate the remaining player viewport to artwork after measuring track details and seek controls. Keep transport and menu at their existing bottom positions, reduce the album-hint gap, and reserve signal/album-hint slots to avoid state-dependent shifts. SE / Pro Max previews and the simulator build pass.
+- 🟢 [Done] Light raised button edges from the upper left, shade recessed edges in the opposite direction, and cast contact shadows to the lower right. Transport press state shortens the shadow; button sizes and reduced symbols remain unchanged. Simulator build and isolated production-control previews passed visual review.
+- 🟢 [Done] Refine Light around #f4f4f4 / #fbfbfb / #ffffff with darker details; lower Dark's material brightness while retaining its tonal width and black recesses. Restore vivid orange indicators and group transport/mode controls with 4 pt spacing while retaining the 16 pt menu gap. Simulator build and SE / Pro Max visual checks passed.
+- 🟢 [Done] Soften Light/Dark material tonal ranges and glow, compact playback-mode icons while retaining 44 pt hit targets, reserve 16 pt above the bottom menu, and adapt artwork to compact screen height. Cache the brushed texture tile.
+- 🟢 [Done] Open streaming sources off MainActor concurrently with session preparation; preserve generation/cancellation guards and PCM. Stop cancelled metadata scans from scheduling new work or replacing complete caches; defer library work during paused audio preparation. Worker, cancellation, transport and navigation regressions pass.
+- ⭕️ [Pending] Measure actual startup-time improvement on the affected iPhone/library and validate live playback/remote/DRM behavior after the scheduling changes.
+
+- 🟢 [Done] Preserve Original as the default; add persisted Realistic Light / Realistic Dark finishes with metallic controls, brushed surfaces, illuminated rings, native slider interaction and localized appearance selection. Replace the bottom Music shortcut with Appearance and place Open Music in the Search page.
+- 🟢 [Done] Adapt shared colors and settings/lyrics/sync sheets, verify the simulator build and navigation regression, inspect SE / 16 Pro Max settings layouts, and verify mode persistence across process restart. See [appearance validation](APPEARANCE_VALIDATION.md).
+- ⭕️ [Pending] Verify physical taps, VoiceOver, seek/effect slider gestures and live playback/visualization appearance on an iPhone.
+
 ## Playback fidelity and timing
 
 - 🟢 [Done] Keep Now Playing loading until the local preparation task finishes, including paused startup restoration. Publish task readiness, withhold the format/DSP badge while preparing, and disable transport buttons, seek gestures, artwork track changes and playback-mode controls together. Clear readiness on failure/cancellation, reject stale cache errors, and avoid requiring a DSP badge for system playback. iOS build, transport regressions and real-file simulator readiness checks passed; see [validation](RENDER_NAVIGATION_VALIDATION.md#now-playing-dsp-readiness-2026-10-15).
@@ -74,6 +98,10 @@
 - ⭕️ [Pending] Verify locked-device interruption recovery with calls and other audio apps, including delayed session release, Bluetooth route changes, and pause/track changes during recovery. iOS controls background execution and delivery of interruption notifications.
 
 ## Music library integrity
+
+- 🟢 [Done] Read local embedded/folder artwork in Library, group compilation albums by folder instead of performer, extract disc/track/album-artist tags and sort album contents naturally. Migrate the local metadata cache and keep local browsing available without Music permission. Five-format fixtures and existing library-index regressions pass; see [local library validation](LOCAL_LIBRARY_VALIDATION.md).
+- 🟢 [Done] Enable native iPad targeting and replace screen-sized fixed widths with container-constrained layouts and adaptive marquee text. iOS Simulator build passes with both device families enabled.
+- ⭕️ [Pending] Verify the reported local library issues with the original music on iPhone 12 and iPad Air (5th generation), including window resizing and the reported OS version.
 
 - 🟢 [Done] Give the Now Playing artwork's upward swipe a left-to-right album entrance: suppress the destination's forward push and slide the retained Library stack in from the left over 300 ms, keeping the custom tab bar fixed. Preserve ordinary navigation and the artist/album back path, cancel pending entrance when leaving Library, and honor Reduce Motion. iOS build, navigation regression and isolated SE/16 Pro Max transition checks passed; see [gesture validation](RENDER_NAVIGATION_VALIDATION.md#artwork-swipe-album-entrance-2026-10-15).
 - 🟢 [Done] Keep NavigationStack/path/destination registration independent of playback telemetry. Coalesce relevant Library/Search model changes after Published values commit, preserve row/loading/permission updates, and register LibraryRoute destinations in Search as well as Library. Keep typed tab paths independent, skip identical album-path replacement and log navigation source/depth.

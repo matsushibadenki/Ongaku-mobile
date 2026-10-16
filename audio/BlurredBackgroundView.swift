@@ -14,11 +14,11 @@ struct BlurredBackgroundView: View {
     var body: some View {
         ZStack {
             // シックな黒のベース
-            Theme.background.ignoresSafeArea()
+            AppBackground().ignoresSafeArea()
             
             // フラットかつミニマルにするため、アートワークの裏側の処理を大幅に簡素化
             // 非常に薄い（0.1程度の）ぼかしレイヤーをオプションで残し、真っ暗すぎない質感を出す
-            if let image = image {
+            if let image = image, !Theme.isRealistic {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()

@@ -71,7 +71,7 @@ struct PlaybackControlsView: View {
             
             Spacer(minLength: 2)
         }
-        .frame(width: Theme.maxContentWidth) // 90%の枠内に物理的に封じ込め
+        .frame(maxWidth: Theme.maxContentWidth) // Parent supplies the safe-area gutters.
     }
 }
 
@@ -86,24 +86,30 @@ private struct ControlFlatButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle()
-                    .stroke(isPressed ? Color.white.opacity(0.3) : Theme.border, lineWidth: 1)
-                    .frame(width: size, height: size)
+                if Theme.isRealistic {
+                    HardwareDial(active: false, isPressed: isPressed, outerInset: 2)
+                        .frame(width: size, height: size)
+                } else {
+                    Circle()
+                        .stroke(isPressed ? Theme.textPrimary.opacity(0.3) : Theme.border, lineWidth: 1)
+                        .frame(width: size, height: size)
+                }
                 
                 Image(systemName: iconName)
-                    .font(.system(size: size * 0.35, weight: .regular))
-                    .foregroundStyle(isDisabled ? Theme.textSecondary : Color.white)
+                    .font(.system(size: size * 0.35 * 2 / 3, weight: .regular))
+                    .foregroundStyle(isDisabled ? Theme.textSecondary : Theme.textPrimary)
             }
             .scaleEffect(isPressed ? 0.95 : 1.0)
             .opacity(isDisabled ? 0.3 : 1.0)
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(.plain)
         .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isPressed = pressing
             }
         }, perform: {})
         .disabled(isDisabled)
+        .accessibilityLabel(L10n.tr("playback.control.\(iconName)"))
     }
 }
 
@@ -124,13 +130,20 @@ private struct PrimaryControlFlatButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle()
-                    .stroke(isDisabled ? Theme.border : (isVisuallyPlaying ? accentColor.opacity(0.4) : Color.white), lineWidth: 1.5)
-                    .frame(width: size, height: size)
+                if Theme.isRealistic {
+                    HardwareDial(accent: accentColor, active: !isDisabled, isPressed: isPressed,
+                                 isBreathing: isPlaying && !isProcessing && !isDisabled,
+                                 outerInset: 2)
+                        .frame(width: size, height: size)
+                } else {
+                    Circle()
+                        .stroke(isDisabled ? Theme.border : (isVisuallyPlaying ? accentColor.opacity(0.4) : Theme.textPrimary), lineWidth: 1.5)
+                        .frame(width: size, height: size)
+                }
                 
                 Image(systemName: isVisuallyPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: size * 0.4, weight: .regular))
-                    .foregroundStyle(isDisabled ? Theme.textSecondary : (isVisuallyPlaying ? accentColor : Color.white))
+                    .font(.system(size: size * 0.4 * 2 / 3, weight: .regular))
+                    .foregroundStyle(isDisabled ? Theme.textSecondary : (isVisuallyPlaying ? accentColor : Theme.textPrimary))
                     .offset(x: isVisuallyPlaying ? 0 : 2)
 
                 if isProcessing {
@@ -142,12 +155,13 @@ private struct PrimaryControlFlatButton: View {
             }
             .scaleEffect(isPressed ? 0.92 : 1.0)
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(.plain)
         .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isPressed = pressing
             }
         }, perform: {})
         .disabled(isDisabled)
+        .accessibilityLabel(L10n.tr(isVisuallyPlaying ? "playback.control.pause" : "playback.control.play"))
     }
 }

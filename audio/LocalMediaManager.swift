@@ -8,16 +8,6 @@ import Foundation
 import AVFoundation
 import UIKit
 
-struct LocalTrackMetadata: Sendable {
-    let url: URL
-    let title: String
-    let artist: String
-    let album: String
-    let duration: TimeInterval
-    let trackNumber: Int?
-    let discNumber: Int?
-}
-
 final class LocalMediaManager: @unchecked Sendable {
     static let shared = LocalMediaManager()
     nonisolated static let supportedAudioExtensions: Set<String> = [
@@ -44,6 +34,7 @@ final class LocalMediaManager: @unchecked Sendable {
         let duration: TimeInterval
         let trackNumber: Int?
         let discNumber: Int?
+        let albumArtist: String?
 
         func metadata(at url: URL) -> LocalTrackMetadata {
             LocalTrackMetadata(
@@ -53,7 +44,8 @@ final class LocalMediaManager: @unchecked Sendable {
                 album: album,
                 duration: duration,
                 trackNumber: trackNumber,
-                discNumber: discNumber
+                discNumber: discNumber,
+                albumArtist: albumArtist
             )
         }
     }
@@ -132,6 +124,7 @@ final class LocalMediaManager: @unchecked Sendable {
             }
         }
 
+        guard !Task.isCancelled else { return [] }
         guard !candidates.isEmpty else {
             saveMetadataCache([])
             return GoogleDriveLibraryStore.shared.localTracks()
@@ -165,12 +158,16 @@ final class LocalMediaManager: @unchecked Sendable {
                     let candidate = changedCandidates[nextIndex]
                     nextIndex += 1
                     group.addTask { [weak self] in
-                        guard let self else { return (candidate.index, nil) }
+                        guard !Task.isCancelled, let self else { return (candidate.index, nil) }
                         return (candidate.index, await self.extractMetadata(from: candidate.url))
                     }
                 }
 
                 while let result = await group.next() {
+                    guard !Task.isCancelled else {
+                        group.cancelAll()
+                        break
+                    }
                     if let metadata = result.1 {
                         parsedResults.append((result.0, metadata))
                     }
@@ -178,7 +175,7 @@ final class LocalMediaManager: @unchecked Sendable {
                     let candidate = changedCandidates[nextIndex]
                     nextIndex += 1
                     group.addTask { [weak self] in
-                        guard let self else { return (candidate.index, nil) }
+                        guard !Task.isCancelled, let self else { return (candidate.index, nil) }
                         return (candidate.index, await self.extractMetadata(from: candidate.url))
                     }
                 }
@@ -188,6 +185,8 @@ final class LocalMediaManager: @unchecked Sendable {
             results.append(contentsOf: parsed)
         }
 
+        // Never overwrite a complete cache with the partial result of a cancelled scan.
+        guard !Task.isCancelled else { return [] }
         let sortedResults = results.sorted { $0.0 < $1.0 }
         let metadataByIndex = Dictionary(uniqueKeysWithValues: sortedResults)
         let refreshedCache = candidates.compactMap { candidate -> CachedLocalTrack? in
@@ -201,7 +200,8 @@ final class LocalMediaManager: @unchecked Sendable {
                 album: metadata.album,
                 duration: metadata.duration,
                 trackNumber: metadata.trackNumber,
-                discNumber: metadata.discNumber
+                discNumber: metadata.discNumber,
+                albumArtist: metadata.albumArtist
             )
         }
         saveMetadataCache(refreshedCache)
@@ -213,7 +213,7 @@ final class LocalMediaManager: @unchecked Sendable {
         defer { metadataCacheLock.unlock() }
         guard let data = try? Data(contentsOf: metadataCacheURL),
               let cache = try? JSONDecoder().decode(MetadataCache.self, from: data),
-              cache.version == 2 else { return [] }
+              cache.version == 3 else { return [] }
         return cache.tracks
     }
 
@@ -223,7 +223,7 @@ final class LocalMediaManager: @unchecked Sendable {
         do {
             let directory = metadataCacheURL.deletingLastPathComponent()
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(MetadataCache(version: 2, tracks: tracks))
+            let data = try JSONEncoder().encode(MetadataCache(version: 3, tracks: tracks))
             try data.write(to: metadataCacheURL, options: .atomic)
         } catch {
             print("[LocalMediaManager] Failed to save metadata cache: \(error)")
@@ -232,58 +232,17 @@ final class LocalMediaManager: @unchecked Sendable {
     
     // メタデータの抽出
     private func extractMetadata(from url: URL) async -> LocalTrackMetadata? {
-        let asset = AVURLAsset(url: url)
-        
+        guard !Task.isCancelled else { return nil }
         do {
-            // タイトル、アーティスト、アルバム、再生時間を取得
-            let duration = try await asset.load(.duration).seconds
-            let metadata = try await asset.load(.commonMetadata)
-            
-            var title = url.deletingPathExtension().lastPathComponent
-            var artist = "Unknown Artist"
-            var album = "Unknown Album"
-            
-            if let titleItem = metadata.first(where: { $0.commonKey == .commonKeyTitle }),
-               let value = try? await titleItem.load(.value) as? String {
-                title = value
-            }
-            
-            if let artistItem = metadata.first(where: { $0.commonKey == .commonKeyArtist }),
-               let value = try? await artistItem.load(.value) as? String {
-                artist = value
-            }
-            
-            if let albumItem = metadata.first(where: { $0.commonKey == .commonKeyAlbumName }),
-               let value = try? await albumItem.load(.value) as? String {
-                album = value
-            }
-            
-            return LocalTrackMetadata(
-                url: url,
-                title: title,
-                artist: artist,
-                album: album,
-                duration: duration,
-                trackNumber: nil,
-                discNumber: nil
-            )
+            return try await LocalMediaMetadataReader.read(url)
         } catch {
-            print("[LocalMediaManager] Failed to extract metadata for \(url.lastPathComponent): \(error)")
             return nil
         }
     }
-    
+
     // アートワークの抽出（オンデマンド用）
     func fetchArtwork(from url: URL) async -> UIImage? {
-        let asset = AVURLAsset(url: url)
-        guard let metadata = try? await asset.load(.commonMetadata) else { return nil }
-        
-        let artworkItem = metadata.first(where: { $0.commonKey == .commonKeyArtwork })
-        if let firstItem = artworkItem {
-            if let value = try? await firstItem.load(.value), let data = value as? Data {
-                return UIImage(data: data)
-            }
-        }
-        return nil
+        guard let data = await LocalMediaMetadataReader.artworkData(url) else { return nil }
+        return UIImage(data: data)
     }
 }

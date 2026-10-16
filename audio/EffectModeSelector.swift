@@ -17,7 +17,7 @@ struct EffectModeSelector: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .padding(.horizontal, 4)
-                        .foregroundStyle(selection == mode ? Color.black : Theme.textSecondary)
+                        .foregroundStyle(selection == mode ? Theme.onAccent : Theme.textSecondary)
                         .background(selection == mode ? accentColor : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .contentShape(Rectangle())

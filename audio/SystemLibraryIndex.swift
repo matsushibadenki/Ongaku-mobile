@@ -42,9 +42,13 @@ nonisolated struct SystemLibraryIndex {
                 usedAlbumIDs.insert(generated)
                 id = generated
             }
-            let artist = first.albumArtist ?? first.artist
+            let albumArtists = Set(group.compactMap(\.albumArtist).filter { !$0.isEmpty })
+            let performers = Set(group.map(\.artist))
+            let artist = albumArtists.count == 1 ? albumArtists.first! :
+                (performers.count == 1 ? first.artist : L10n.tr("library.various_artists"))
             return SystemAlbum(
                 id: id, title: first.album, artist: artist, songCount: group.count,
+                localIdentity: first.url?.isFileURL == true ? key : nil,
                 normalizedSearchTerms: [normalize(first.album), normalize(artist), normalize("\(artist) \(first.album)")]
             )
         }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
@@ -57,7 +61,9 @@ nonisolated struct SystemLibraryIndex {
     }
 
     static func contains(_ song: SystemSong, album: SystemAlbum) -> Bool {
+        if let identity = album.localIdentity { return albumKey(song) == identity }
         if let id = song.albumID { return id == album.id }
+        if song.url?.isFileURL == true { return stableID(albumKey(song)) == album.id }
         return song.album == album.title && (song.albumArtist ?? song.artist) == album.artist
     }
 
@@ -67,7 +73,8 @@ nonisolated struct SystemLibraryIndex {
         if let match = albums.first(where: { contains(song, album: $0) }) { return match }
         return SystemAlbum(
             id: song.albumID ?? stableID(albumKey(song)),
-            title: song.album, artist: song.albumArtist ?? song.artist, songCount: 1
+            title: song.album, artist: song.albumArtist ?? song.artist, songCount: 1,
+            localIdentity: song.url?.isFileURL == true ? albumKey(song) : nil
         )
     }
 
@@ -79,11 +86,33 @@ nonisolated struct SystemLibraryIndex {
 
     private static func albumKey(_ song: SystemSong) -> String {
         if let id = song.albumID { return "id:\(id)" }
+        if let url = song.url, url.isFileURL {
+            let folder = LocalAlbumFiles.albumDirectory(for: url).path
+            return "local:\(folder.utf8.count):\(folder):\(song.album)"
+        }
         let artist = song.albumArtist ?? song.artist
         return "name:\(artist.utf8.count):\(artist):\(song.album)"
     }
 
     private static func stableID(_ value: String) -> UInt64 {
         value.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+    }
+
+    static func orderedAlbumSongs(_ songs: [SystemSong]) -> [SystemSong] {
+        guard songs.contains(where: { $0.url?.isFileURL == true || ($0.trackNumber ?? 0) > 0 || ($0.discNumber ?? 0) > 0 }) else { return songs }
+        return songs.sorted { lhs, rhs in
+            let ld = (lhs.discNumber ?? 0) > 0 ? lhs.discNumber! : 1
+            let rd = (rhs.discNumber ?? 0) > 0 ? rhs.discNumber! : 1
+            if ld != rd { return ld < rd }
+            let lt = (lhs.trackNumber ?? 0) > 0 ? lhs.trackNumber! : Int.max
+            let rt = (rhs.trackNumber ?? 0) > 0 ? rhs.trackNumber! : Int.max
+            if lt != rt { return lt < rt }
+            if let lu = lhs.url, let ru = rhs.url {
+                let order = lu.lastPathComponent.localizedStandardCompare(ru.lastPathComponent)
+                if order != .orderedSame { return order == .orderedAscending }
+            }
+            let order = lhs.title.localizedStandardCompare(rhs.title)
+            return order == .orderedSame ? lhs.id < rhs.id : order == .orderedAscending
+        }
     }
 }

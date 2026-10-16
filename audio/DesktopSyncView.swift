@@ -16,7 +16,7 @@ struct DesktopSyncView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(AppBackground().ignoresSafeArea())
             .navigationTitle(L10n.tr("sync.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -28,7 +28,7 @@ struct DesktopSyncView: View {
                 sync.start()
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
         .tint(Theme.accent)
     }
 

@@ -728,13 +728,21 @@ final class HiResPlaybackEngine {
         let safeEffectSettings = memorySafetyMode.safeEffectSettings(effectSettings)
 
         if strategy == .immediateStreaming {
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            // File/provider I/O and session IPC are independent. Neither must
+            // block the UI or wait for the other before beginning.
+            async let openedFile = StreamingAudioFilePreparation.open(url: url)
             try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate)
+            let opened = try await openedFile
+            try Task.checkCancellation()
             guard preparationGeneration == generation else { throw CancellationError() }
             try loadFastFile(
                 url: url,
+                audioFile: opened.file,
                 effectSettings: safeEffectSettings,
                 headphoneSpatialSettings: resolvedSpatialSettings
             )
+            PlaybackDebugLogger.event("audio.streaming.ready elapsedMs=\(Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000))")
             return
         }
         
@@ -780,10 +788,10 @@ final class HiResPlaybackEngine {
     /// prepared separately by the background upgrade task.
     private func loadFastFile(
         url: URL,
+        audioFile: AVAudioFile,
         effectSettings: [RealtimeAudioEffectSetting],
         headphoneSpatialSettings: HeadphoneSpatialSettings
     ) throws {
-        let audioFile = try AVAudioFile(forReading: url)
         let sourceFormat = audioFile.processingFormat
         guard sourceFormat.sampleRate > 0, sourceFormat.channelCount > 0 else {
             throw HiResEngineError.sourceBufferFailed

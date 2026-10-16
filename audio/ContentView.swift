@@ -61,7 +61,10 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var presentedErrorMessage: String?
     @State private var selectedTab: RootTab = .nowPlaying
+    @State private var artworkMode: ArtworkMode = .thumbnail
     @State private var isShowingSettings = false
+    @State private var isShowingAppearance = false
+    @State private var isShowingNowPlayingLyrics = false
     @State private var isShowingDesktopSync = false
     @State private var libraryPath: [LibraryRoute] = []
     @State private var searchPath: [LibraryRoute] = []
@@ -79,70 +82,111 @@ struct ContentView: View {
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
         appearance.backgroundColor = .clear
-        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        appearance.titleTextAttributes = [.foregroundColor: UIColor.label]
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
         UINavigationBar.appearance().standardAppearance = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
     }
     
     var body: some View {
-        TabView(selection: $selectedTab) {
-            // NOW PLAYING
-            NowPlayingView(player: player, onGoToAlbum: { album in
-                openNowPlayingAlbum(album, fromArtworkSwipe: false)
-            }, onSwipeUpToAlbum: { album in
-                openNowPlayingAlbum(album, fromArtworkSwipe: true)
-            })
-                .tag(RootTab.nowPlaying)
-                .toolbar(.hidden, for: .tabBar)
+        GeometryReader { viewport in
+            let safeFrame = viewport.frame(in: .global)
+            let vuFrame = CGRect(x: safeFrame.minX - viewport.safeAreaInsets.leading,
+                                 y: safeFrame.minY - viewport.safeAreaInsets.top,
+                                 width: safeFrame.width + viewport.safeAreaInsets.leading + viewport.safeAreaInsets.trailing,
+                                 height: safeFrame.height + viewport.safeAreaInsets.top + viewport.safeAreaInsets.bottom)
+            VStack(spacing: 0) {
+                TabView(selection: $selectedTab) {
+                    // NOW PLAYING
+                    NowPlayingView(player: player, artworkMode: $artworkMode, onGoToAlbum: { album in
+                        openNowPlayingAlbum(album, fromArtworkSwipe: false)
+                    }, onSwipeUpToAlbum: { album in
+                        openNowPlayingAlbum(album, fromArtworkSwipe: true)
+                    }, vuScreenFrame: vuFrame)
+                        .tag(RootTab.nowPlaying)
+                        .toolbar(.hidden, for: .tabBar)
             
-            // Navigation owners do not observe playback telemetry. Observed
-            // content sits inside each stack, below destination registration.
-            GeometryReader { geometry in
-                NavigationStack(path: $libraryPath) {
-                    LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
-                        .toolbar { settingsToolbar(for: .library) }
-                        .navigationDestination(for: LibraryRoute.self) { route in
-                            LibraryDestinationView(route: route, player: player,
-                                                   onPlay: { selectedTab = .nowPlaying })
+                    // Navigation owners do not observe playback telemetry. Observed
+                    // content sits inside each stack, below destination registration.
+                    GeometryReader { geometry in
+                        NavigationStack(path: $libraryPath) {
+                            LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                                .toolbarBackground(.hidden, for: .navigationBar)
+                                .toolbar { settingsToolbar(for: .library) }
+                                .navigationDestination(for: LibraryRoute.self) { route in
+                                    LibraryDestinationView(route: route, player: player,
+                                                           onPlay: { selectedTab = .nowPlaying })
+                                }
                         }
-                }
-                .offset(x: isAlbumEnteringFromLeading ? -geometry.size.width : 0)
-            }
-            .clipped()
-            .tag(RootTab.library)
-            .toolbar(.hidden, for: .tabBar)
-
-            NavigationStack {
-                EffectsTabContent(player: player,
-                                  isPresented: selectedTab == .effects,
-                                  shouldRenderControls: shouldRenderEffectsControls,
-                                  controlsRenderID: effectsControlsRenderID)
-                    .toolbar { settingsToolbar(for: .effects) }
-            }
-            .tag(RootTab.effects)
-            .toolbar(.hidden, for: .tabBar)
-
-            NavigationStack(path: $searchPath) {
-                SearchTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
-                    .toolbar { settingsToolbar(for: .search) }
-                    .navigationDestination(for: LibraryRoute.self) { route in
-                        LibraryDestinationView(route: route, player: player,
-                                               onPlay: { selectedTab = .nowPlaying })
+                        .offset(x: isAlbumEnteringFromLeading ? -geometry.size.width : 0)
                     }
+                    .tag(RootTab.library)
+                    .toolbar(.hidden, for: .tabBar)
+
+                    NavigationStack {
+                        EffectsTabContent(player: player,
+                                          isPresented: selectedTab == .effects,
+                                          shouldRenderControls: shouldRenderEffectsControls,
+                                          controlsRenderID: effectsControlsRenderID)
+                            .toolbarBackground(.hidden, for: .navigationBar)
+                            .toolbar { settingsToolbar(for: .effects) }
+                    }
+                    .tag(RootTab.effects)
+                    .toolbar(.hidden, for: .tabBar)
+
+                    NavigationStack(path: $searchPath) {
+                        SearchTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                            .toolbarBackground(.hidden, for: .navigationBar)
+                            .toolbar { settingsToolbar(for: .search) }
+                            .navigationDestination(for: LibraryRoute.self) { route in
+                                LibraryDestinationView(route: route, player: player,
+                                                       onPlay: { selectedTab = .nowPlaying })
+                            }
+                    }
+                    .tag(RootTab.search)
+                    .toolbar(.hidden, for: .tabBar)
+                }
+                // Give TabView the actual remaining height; a bottom safe-area inset
+                // can overlay its child GeometryReader instead of reducing its size.
+                VStack(spacing: 16) {
+                    if selectedTab == .nowPlaying {
+                        VStack(spacing: 4) {
+                            PlaybackControlsView(player: player)
+                            PlaybackModeButtonsView(player: player, onLyrics: { isShowingNowPlayingLyrics = true })
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    }
+                    CustomTabBar(selectedTab: $selectedTab, accentColor: accentColor, onAppearance: { isShowingAppearance = true })
+                }
+                .background {
+                    if !(selectedTab == .nowPlaying && artworkMode == .vuMeter) {
+                        AppBackground().ignoresSafeArea()
+                    }
+                }
             }
-            .tag(RootTab.search)
-            .toolbar(.hidden, for: .tabBar)
+            .background {
+                if selectedTab == .nowPlaying && artworkMode == .vuMeter {
+                    NowPlayingVUBackground(player: player).ignoresSafeArea()
+                } else {
+                    AppBackground().ignoresSafeArea()
+                }
+            }
+            .frame(width: viewport.size.width, height: viewport.size.height)
+            .environment(\.appBackgroundFrame, vuFrame)
         }
-        .safeAreaInset(edge: .bottom) {
-            CustomTabBar(selectedTab: $selectedTab, accentColor: accentColor)
-        }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
         .tint(accentColor)
         .alert(L10n.tr("common.error"), isPresented: errorBinding) {
             Button(L10n.tr("common.ok"), role: .cancel) { dismissPresentedError() }
         } message: {
             Text(presentedErrorMessage ?? "")
+        }
+        .sheet(isPresented: $isShowingNowPlayingLyrics) {
+            NowPlayingLyricsView(player: player)
+        }
+        .sheet(isPresented: $isShowingAppearance) {
+            AppearanceView()
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(player: player, isShowing: $isShowingSettings)
@@ -153,6 +197,9 @@ struct ContentView: View {
         .onAppear {
             player.startInitialBootstrapIfNeeded()
             scheduleEffectsPresentationUpdate()
+        }
+        .onChange(of: Theme.appearance) { _, _ in
+            accentColor = player.accentColor
         }
         .onChange(of: selectedTab) { _, newValue in
             PlaybackDebugLogger.event("ui.navigation.tab selected=\(newValue)")
@@ -277,11 +324,15 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "desktopcomputer.and.arrow.down")
                         .foregroundStyle(player.accentColor)
+                        .scaleEffect(0.70)
+                        .offset(x: 3)
                 }
                 .accessibilityLabel(L10n.tr("settings.sync.title"))
             }
             Button { isShowingSettings = true } label: {
                 Image(systemName: "person.crop.circle")
+                    .scaleEffect(0.85)
+                    .offset(x: tab == .library ? -3 : 0)
             }
         }
     }
@@ -313,8 +364,9 @@ private struct LibraryTabContent: View {
     var body: some View {
         VStack(spacing: 0) {
             libraryHeader
+                .padding(.horizontal, Theme.horizontalPadding)
 
-            if player.mediaLibraryAccess == .authorized {
+            if player.mediaLibraryAccess == .authorized || player.systemSongs.contains(where: { $0.url != nil }) {
                 if player.isLibraryBootstrapInProgress {
                     HStack(spacing: 10) {
                         ProgressView()
@@ -334,7 +386,8 @@ private struct LibraryTabContent: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: Theme.maxContentWidth)
+                .frame(maxWidth: Theme.maxContentWidth)
+                .padding(.horizontal, Theme.horizontalPadding)
                 .padding(.vertical, 8)
 
                 if player.isLibraryBootstrapInProgress && player.systemSongs.isEmpty {
@@ -357,7 +410,7 @@ private struct LibraryTabContent: View {
                 }
             }
         }
-        .background(Theme.background)
+        .background(AppBackground().ignoresSafeArea())
     }
 
     private var libraryHeader: some View {
@@ -476,15 +529,14 @@ private struct LibraryTabContent: View {
                 MarqueeView(
                     text: name,
                     font: .headline,
-                    color: Theme.textPrimary,
-                    maxWidth: Theme.maxContentWidth - 80
+                    color: Theme.textPrimary
                 )
                 Text(L10n.songCount(count))
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
         }
-        .frame(width: Theme.maxContentWidth, alignment: .leading)
+        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
     }
     
     private var artistsView: some View {
@@ -496,33 +548,23 @@ private struct LibraryTabContent: View {
                     NavigationLink(value: LibraryRoute.artist(artist)) {
                         HStack(spacing: 16) {
                             // アーティストサムネイル（円形）
-                            if let artwork = player.artistArtwork(for: artist, size: CGSize(width: 80, height: 80)) {
-                                Image(uiImage: artwork)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 44, height: 44)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
-                            } else {
-                                Circle()
-                                    .fill(Theme.secondaryBackground)
-                                    .frame(width: 44, height: 44)
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .font(.system(size: 18, weight: .thin))
-                                            .foregroundStyle(Theme.textSecondary)
-                                    )
-                                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
-                            }
-                            
+                            LibraryArtworkImage(
+                                fallback: player.artistArtwork(for: artist, size: CGSize(width: 80, height: 80)),
+                                urls: player.songs(for: artist).compactMap(\.url).filter(\.isFileURL),
+                                placeholder: "person.fill"
+                            )
+                            .frame(width: 44, height: 44)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Theme.border, lineWidth: 1))
+
                             VStack(alignment: .leading, spacing: 4) {
-                                MarqueeView(text: artist.name, font: .system(size: 17, weight: .regular), color: Theme.textPrimary, maxWidth: Theme.maxContentWidth - 90)
+                                MarqueeView(text: artist.name, font: .system(size: 17, weight: .regular), color: Theme.textPrimary)
                                 Text(L10n.albumAndSongCount(albums: artist.albumCount, songs: artist.songCount))
                                     .font(.system(size: 13, weight: .light))
                                     .foregroundStyle(Theme.textSecondary)
                             }
                         }
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
+                        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                         .padding(.vertical, 4)
                     }
                     .listRowBackground(Color.clear)
@@ -542,7 +584,7 @@ private struct LibraryTabContent: View {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 20) {
                         ForEach(player.systemAlbums) { album in
                             NavigationLink(value: LibraryRoute.album(album)) {
-                                AlbumTileView(album: album, artwork: player.albumArtwork(for: album))
+                                AlbumTileView(album: album, artwork: player.albumArtwork(for: album), artworkURLs: player.albumArtworkURLs(for: album))
                             }
                             .buttonStyle(.plain)
                         }
@@ -603,12 +645,13 @@ private struct LibraryTabContent: View {
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
         }
-        .frame(width: Theme.maxContentWidth)
+        .frame(maxWidth: Theme.maxContentWidth)
     }
 
 }
 
 private struct SearchTabContent: View {
+    @Environment(\.openURL) private var openURL
     let player: AudioPlayerViewModel
     let onPlay: () -> Void
     @StateObject private var updates: CoalescedViewUpdates
@@ -623,7 +666,7 @@ private struct SearchTabContent: View {
 
     var body: some View {
         ZStack {
-            Theme.background.ignoresSafeArea()
+            AppBackground().ignoresSafeArea()
             searchRoot
                 .scrollContentBackground(.hidden)
                 .scrollDismissesKeyboard(.interactively)
@@ -643,7 +686,7 @@ private struct SearchTabContent: View {
                     Text(player.searchResultCountSummary)
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
+                        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
 
                     Picker(L10n.tr("search.scope.picker"), selection: $selectedSearchScope) {
                         ForEach(SearchScope.allCases) { scope in
@@ -651,7 +694,17 @@ private struct SearchTabContent: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: Theme.maxContentWidth)
+                    .frame(maxWidth: Theme.maxContentWidth)
+
+                    Button {
+                        if let url = URL(string: "music://") { openURL(url) }
+                    } label: {
+                        Label(L10n.tr("search.open_music"), systemImage: "arrow.up.right.square")
+                            .font(.subheadline)
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textSecondary)
                 }
                 .padding(.vertical, 4)
             }
@@ -662,12 +715,12 @@ private struct SearchTabContent: View {
                     Text(L10n.tr("search.cross_library_hint"))
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
+                        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                         .padding(.vertical, 6)
                 }
             }
 
-            if player.mediaLibraryAccess == .authorized {
+            if player.mediaLibraryAccess == .authorized || player.systemSongs.contains(where: { $0.url != nil }) {
                 if selectedSearchScope == .all || selectedSearchScope == .playlists {
                     Section(L10n.tr("library.playlists")) {
                         if player.filteredSystemPlaylists.isEmpty {
@@ -687,7 +740,7 @@ private struct SearchTabContent: View {
                                                 .foregroundStyle(Theme.textSecondary)
                                         }
                                     }
-                                    .frame(width: Theme.maxContentWidth, alignment: .leading)
+                                    .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                                 }
                                 .listRowBackground(Color.clear)
                             }
@@ -714,7 +767,7 @@ private struct SearchTabContent: View {
                                                 .foregroundStyle(Theme.textSecondary)
                                         }
                                     }
-                                    .frame(width: Theme.maxContentWidth, alignment: .leading)
+                                    .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                                 }
                                 .listRowBackground(Color.clear)
                             }
@@ -741,7 +794,7 @@ private struct SearchTabContent: View {
                                                 .foregroundStyle(Theme.textSecondary)
                                         }
                                     }
-                                    .frame(width: Theme.maxContentWidth, alignment: .leading)
+                                    .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                                 }
                                 .listRowBackground(Color.clear)
                             }
@@ -813,7 +866,7 @@ private struct SearchTabContent: View {
                         Text(statusMessage)
                             .font(.caption)
                             .foregroundStyle(Color.orange.opacity(0.92))
-                            .frame(width: Theme.maxContentWidth, alignment: .leading)
+                            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                             .padding(.vertical, 4)
                     }
 
@@ -825,19 +878,19 @@ private struct SearchTabContent: View {
                                 .font(.caption)
                                 .foregroundStyle(Theme.textSecondary)
                         }
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
+                        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                         .padding(.vertical, 6)
                     } else if !player.hasActiveSearch {
                         Text(L10n.tr("apple_music.search_hint"))
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
-                            .frame(width: Theme.maxContentWidth, alignment: .leading)
+                            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                             .padding(.vertical, 6)
                     } else if player.appleMusicCatalogAlbums.isEmpty && player.appleMusicCatalogSongs.isEmpty {
                         Text(L10n.tr("apple_music.empty"))
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
-                            .frame(width: Theme.maxContentWidth, alignment: .leading)
+                            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                             .padding(.vertical, 6)
                     } else {
                         if !player.appleMusicCatalogAlbums.isEmpty {
@@ -883,7 +936,7 @@ private struct SearchTabContent: View {
         Text(title)
             .font(.caption.weight(.semibold))
             .foregroundStyle(Theme.textSecondary)
-            .frame(width: Theme.maxContentWidth, alignment: .leading)
+            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
             .padding(.top, 4)
     }
 
@@ -891,7 +944,7 @@ private struct SearchTabContent: View {
         Text(player.hasActiveSearch ? L10n.tr("search.empty.active") : L10n.tr("search.empty.idle"))
             .font(.caption)
             .foregroundStyle(Theme.textSecondary)
-            .frame(width: Theme.maxContentWidth, alignment: .leading)
+            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
             .padding(.vertical, 6)
     }
     
@@ -907,7 +960,7 @@ private struct EffectsTabContent: View {
 
     var body: some View {
         ZStack {
-            Theme.background.ignoresSafeArea()
+            AppBackground().ignoresSafeArea()
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -945,7 +998,7 @@ private struct EffectsTabContent: View {
                             Text(player.realtimeEffectsAvailabilityDetail)
                                 .font(.appCaption())
                                 .foregroundStyle(Color.orange.opacity(0.9))
-                                .frame(width: Theme.maxContentWidth, alignment: .leading)
+                                .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                                 .padding(.horizontal, 20)
                         }
 
@@ -961,7 +1014,7 @@ private struct EffectsTabContent: View {
                                     .font(.system(size: 13, weight: .light))
                                     .foregroundStyle(Theme.textSecondary)
                             }
-                            .frame(width: Theme.maxContentWidth)
+                            .frame(maxWidth: Theme.maxContentWidth)
                             .padding(.vertical, 36)
                             .background(Theme.secondaryBackground)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
@@ -972,14 +1025,14 @@ private struct EffectsTabContent: View {
                                 .font(.appCaption())
                                 .foregroundStyle(Theme.textSecondary.opacity(0.4))
                                 .padding(.top, 10)
-                                .frame(width: Theme.maxContentWidth)
+                                .frame(maxWidth: Theme.maxContentWidth)
                                 .lineLimit(1)
                         }
 
                         Text(player.signalDiagnosticsSummary)
                             .font(.appCaption())
                             .foregroundStyle(Theme.textSecondary.opacity(0.55))
-                            .frame(width: Theme.maxContentWidth)
+                            .frame(maxWidth: Theme.maxContentWidth)
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
 
@@ -990,7 +1043,7 @@ private struct EffectsTabContent: View {
                                     ? Color.red
                                     : Theme.textSecondary.opacity(0.55)
                             )
-                            .frame(width: Theme.maxContentWidth)
+                            .frame(maxWidth: Theme.maxContentWidth)
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
 
@@ -1005,14 +1058,15 @@ private struct EffectsTabContent: View {
                                     .foregroundStyle(Theme.textSecondary)
                             }
 
-                            Slider(
+                            AppearanceSlider(
                                 value: Binding(
                                     get: { player.automaticDSPStrength },
                                     set: { player.setAutomaticDSPStrength($0) }
                                 ),
-                                in: 0...1.5
+                                in: 0...1.5, accent: player.accentColor
                             )
                             .tint(player.accentColor)
+                            .accessibilityLabel(L10n.tr("effects.auto_dsp.title"))
                             .disabled(!player.supportsRealtimeEffects || player.selectedEffectPageTab == .off)
 
                             Picker("DSP", selection: Binding(
@@ -1048,14 +1102,14 @@ private struct EffectsTabContent: View {
                                 .multilineTextAlignment(.leading)
                         }
                         .padding(12)
-                        .frame(width: Theme.maxContentWidth, alignment: .leading)
+                        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                         .background(Theme.secondaryBackground)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
 
                         Text(player.effectAuditSummaryText)
                             .font(.system(size: 11, weight: .regular, design: .monospaced))
                             .foregroundStyle(Theme.textSecondary.opacity(0.58))
-                            .frame(width: Theme.maxContentWidth, alignment: .leading)
+                            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
                             .lineLimit(nil)
                             .multilineTextAlignment(.leading)
                     }
@@ -1107,7 +1161,7 @@ private struct EffectsTabContent: View {
                         .presentationCompactAdaptation(.popover)
                 }
             }
-            .frame(width: Theme.maxContentWidth)
+            .frame(maxWidth: Theme.maxContentWidth)
 
             if player.selectedEffectPageTab == .pro {
                 HeadphoneSpatialCard(
@@ -1185,13 +1239,13 @@ struct ArtistAlbumsView: View {
     
     var body: some View {
         ZStack {
-            Theme.background.ignoresSafeArea()
+            AppBackground().ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 0) {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 20) {
                         ForEach(player.albums(for: artist)) { album in
                             NavigationLink(value: LibraryRoute.album(album)) {
-                                AlbumTileView(album: album, artwork: player.albumArtwork(for: album))
+                                AlbumTileView(album: album, artwork: player.albumArtwork(for: album), artworkURLs: player.albumArtworkURLs(for: album))
                             }
                             .buttonStyle(.plain)
                         }
@@ -1218,7 +1272,7 @@ struct AlbumSongsView: View {
         let songs = player.songs(for: album)
         ScrollViewReader { proxy in
             List {
-                HeaderSection(album: album, artwork: player.albumArtwork(for: album), count: songs.count)
+                HeaderSection(album: album, artwork: player.albumArtwork(for: album), count: songs.count, artworkURLs: player.albumArtworkURLs(for: album))
                     .listRowBackground(Color.clear)
                 
                 Section(L10n.tr("album.track_list")) {
@@ -1250,7 +1304,7 @@ struct AlbumSongsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(AppBackground().ignoresSafeArea())
             .listStyle(.plain)
             .reservingTabBarSpace()
             .navigationTitle(album.title)
@@ -1300,7 +1354,7 @@ struct PlaylistSongsView: View {
             .listRowBackground(Color.clear)
         }
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
+        .background(AppBackground().ignoresSafeArea())
         .listStyle(.plain)
         .reservingTabBarSpace()
         .navigationTitle(playlist.name)
@@ -1361,7 +1415,7 @@ struct OngakuPlaylistSongsView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
+        .background(AppBackground().ignoresSafeArea())
         .reservingTabBarSpace()
         .navigationTitle(currentPlaylist.name)
     }
@@ -1393,10 +1447,10 @@ private struct MediaLibraryPermissionInlineCard: View {
                 LoadingButtonLabel(
                     title: actionTitle,
                     isLoading: isLoading,
-                    accentColor: .black
+                    accentColor: Theme.onAccent
                 )
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
                     .background(accentColor)
@@ -1406,7 +1460,7 @@ private struct MediaLibraryPermissionInlineCard: View {
             .disabled(isLoading)
         }
         .padding(18)
-        .frame(width: Theme.maxContentWidth, alignment: .leading)
+        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
         .background(Theme.secondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         .overlay(
@@ -1448,7 +1502,7 @@ private struct AppleMusicCatalogSongRow: View {
                 action: onAdd
             )
         }
-        .frame(width: Theme.maxContentWidth, alignment: .leading)
+        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
     }
 }
 
@@ -1484,7 +1538,7 @@ private struct AppleMusicCatalogAlbumRow: View {
                 action: onAdd
             )
         }
-        .frame(width: Theme.maxContentWidth, alignment: .leading)
+        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
     }
 
     private var albumSubtitle: String {
@@ -1549,16 +1603,16 @@ private struct AppleMusicAddButton: View {
             Group {
                 if isAdding {
                     ProgressView()
-                        .tint(.black)
+                        .tint(Theme.onAccent)
                         .frame(width: 18, height: 18)
                 } else if isAdded {
                     Image(systemName: "checkmark")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(Theme.onAccent)
                 } else {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(canAdd ? .black : Theme.textSecondary)
+                        .foregroundStyle(canAdd ? Theme.onAccent : Theme.textSecondary)
                 }
             }
             .frame(width: 34, height: 34)
@@ -1578,28 +1632,22 @@ struct HeaderSection: View {
     let album: SystemAlbum
     let artwork: UIImage?
     let count: Int
+    var artworkURLs: [URL] = []
     
     var body: some View {
         HStack(spacing: 20) {
-            if let artwork {
-                Image(uiImage: artwork)
-                    .resizable().scaledToFill()
-                    .frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                RoundedRectangle(cornerRadius: 12).fill(Theme.secondaryBackground)
-                    .frame(width: 80, height: 80)
-                    .overlay(Image(systemName: "opticaldisc").font(.title3.weight(.thin)).foregroundStyle(Theme.textSecondary))
-            }
-            
+            LibraryArtworkImage(fallback: artwork, urls: artworkURLs)
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
             VStack(alignment: .leading, spacing: 4) {
-                MarqueeView(text: album.title, font: .headline, color: Theme.textPrimary, maxWidth: Theme.maxContentWidth - 120)
-                MarqueeView(text: album.artist, font: .subheadline, color: Theme.textSecondary, maxWidth: Theme.maxContentWidth - 120)
+                MarqueeView(text: album.title, font: .headline, color: Theme.textPrimary)
+                MarqueeView(text: album.artist, font: .subheadline, color: Theme.textSecondary)
                 Text(L10n.songCount(count)).font(.caption).foregroundStyle(Theme.textSecondary)
             }
         }
         .padding(.vertical, 8)
-        .frame(width: Theme.maxContentWidth)
+        .frame(maxWidth: Theme.maxContentWidth)
     }
 }
 
@@ -1621,7 +1669,7 @@ struct SectionHeader: View {
                 .lineLimit(nil)
                 .multilineTextAlignment(.leading)
         }
-        .frame(width: Theme.maxContentWidth, alignment: .leading)
+        .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
     }
 }
 
@@ -1832,9 +1880,9 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Theme.secondaryBackground)
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.appearance.colorScheme)
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(AppBackground().ignoresSafeArea())
             .listStyle(.insetGrouped)
             .navigationTitle(L10n.tr("settings.title"))
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("common.close")) { isShowing = false } } }
@@ -1978,18 +2026,18 @@ private struct CustomTabBar: View {
     @Binding var selectedTab: RootTab
     let accentColor: Color
     
-    @Environment(\.openURL) private var openURL
+    var onAppearance: () -> Void = {}
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            // Apple Music
+            // Appearance (formerly the Music shortcut)
             TabBarButton(
-                icon: "applelogo",
-                title: L10n.tr("tab.music"),
+                icon: "circle.lefthalf.filled",
+                title: L10n.tr("appearance.title"),
                 isActive: false,
                 accentColor: accentColor
             ) {
-                if let url = URL(string: "music://") { openURL(url) }
+                onAppearance()
             }
             
             
@@ -2030,7 +2078,9 @@ private struct CustomTabBar: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background {
-            if #available(iOS 26.0, *) {
+            if Theme.isRealistic {
+                HardwarePanel(radius: 36)
+            } else if #available(iOS 26.0, *) {
                 Capsule(style: .circular)
                     .fill(.clear)
                     .glassEffect(.regular, in: Capsule(style: .circular))
@@ -2089,7 +2139,7 @@ private struct CustomTabBar_Previews: PreviewProvider {
             .safeAreaInset(edge: .bottom) {
                 CustomTabBar(selectedTab: .constant(.nowPlaying), accentColor: .orange)
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.appearance.colorScheme)
     }
 }
 
@@ -2106,6 +2156,6 @@ private struct EffectsTabContent_Previews: PreviewProvider {
         NavigationStack {
             EffectsTabContent(player: AudioPlayerViewModel(), isPresented: true, shouldRenderControls: true, controlsRenderID: UUID())
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
     }
 }

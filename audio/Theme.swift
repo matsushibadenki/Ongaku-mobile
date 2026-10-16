@@ -10,30 +10,30 @@ import UIKit
 
 enum Theme {
     // MARK: - Colors
-    static let accent = Color.orange
-    static let precisionSincAccent = Color(red: 0.68, green: 0.9, blue: 0.1)
-    static let background = Color.black
-    static let secondaryBackground = Color(white: 0.05)
-    static let border = Color.white.opacity(0.12)
-    static let textPrimary = Color.white
-    static let textSecondary = Color.white.opacity(0.55)
+    static var accent: Color { appearance == .original ? .orange : appearance.palette.signal }
+    static var precisionSincAccent: Color {
+        appearance == .original ? Color(red: 0.68, green: 0.9, blue: 0.1)
+            : (appearance == .light ? Color(red: 0.34, green: 0.42, blue: 0.15) : Color(red: 0.61, green: 0.68, blue: 0.39))
+    }
+    static let onAccent = Color.black
+    static var appearance: AppAppearance { AppearanceSettings.shared.selection }
+    static var isRealistic: Bool { appearance.isRealistic }
+    static var background: Color { appearance.palette.background }
+    static var secondaryBackground: Color { appearance.palette.panel }
+    static var border: Color { appearance.palette.edge }
+    static var textPrimary: Color { appearance == .original ? .white : appearance.palette.ink }
+    static var textSecondary: Color { appearance.palette.secondary }
     
     // MARK: - Dimens
     static let cornerRadius: CGFloat = 16
     static let innerPadding: CGFloat = 24
     
-    // 【最重要】画面幅の90%をコンテンツの限界とする
-    static var screenWidth: CGFloat {
-        let sceneWidth = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?.screen.bounds.width
-        return sceneWidth ?? 390
-    }
-    static var maxContentWidth: CGFloat { screenWidth * 0.9 }
-    
-    static let horizontalPadding: CGFloat = (screenWidth * 0.1) / 2 // 左右5%ずつの余白
-    static let artworkSize: CGFloat = maxContentWidth * 0.85 // 90%の枠に対してさらに余白
-    
+    // Maximum reading width, never a device/screen-sized fixed frame. Views accept
+    // their parent's proposed width so iPad windows and rotation remain contained.
+    static let maxContentWidth: CGFloat = 760
+    static let horizontalPadding: CGFloat = 16
+    static let artworkSize: CGFloat = 300
+
     static let controlButtonSize: CGFloat = 48
     static let primaryControlButtonSize: CGFloat = 60 // 少しだけ縮小
     
@@ -55,7 +55,7 @@ extension View {
     
     func flatCard() -> some View {
         self.padding(Theme.innerPadding)
-            .background(Theme.secondaryBackground)
+            .background(HardwarePanel())
             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
@@ -70,7 +70,10 @@ struct GlassFallbackShape<S: Shape>: View {
     let cornerRadius: CGFloat
 
     var body: some View {
-        if #available(iOS 26.0, *) {
+        if Theme.isRealistic {
+            shape.fill(Theme.appearance.palette.metal)
+                .overlay(shape.stroke(Theme.border, lineWidth: 1))
+        } else if #available(iOS 26.0, *) {
             shape
                 .fill(.clear)
                 .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))

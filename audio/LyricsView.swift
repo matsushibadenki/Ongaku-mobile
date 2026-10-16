@@ -29,7 +29,7 @@ struct NowPlayingLyricsView: View {
             }
         }
         .tint(player.accentColor)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
     }
 }
 
@@ -99,7 +99,7 @@ struct SongLyricsView: View {
             }
         }
         .padding(.top, 12)
-        .background(Theme.background)
+        .background(AppBackground().ignoresSafeArea())
         .navigationTitle(L10n.tr("lyrics.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -249,6 +249,6 @@ struct LyricsView_Previews: PreviewProvider {
         Group {
             NavigationStack { SongLyricsView(song: song) }.previewDevice("iPhone SE (3rd generation)")
             NavigationStack { SongLyricsView(song: song) }.previewDevice("iPhone 16 Pro Max")
-        }.preferredColorScheme(.dark)
+        }.preferredColorScheme(Theme.appearance.colorScheme)
     }
 }

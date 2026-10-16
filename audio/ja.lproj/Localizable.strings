@@ -390,3 +390,26 @@
 
 "effects.tab.off" = "OFF";
 "effects.preparing" = "エフェクトを準備中…";
+
+// Appearance
+"appearance.title" = "アピアランス";
+"appearance.original" = "オリジナル";
+"appearance.light" = "リアル・ライト";
+"appearance.dark" = "リアル・ダーク";
+"appearance.info.title" = "アピアランスについて";
+"appearance.info.message" = "アプリ全体の質感を選択できます。選択は自動保存されます。サンプルの操作部は見た目の確認用で、再生には影響しません。";
+"search.open_music" = "Musicを開く";
+"appearance.preview" = "操作部のプレビュー";
+"appearance.preview.level" = "プレビューのレベル";
+"appearance.preview.power" = "プレビューの電源";
+"appearance.on" = "オン";
+"appearance.off" = "オフ";
+"appearance.playback_position" = "再生位置";
+"playback.control.backward.fill" = "前の曲";
+"playback.control.gobackward.15" = "15秒戻る";
+"playback.control.goforward.15" = "15秒進む";
+"playback.control.forward.fill" = "次の曲";
+"playback.control.play" = "再生";
+"playback.control.pause" = "一時停止";
+
+"library.various_artists" = "さまざまなアーティスト";

@@ -71,7 +71,7 @@ struct MediaLibraryPermissionView: View {
         }
         .padding(.horizontal, Theme.horizontalPadding)
         .frame(maxWidth: .infinity)
-        .background(Theme.background)
+        .background(AppBackground().ignoresSafeArea())
     }
     
     private var title: String {

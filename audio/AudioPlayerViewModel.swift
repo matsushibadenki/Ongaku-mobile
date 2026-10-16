@@ -302,7 +302,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var localLibraryTracks: [LocalTrackMetadata] = []
 
     private var isPlaybackBusyForLibraryWork: Bool {
-        if isPlaying || isProcessing || isPlaybackStarting { return true }
+        if isPlaying || isProcessing || isPlaybackStarting || isPreparingLocalPlayback { return true }
         if hasInitializedHiResPlaybackEngine && hiResPlaybackEngine.isPlaying { return true }
         if isSystemPlayerConfigured && systemPlayer.playbackState == .playing { return true }
         return false
@@ -1804,28 +1804,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             ? systemQueue.filter { SystemLibraryIndex.contains($0, album: album) }
             : indexedSongs
 
-        let hasTrackMetadata = albumSongs.contains { song in
-            (song.discNumber ?? 0) > 0 || (song.trackNumber ?? 0) > 0
-        }
-
-        guard hasTrackMetadata else { return albumSongs }
-
-        return albumSongs.sorted { lhs, rhs in
-            let lhsDisc = lhs.discNumber ?? 1
-            let rhsDisc = rhs.discNumber ?? 1
-            if lhsDisc != rhsDisc { return lhsDisc < rhsDisc }
-
-            let lhsTrack = lhs.trackNumber ?? Int.max
-            let rhsTrack = rhs.trackNumber ?? Int.max
-            if lhsTrack != rhsTrack { return lhsTrack < rhsTrack }
-
-            let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
-            if titleOrder != .orderedSame {
-                return titleOrder == .orderedAscending
-            }
-
-            return lhs.id < rhs.id
-        }
+        return SystemLibraryIndex.orderedAlbumSongs(albumSongs)
     }
 
     func songs(in playlist: SystemPlaylist) -> [SystemSong] {
@@ -1833,11 +1812,17 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func albumArtwork(for album: SystemAlbum, size: CGSize = CGSize(width: 280, height: 280)) -> UIImage? {
-        systemMediaLibrary.artwork(for: album, size: size)
+        guard album.localIdentity == nil else { return nil }
+        return systemMediaLibrary.artwork(for: album, size: size)
+    }
+
+    func albumArtworkURLs(for album: SystemAlbum) -> [URL] {
+        songs(for: album).compactMap(\.url).filter(\.isFileURL)
     }
 
     func songArtwork(for song: SystemSong, size: CGSize = CGSize(width: 80, height: 80)) -> UIImage? {
-        systemMediaLibrary.artwork(for: song.id, size: size)
+        guard song.url == nil else { return nil }
+        return systemMediaLibrary.artwork(for: song.id, size: size)
     }
 
     func overlay(for song: SystemSong) -> LibraryTrackOverlay {
@@ -2080,7 +2065,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func artistArtwork(for artist: SystemArtist, size: CGSize = CGSize(width: 120, height: 120)) -> UIImage? {
-        systemMediaLibrary.artworkForArtist(id: artist.id, name: artist.name, size: size)
+        guard songs(for: artist).contains(where: { $0.url == nil }) else { return nil }
+        return systemMediaLibrary.artworkForArtist(id: artist.id, name: artist.name, size: size)
     }
 
     func playSystemSong(_ song: SystemSong) {
@@ -4637,6 +4623,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         autoplay: Bool,
         restoreUpsamplingMode: UpsamplingMode? = nil
     ) -> Bool {
+        cancelLibraryWorkForPlayback(force: true)
         localPlaybackFormatDescription = L10n.tr("playback.preparing")
         stopCurrentPlaybackForTransition(pauseSystemPlayback: true)
         playbackSource = .local
@@ -5623,7 +5610,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     normalizeSearchText(track.title),
                     normalizeSearchText(track.artist),
                     normalizeSearchText(track.album)
-                ]
+                ],
+                albumArtist: track.albumArtist
             )
 
             if !songs.contains(where: { $0.id == localID }) {

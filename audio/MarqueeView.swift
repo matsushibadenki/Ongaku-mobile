@@ -1,103 +1,57 @@
-//
-//  MarqueeView.swift
-//  audio
-//
-//  Created by Antigravity on 2026/04/07.
-//
-
 import SwiftUI
 
+/// Uses the row/grid cell's actual width, including during iPad window resizing.
 struct MarqueeView: View {
     let text: String
     let font: Font
     let color: Color
-    var maxWidth: CGFloat = Theme.maxContentWidth
-    
+    var maxWidth: CGFloat = .infinity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
-    
-    // スクロール速度（ピクセル/秒）
-    private let speed: Double = 32
-    // 開始前の待機時間（秒）
-    private let delay: Double = 2.0
-    
+
+    private struct AnimationKey: Equatable {
+        let text: String
+        let available: CGFloat
+        let measured: CGFloat
+        let reduceMotion: Bool
+    }
+
     var body: some View {
-        ZStack(alignment: .leading) {
-            // サイズ計測用のダミー（非表示）
-            Text(text)
-                .font(font)
-                .lineLimit(1)
-                .background(
-                    GeometryReader { textGeometry in
-                        Color.clear.onAppear {
-                            self.textWidth = textGeometry.size.width
-                        }
-                        .onChange(of: text) {
-                            self.textWidth = textGeometry.size.width
-                            resetAnimation()
+        Text(text).font(font).lineLimit(1).hidden()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 0) // The containing row owns its 16 pt gutter.
+            .overlay {
+                GeometryReader { geometry in
+                    let width = min(maxWidth, geometry.size.width)
+                    HStack(spacing: 50) {
+                        Text(text).font(font).foregroundStyle(color).fixedSize()
+                            .background {
+                                GeometryReader { measure in
+                                    Color.clear
+                                        .onAppear { textWidth = measure.size.width }
+                                        .onChange(of: measure.size.width) { _, value in textWidth = value }
+                                }
+                            }
+                        if textWidth > width && !reduceMotion {
+                            Text(text).font(font).foregroundStyle(color).fixedSize()
                         }
                     }
-                )
-                .opacity(0)
-            
-            // 実際の表示エリア（ここで物理的に幅を 90% に制限する）
-            HStack(spacing: 50) {
-                Text(text)
-                    .font(font)
-                    .foregroundStyle(color)
-                    .lineLimit(1)
                     .offset(x: offset)
-                
-                if textWidth > maxWidth {
-                    Text(text)
-                        .font(font)
-                        .foregroundStyle(color)
-                        .lineLimit(1)
-                        .offset(x: offset)
+                    .frame(width: width, height: geometry.size.height, alignment: .leading)
+                    .clipped()
+                    .task(id: AnimationKey(text: text, available: width, measured: textWidth, reduceMotion: reduceMotion)) {
+                        withAnimation(nil) { offset = 0 }
+                        guard width > 0, textWidth > width, !reduceMotion else { return }
+                        do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.linear(duration: (textWidth + 50) / 32).repeatForever(autoreverses: false)) {
+                            offset = -(textWidth + 50)
+                        }
+                    }
                 }
             }
-            .frame(width: maxWidth, alignment: .leading)
-            .clipped() // 枠外を物理的にカット
-            .mask(
-                HStack(spacing: 0) {
-                    LinearGradient(gradient: Gradient(colors: [.clear, .black]), startPoint: .leading, endPoint: .trailing)
-                        .frame(width: textWidth > maxWidth ? 16 : 0)
-                    Rectangle().fill(.black)
-                    LinearGradient(gradient: Gradient(colors: [.black, .clear]), startPoint: .leading, endPoint: .trailing)
-                        .frame(width: textWidth > maxWidth ? 16 : 0)
-                }
-            )
-        }
-        .frame(width: maxWidth) // 親コンテナに対しても 90% 幅を強制
-        .onAppear {
-            if textWidth > maxWidth {
-                startAnimation()
-            }
-        }
-    }
-    
-    private func startAnimation() {
-        guard textWidth > maxWidth else { return }
-        
-        let totalDistance = textWidth + 50 // spacing 50
-        let duration = totalDistance / speed
-        
-        // 遅延を置いて開始
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            withAnimation(.linear(duration: duration).repeatForever(autoreverses: false)) {
-                offset = -totalDistance
-            }
-        }
-    }
-    
-    private func resetAnimation() {
-        withAnimation(.none) {
-            offset = 0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if textWidth > maxWidth {
-                startAnimation()
-            }
-        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(text))
     }
 }
