@@ -12,6 +12,12 @@ struct NativeFirstPlaybackAuditApp: App {
         var lines: [String] = []
         func log(_ text: String) { lines.append(text); try? lines.joined(separator: "\n").write(to: report, atomically: true, encoding: .utf8) }
         let engine = HiResPlaybackEngine()
+        func field<T>(_ name: String, as type: T.Type) -> T {
+            Mirror(reflecting: engine).children.first { $0.label == name }!.value as! T
+        }
+        let graph = field("engine", as: AVAudioEngine.self)
+        let gainEQ = field("inputGainEQ", as: AVAudioUnitEQ.self)
+        let automaticEQ = field("automaticDSPEQ", as: AVAudioUnitEQ.self)
         do {
             await HiResPlaybackEngine.clearPreparedAudioDiskCache()
             let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
@@ -25,6 +31,21 @@ struct NativeFirstPlaybackAuditApp: App {
             for url in [source, next] {
                 let file = try AVAudioFile(forWriting: url, settings: format.settings)
                 try file.write(from: buffer)
+            }
+            let missing = root.appendingPathComponent("missing-diagnostic-source.caf")
+            do {
+                try await engine.load(url: missing, effectSettings: [], upsamplingMode: .precisionSincLinearEco, strategy: .immediateStreaming)
+                preconditionFailure("Missing streaming source succeeded")
+            } catch let failure as AudioPreparationFailure {
+                precondition(failure.stage == .streamingOpen && failure.reason == .preparationFailed)
+                log("PASS: requested Precision Sinc still reports actual streaming_open failure: \(AudioPreparationFailure.diagnostic(failure, fallbackStage: .streamingStart))")
+            }
+            do {
+                try await HiResPlaybackEngine.prepareDiskCache(url: missing, headphoneSpatialSettings: .default, upsamplingMode: .precisionSincLinearEco)
+                preconditionFailure("Missing cache source succeeded")
+            } catch let failure as AudioPreparationFailure {
+                precondition(failure.stage == .offlineOpen && failure.reason == .preparationFailed)
+                log("PASS: next-track cache retains offline_open failure instead of manufacturing capacity_exceeded")
             }
             let started = Date()
             try await engine.load(url: source, effectSettings: [], upsamplingMode: .precisionSincLinearEco, strategy: .immediateStreaming)
@@ -66,16 +87,118 @@ struct NativeFirstPlaybackAuditApp: App {
             }
             precondition(observedEnabledEffect)
             log("PASS: decoded fallback resumes with fade-in and a live enabled EQ, retaining the Music asset identity")
+            // Exercise real production transport, including cancellation before
+            // the old fade's delayed physical pause can run.
+            let beforePause = engine.currentTime()
+            engine.pause()
+            precondition(!engine.isPlaying && graph.isRunning)
+            let frozenPause = engine.currentTime()
+            try await Task.sleep(for: .milliseconds(5))
+            precondition(engine.currentTime() == frozenPause)
+            try engine.play()
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(engine.isPlaying && graph.mainMixerNode.outputVolume == 1)
+            precondition(engine.currentTime() > beforePause)
+            log("PASS: rapid pause/resume preserves the live schedule and rejects the stale physical pause")
+            engine.pause()
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(!engine.isPlaying && !graph.isRunning && graph.mainMixerNode.outputVolume == 0)
+            try engine.seek(to: 1)
+            precondition(!engine.isPlaying && abs(engine.currentTime() - 1) < 0.01)
+            try engine.play()
+            precondition(graph.mainMixerNode.outputVolume == 0)
+            try await engine.waitForSystemHandoffRender()
+            precondition(graph.mainMixerNode.outputVolume == 1)
+            log("PASS: pause drains at zero; paused seek and default resume restore output only after render startup")
+            try engine.seek(to: 4)
+            try await Task.sleep(for: .milliseconds(5))
+            engine.pause()
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(!engine.isPlaying && !graph.isRunning && graph.mainMixerNode.outputVolume == 0)
+            try engine.play()
+            try await engine.waitForSystemHandoffRender()
+            log("PASS: pause cancels an in-flight seek without restarting or leaving output muted on resume")
+            let beforeFailedUpgrade = engine.currentTime()
+            do {
+                try await engine.seamlessUpgrade(url: logicalSource, preparationURL: missing,
+                    effectSettings: effects, headphoneSpatialSettings: .default,
+                    upsamplingMode: .precisionSincLinearEco, shouldResume: true)
+                preconditionFailure("Missing quality source succeeded")
+            } catch let failure as AudioPreparationFailure {
+                precondition(failure.stage == .offlineOpen && failure.reason == .preparationFailed)
+                precondition(engine.isPlaying && engine.currentTime() >= beforeFailedUpgrade)
+                log("PASS: failed Precision Sinc source preparation retains its stage and leaves native playback running")
+            }
             try engine.seek(to: 2)
+            try await Task.sleep(for: .milliseconds(150))
+            let inputBeforeUpgrade = gainEQ.globalGain
+            let automaticBeforeUpgrade = automaticEQ.bands.map(\.gain)
             var sampledLatestSettings = false
             let snapshot = nativeSnapshot
-            try await engine.seamlessUpgrade(url: logicalSource, preparationURL: snapshot.url, latestEffectSettings: { sampledLatestSettings = true; return effects },
-                effectSettings: [], headphoneSpatialSettings: .default,
-                upsamplingMode: .precisionSincLinearEco, shouldResume: true)
+            let upgrade = { @MainActor () async throws in
+                try await engine.seamlessUpgrade(url: logicalSource, preparationURL: snapshot.url,
+                    latestEffectSettings: { sampledLatestSettings = true; return effects },
+                    effectSettings: [], headphoneSpatialSettings: .default,
+                    upsamplingMode: .precisionSincLinearEco, shouldResume: true)
+            }
+            do { try await upgrade() }
+            catch is CancellationError {
+                // A loaded simulator can take longer than this 20-second fixture
+                // to prepare PCM. Only accept the existing EOF safety deferral;
+                // restart the test source and retry once using the completed cache.
+                guard engine.currentTime() >= engine.duration - 0.25 else { throw CancellationError() }
+                log("PASS: preparation reaching fixture EOF safely defers the handoff")
+                for _ in 0..<100 {
+                    if await HiResPlaybackEngine.preparedAudioCacheStatistics().entryCount > 0 { break }
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+                let preparedCache = await HiResPlaybackEngine.preparedAudioCacheStatistics()
+                precondition(preparedCache.entryCount > 0)
+                try engine.seek(to: 2); try engine.play()
+                try await Task.sleep(for: .milliseconds(100))
+                try await upgrade()
+            }
             try await Task.sleep(for: .milliseconds(300))
             precondition(engine.isPlaying && engine.currentTime() >= 2 && sampledLatestSettings)
             precondition(engine.activeUpsamplingMode == .precisionSincLinearEco)
+            precondition(abs(gainEQ.globalGain - inputBeforeUpgrade) < 0.0001)
+            precondition(automaticEQ.bands.map(\.gain) == automaticBeforeUpgrade)
+            // A later explicit effect update must not accidentally activate the
+            // new analysis as normalization for the same track.
+            var changedEffects = effects
+            changedEffects[0].parameters["preamp"] = -1
+            engine.apply(effectSettings: changedEffects)
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(abs(gainEQ.globalGain - inputBeforeUpgrade) < 0.0001)
+            log("PASS: quality handoff preserves input gain and automatic EQ, including a subsequent effect edit")
             log("PASS: audible native stream upgrades without resetting the seek position; latest effects sampled at commit")
+            for rapidResume in [false, true] {
+                try await upgrade()
+                if rapidResume {
+                    let incoming = field(field("isUpgradePlayerNodeActive", as: Bool.self) ? "upgradePlayerNode" : "playerNode", as: AVAudioPlayerNode.self)
+                    for _ in 0..<150 {
+                        if let stamp = incoming.lastRenderTime,
+                           let time = incoming.playerTime(forNodeTime: stamp), time.sampleTime >= 480 { break }
+                        try await Task.sleep(for: .milliseconds(1))
+                    }
+                }
+                let handoff = Mirror(reflecting: engine).children.first { $0.label == "pendingHandoff" }!.value
+                precondition(!Mirror(reflecting: handoff).children.isEmpty)
+                engine.pause()
+                if rapidResume {
+                    try await Task.sleep(for: .milliseconds(5))
+                    try engine.play()
+                }
+                try await Task.sleep(for: .milliseconds(200))
+                precondition(engine.isPlaying == rapidResume)
+                if !rapidResume {
+                    precondition(!graph.isRunning && graph.mainMixerNode.outputVolume == 0)
+                    try engine.play()
+                    try await engine.waitForSystemHandoffRender()
+                }
+                precondition(graph.mainMixerNode.outputVolume == 1 && abs(gainEQ.globalGain - inputBeforeUpgrade) < 0.0001)
+            }
+            log("PASS: pause before incoming start and rapid resume during a live quality overlap preserve transport and gain")
             for _ in 0..<100 {
                 if await HiResPlaybackEngine.preparedAudioCacheStatistics().entryCount > 0 { break }
                 try await Task.sleep(for: .milliseconds(50))
@@ -93,7 +216,14 @@ struct NativeFirstPlaybackAuditApp: App {
             try await Task.sleep(for: .milliseconds(200))
             let pausedUpgrade = Task { try await engine.seamlessUpgrade(url: logicalSource, preparationURL: nativeSnapshot.url, effectSettings: effects, headphoneSpatialSettings: .default, upsamplingMode: .precisionSincLinearEco, shouldResume: true) }
             engine.pause()
-            try await pausedUpgrade.value
+            do { try await pausedUpgrade.value }
+            catch is CancellationError {
+                precondition(!engine.isPlaying)
+                try await Task.sleep(for: .milliseconds(150))
+                try await engine.seamlessUpgrade(url: logicalSource, preparationURL: nativeSnapshot.url,
+                    effectSettings: effects, headphoneSpatialSettings: .default,
+                    upsamplingMode: .precisionSincLinearEco, shouldResume: false)
+            }
             precondition(!engine.isPlaying && engine.automaticDSPStatus.cacheHit)
             log("PASS: cached quality reused; completed upgrade cannot resume an explicitly paused track")
             let obsolete = Task { try await engine.seamlessUpgrade(url: logicalSource, preparationURL: nativeSnapshot.url, effectSettings: effects, headphoneSpatialSettings: .default, upsamplingMode: .precisionSincLinearEco, shouldResume: false) }

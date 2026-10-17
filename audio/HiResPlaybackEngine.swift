@@ -332,11 +332,15 @@ private enum LoudnessCompensationRouteProfile: Sendable, Equatable {
     case neutral
 }
 
-private enum HiResEngineError: LocalizedError, Sendable {
+private enum HiResEngineError: LocalizedError, Sendable, AudioPreparationFailureReasonProviding {
     case sourceBufferFailed
     case upconvertBufferFailed
     case upconvertFailed
     case offlineBufferTooLarge
+
+    nonisolated var preparationFailureReason: AudioPreparationFailure.Reason {
+        self == .offlineBufferTooLarge ? .capacityExceeded : .preparationFailed
+    }
     
     @MainActor
     var errorDescription: String? {
@@ -525,6 +529,15 @@ final class HiResPlaybackEngine {
     private var meterLevels: MeterLevelStore
     private var smoothedMeasuredEffectBoostDB: Float = 0
     private var plannedOutputTrimDB: Float = 0
+    // A same-track quality replacement must not also change its mastering.
+    private var preservesQualityUpgradeGainReference = false
+    private var qualityUpgradeGainReference: SignalLevelDiagnostics?
+    private var deferredQualityDSPProfile: AutomaticDSPProfile?
+    private var transportToken: UInt64 = 0
+    private var pendingTransportPause: TimeInterval?
+    private var transportFadeInPending = false
+    private var transportSeekPending = false
+    private var transportReachedEnd = false
     private var declickToken: UInt64 = 0
     private var effectsBypassed = false
     private var pendingDeclickEffectSettings: [RealtimeAudioEffectSetting]?
@@ -566,7 +579,7 @@ final class HiResPlaybackEngine {
     }
 
     var isPlaying: Bool {
-        activePlayerNode.isPlaying && engine.isRunning
+        pendingTransportPause == nil && activePlayerNode.isPlaying && engine.isRunning
     }
 
     var isEngineRunning: Bool {
@@ -741,16 +754,19 @@ final class HiResPlaybackEngine {
             // File/provider I/O and session IPC are independent. Neither must
             // block the UI or wait for the other before beginning.
             async let openedFile = StreamingAudioFilePreparation.open(url: url)
-            try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate)
+            do { try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate) }
+            catch { throw AudioPreparationFailure.tagging(error, stage: .streamingSession) }
             let opened = try await openedFile
             try Task.checkCancellation()
             guard preparationGeneration == generation else { throw CancellationError() }
-            try loadFastFile(
-                url: url,
-                audioFile: opened.file,
-                effectSettings: safeEffectSettings,
-                headphoneSpatialSettings: resolvedSpatialSettings
-            )
+            try AudioPreparationFailure.at(.streamingGraph) {
+                try loadFastFile(
+                    url: url,
+                    audioFile: opened.file,
+                    effectSettings: safeEffectSettings,
+                    headphoneSpatialSettings: resolvedSpatialSettings
+                )
+            }
             PlaybackDebugLogger.event("audio.streaming.ready elapsedMs=\(Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000))")
             return
         }
@@ -802,16 +818,20 @@ final class HiResPlaybackEngine {
     ) async throws {
         stop()
         let generation = preparationGeneration
-        if let mixedHandoff {
-            try await PlaybackAudioSession.shared.activate(mixedHandoff: mixedHandoff)
-        } else {
-            try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate)
-        }
+        do {
+            if let mixedHandoff {
+                try await PlaybackAudioSession.shared.activate(mixedHandoff: mixedHandoff)
+            } else {
+                try await configureAudioSession(preferredSampleRate: Self.preferredSampleRate)
+            }
+        } catch { throw AudioPreparationFailure.tagging(error, stage: .streamingSession) }
         try Task.checkCancellation()
         guard preparationGeneration == generation else { throw CancellationError() }
-        try loadFastFile(url: url, audioFile: opened.file,
-            effectSettings: memorySafetyMode.safeEffectSettings(effectSettings),
-            headphoneSpatialSettings: memorySafetyMode.safeSpatialSettings(headphoneSpatialSettings))
+        try AudioPreparationFailure.at(.streamingGraph) {
+            try loadFastFile(url: url, audioFile: opened.file,
+                effectSettings: memorySafetyMode.safeEffectSettings(effectSettings),
+                headphoneSpatialSettings: memorySafetyMode.safeSpatialSettings(headphoneSpatialSettings))
+        }
     }
 
     /// Starts the source file directly. This avoids decoding the entire song
@@ -862,16 +882,78 @@ final class HiResPlaybackEngine {
         scheduleBuffer(from: 0, autoplay: false)
     }
 
-    func play(fadeInDuration: TimeInterval = 0) throws {
+    func play(fadeInDuration: TimeInterval = 0.024) throws {
         ensureEffectLevelMetersInstalled()
         try ensureEngineRunning()
-        if fadeInDuration > 0 {
-            declickToken &+= 1
-            declickMixer.outputVolume = 0
+        // Existing callers may issue seek(); play(). Keep the pending seek's
+        // destination/startup instead of rescheduling the old offset at EOF.
+        if pendingTransportPause == nil, transportFadeInPending, activePlayerNode.isPlaying { return }
+        transportToken &+= 1
+        let token = transportToken
+        if let position = pendingTransportPause, !activePlayerNode.isPlaying || transportReachedEnd {
+            pendingTransportPause = nil
+            playbackOffset = position
+            activePlayerNode.stop() // Its end callback has already fired: no audible frames remain.
         }
+        if pendingTransportPause != nil {
+            // Resume during fade-out without stopping/rescheduling an audible node.
+            pendingTransportPause = nil
+            transportFadeInPending = true
+            rampTransportVolume(to: 1, duration: max(0.024, fadeInDuration), token: token) { [weak self] in
+                self?.transportFadeInPending = false
+            }
+            return
+        }
+        engine.mainMixerNode.outputVolume = 0
+        transportFadeInPending = true
         scheduleBuffer(from: playbackOffset, autoplay: true)
-        if fadeInDuration > 0 {
-            rampOutputVolume(to: 1, duration: fadeInDuration, token: declickToken, completion: nil)
+        beginTransportFadeIn(duration: max(0.024, fadeInDuration), token: token, attempts: 250)
+    }
+
+    /// Keep the final mixer muted until actual source frames have traversed the
+    /// rack. Transport owns this gain; effect fades use a different mixer/token.
+    private func beginTransportFadeIn(duration: TimeInterval, token: UInt64, attempts: Int) {
+        guard transportToken == token, pendingTransportPause == nil else { return }
+        guard engine.isRunning, activePlayerNode.isPlaying else {
+            transportFadeInPending = false
+            return
+        }
+        let rate = configuredProcessingFormat?.sampleRate ?? Self.preferredSampleRate
+        let readySeconds = max(0.008, Double(estimatedPipelineLatencyFrames) / rate)
+        let renderedSeconds: Double
+        if let stamp = activePlayerNode.lastRenderTime,
+           let time = activePlayerNode.playerTime(forNodeTime: stamp),
+           time.isSampleTimeValid, time.sampleRate > 0 {
+            renderedSeconds = Double(time.sampleTime) / time.sampleRate
+        } else {
+            renderedSeconds = 0
+        }
+        if renderedSeconds >= readySeconds {
+            rampTransportVolume(to: 1, duration: duration, token: token) { [weak self] in
+                self?.transportFadeInPending = false
+            }
+        } else if attempts > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.004) { [weak self] in
+                self?.beginTransportFadeIn(duration: duration, token: token, attempts: attempts - 1)
+            }
+        } else {
+            // A stalled render must not become an indefinitely muted "playing" state.
+            PlaybackDebugLogger.event("audio.transport.render_timeout")
+            pause()
+        }
+    }
+
+    private func rampTransportVolume(to target: Float, duration: TimeInterval, token: UInt64,
+                                     completion: @escaping () -> Void) {
+        let start = engine.mainMixerNode.outputVolume
+        let steps = EffectTransitionPolicy.transportSteps
+        for step in 1...steps {
+            let gain = EffectTransitionPolicy.transportGain(from: start, to: target, step: step)
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration * Double(step) / Double(steps)) { [weak self] in
+                guard let self, self.transportToken == token else { return }
+                self.engine.mainMixerNode.outputVolume = gain
+                if step == steps { completion() }
+            }
         }
     }
 
@@ -890,7 +972,8 @@ final class HiResPlaybackEngine {
             }
             if let stamp = activePlayerNode.lastRenderTime,
                let time = activePlayerNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid,
-               time.sampleRate > 0, Double(time.sampleTime) / time.sampleRate >= minimumRenderedSeconds {
+               time.sampleRate > 0, Double(time.sampleTime) / time.sampleRate >= minimumRenderedSeconds,
+               !transportFadeInPending {
                 return
             }
             try await Task.sleep(for: .milliseconds(4))
@@ -899,18 +982,52 @@ final class HiResPlaybackEngine {
     }
 
     func pause() {
-        playbackOffset = currentTime()
+        guard pendingTransportPause == nil else { return }
+        let position = currentTime()
+        transportSeekPending = false
+        transportToken &+= 1
+        let token = transportToken
+        pendingTransportPause = position
+        transportFadeInPending = false
+        guard engine.isRunning, activePlayerNode.isPlaying else {
+            finishTransportPause(position: position, token: token)
+            return
+        }
+        // Keep both handoff sources and the rack alive while the final output
+        // descends. Cutting either schedule first can expose a nonzero sample.
+        rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
+            guard let self else { return }
+            let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
+                self?.finishTransportPause(position: position, token: token)
+            }
+        }
+    }
+
+    private func finishTransportPause(position: TimeInterval, token: UInt64) {
+        guard transportToken == token else { return }
+        engine.mainMixerNode.outputVolume = 0
+        playbackOffset = position
+        lastKnownPlaybackTime = position
         playbackStartedAt = nil
         playbackGeneration &+= 1
         renderHealthMonitor.endMonitoring()
-        // play() always reschedules from playbackOffset. Stop BOTH schedules,
-        // including a replacement whose future host-time start has not arrived.
         cancelPendingHandoff()
         activePlayerNode.stop()
         engine.pause()
+        pendingTransportPause = nil
     }
 
     func stop() {
+        transportSeekPending = false
+        transportReachedEnd = false
+        transportToken &+= 1
+        pendingTransportPause = nil
+        transportFadeInPending = false
+        engine.mainMixerNode.outputVolume = 0
+        preservesQualityUpgradeGainReference = false
+        qualityUpgradeGainReference = nil
+        deferredQualityDSPProfile = nil
         preparationGeneration &+= 1
         playbackGeneration &+= 1
         headphoneSpatialUpdateToken &+= 1
@@ -1247,18 +1364,24 @@ final class HiResPlaybackEngine {
             let workerGeneration = qualityUpgradeWorkerGeneration
             let workerStartedAt = CFAbsoluteTimeGetCurrent()
             let worker = Task.detached(priority: .background) {
+                var outcome = "failed"
                 defer {
                     let elapsed = CFAbsoluteTimeGetCurrent() - workerStartedAt
                     PlaybackDebugLogger.event(
-                        "audio.quality_worker.ended generation=\(workerGeneration) cancelled=\(Task.isCancelled) elapsed=\(String(format: "%.2f", elapsed)) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) \(Self.processMemoryDiagnostic)"
+                        "audio.quality_worker.ended generation=\(workerGeneration) outcome=\(outcome) cancelled=\(Task.isCancelled) elapsed=\(String(format: "%.2f", elapsed)) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) \(Self.processMemoryDiagnostic)"
                     )
                 }
-                return try Self.preparePlaybackData(
-                    url: preparationURL ?? url,
-                    identityURL: url,
-                    headphoneSpatialSettings: headphoneSpatialSettings,
-                    upsamplingMode: upsamplingMode
-                )
+                do {
+                    let prepared = try Self.preparePlaybackData(
+                        url: preparationURL ?? url, identityURL: url,
+                        headphoneSpatialSettings: headphoneSpatialSettings, upsamplingMode: upsamplingMode)
+                    try Task.checkCancellation()
+                    outcome = "prepared"
+                    return prepared
+                } catch {
+                    if error is CancellationError || Task.isCancelled { outcome = "cancelled" }
+                    throw error
+                }
             }
             qualityUpgradeWorker = worker
             defer {
@@ -1286,11 +1409,11 @@ final class HiResPlaybackEngine {
         let shouldResumeAtHandoff = shouldResume && isPlaying
         // Already on MainActor: do not yield between checking transport intent
         // and committing the handoff (a pause/seek can otherwise slip between).
-        try crossfadeToPreparedPlaybackData(
-            prepared,
-            effectSettings: latestEffectSettings?() ?? effectSettings,
-            shouldResume: shouldResumeAtHandoff
-        )
+        try AudioPreparationFailure.at(.qualityHandoff) {
+            try crossfadeToPreparedPlaybackData(
+                prepared, effectSettings: latestEffectSettings?() ?? effectSettings,
+                shouldResume: shouldResumeAtHandoff)
+        }
         // A completed conversion alone is not a handoff: a missing clock or
         // late scheduling deadline can still defer it. Notify only on commit.
         onHandoffReady?()
@@ -1301,14 +1424,14 @@ final class HiResPlaybackEngine {
         headphoneSpatialSettings: HeadphoneSpatialSettings,
         upsamplingMode: UpsamplingMode
     ) async throws {
-        let snapshot = url.isFileURL ? nil : try await MusicAssetPreparation.playableSnapshot(url: url)
+        let snapshot: MusicAssetPreparation.Snapshot?
+        do { snapshot = url.isFileURL ? nil : try await MusicAssetPreparation.playableSnapshot(url: url) }
+        catch { throw AudioPreparationFailure.tagging(error, stage: .assetSnapshot) }
         let input = snapshot?.url ?? url
         defer { withExtendedLifetime(snapshot) {} }
         let worker = Task.detached(priority: .background) {
             try Task.checkCancellation()
-            guard Self.canPrepareOffline(url: input, upsamplingMode: upsamplingMode) else {
-                throw HiResEngineError.offlineBufferTooLarge
-            }
+            try Self.validateOfflinePreparation(url: input, upsamplingMode: upsamplingMode)
             _ = try Self.preparePlaybackData(url: input, identityURL: url,
                 headphoneSpatialSettings: headphoneSpatialSettings,
                 upsamplingMode: upsamplingMode, storeSynchronously: true)
@@ -1369,22 +1492,56 @@ final class HiResPlaybackEngine {
         let clamped = min(max(value, 0.0), 1.5)
         guard abs(clamped - automaticDSPStrength) >= 0.001 else { return }
         automaticDSPStrength = clamped
+        if let profile = deferredQualityDSPProfile {
+            automaticDSPProfile = profile
+            deferredQualityDSPProfile = nil
+        }
         applyAutomaticDSPProfile(automaticDSPProfile)
         apply(effectSettings: effectSettings)
     }
 
     func setAutomaticDSPVoicing(_ voicing: AutomaticDSPVoicing) {
+        guard automaticDSPVoicing != voicing else { return }
         automaticDSPVoicing = voicing
+        if let profile = deferredQualityDSPProfile {
+            automaticDSPProfile = profile
+            deferredQualityDSPProfile = nil
+        }
         applyAutomaticDSPProfile(automaticDSPProfile)
     }
 
     func seek(to time: TimeInterval) throws {
         let clamped = min(max(0, time), duration)
         let shouldResume = isPlaying
-        playbackOffset = clamped
-        lastKnownPlaybackTime = clamped
         try ensureEngineRunning()
-        scheduleBuffer(from: clamped, autoplay: shouldResume)
+        transportToken &+= 1
+        let token = transportToken
+        pendingTransportPause = nil
+        transportFadeInPending = false
+        if shouldResume {
+            transportSeekPending = true
+            transportFadeInPending = true
+            rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
+                guard let self else { return }
+                let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+                DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
+                    guard let self, self.transportToken == token else { return }
+                    self.transportSeekPending = false
+                    self.playbackOffset = clamped
+                    self.lastKnownPlaybackTime = clamped
+                    self.scheduleBuffer(from: clamped, autoplay: true)
+                    self.transportFadeInPending = true
+                    self.beginTransportFadeIn(duration: 0.024, token: token, attempts: 250)
+                }
+            }
+        } else {
+            transportSeekPending = false
+            engine.mainMixerNode.outputVolume = 0
+            playbackOffset = clamped
+            lastKnownPlaybackTime = clamped
+            scheduleBuffer(from: clamped, autoplay: false)
+            engine.pause()
+        }
     }
 
     func skip(by timeDelta: TimeInterval) throws {
@@ -1392,6 +1549,7 @@ final class HiResPlaybackEngine {
     }
 
     func currentTime() -> TimeInterval {
+        if let position = pendingTransportPause { return position }
         guard currentAudioFile != nil else { return 0 }
         // The replacement can be scheduled but not yet rendering. Until its
         // first frame, keep reporting the old, still-audible source position.
@@ -1585,12 +1743,12 @@ final class HiResPlaybackEngine {
         }
         let originalOutput = effectDeclickRestoreVolume ?? declickMixer.outputVolume
         effectDeclickRestoreVolume = originalOutput
-        rampOutputVolume(to: 0.0, duration: 0.008, token: token) { [weak self] in
+        rampOutputVolume(to: 0.0, duration: EffectTransitionPolicy.protectionFadeOut, token: token) { [weak self] in
             guard let self, self.declickToken == token else { return }
             self.applyPendingEffectSettings()
             // No silent settling plateau: the old 90 ms hold was audible as
             // a dropout, especially when a gesture repeatedly restarted it.
-            self.rampOutputVolume(to: originalOutput, duration: 0.016, token: token) { [weak self] in
+            self.rampOutputVolume(to: originalOutput, duration: EffectTransitionPolicy.protectionFadeIn, token: token) { [weak self] in
                 guard let self, self.declickToken == token else { return }
                 self.effectDeclickRestoreVolume = nil
             }
@@ -1644,19 +1802,12 @@ final class HiResPlaybackEngine {
     private func rampOutputVolume(to target: Float, duration: TimeInterval, token: UInt64, completion: (() -> Void)?) {
         let startDeclick = declickMixer.outputVolume
         
-        let minLinear: Float = 0.0001
-        let startDBDeclick = 20.0 * log10(max(minLinear, startDeclick))
-        let targetDB = 20.0 * log10(max(minLinear, target))
-        
-        let steps = max(8, Int(duration / 0.005))
+        let steps = EffectTransitionPolicy.envelopeSteps(duration: duration)
         let stepDuration = duration / TimeInterval(steps)
 
         for step in 1...steps {
-            let t = Float(step) / Float(steps)
-            let valDBDeclick = startDBDeclick + (targetDB - startDBDeclick) * t
-            
-            let valDeclick = target == 0 && step == steps ? 0 : pow(10.0, valDBDeclick / 20.0)
-            
+            let valDeclick = EffectTransitionPolicy.envelopeGain(from: startDeclick, to: target, step: step, steps: steps)
+
             DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * TimeInterval(step)) { [weak self] in
                 guard let self, self.declickToken == token else {
                     // A superseding fade cancels gain writes, not the waiting
@@ -1680,15 +1831,16 @@ final class HiResPlaybackEngine {
         AudioProcessingPolicy.processingSampleRate(for: sourceSampleRate)
     }
 
-    /// Performs the cheap metadata-only part of the offline allocation check.
-    /// This lets callers skip an impossible Precision Sinc build while the
-    /// normal file stream continues playing.
-    nonisolated static func canPrepareOffline(url: URL, upsamplingMode: UpsamplingMode) -> Bool {
-        guard upsamplingMode.isPrecisionSinc,
-              let audioFile = try? AVAudioFile(forReading: url) else {
-            return false
+    /// Metadata-only preflight. Opening, allocation limits and unsupported modes
+    /// remain distinct; callers deciding to defer retain the actual failure.
+    nonisolated static func validateOfflinePreparation(url: URL, upsamplingMode: UpsamplingMode) throws {
+        try Task.checkCancellation()
+        guard upsamplingMode.isPrecisionSinc else {
+            throw AudioPreparationFailure.tagging(
+                NSError(domain: "Ongaku.AudioPreparation", code: 1),
+                stage: .offlinePreflight, reason: .unsupportedMode)
         }
-
+        let audioFile = try AudioPreparationFailure.at(.offlineOpen) { try AVAudioFile(forReading: url) }
         let sourceFormat = audioFile.processingFormat
         let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -1696,22 +1848,12 @@ final class HiResPlaybackEngine {
             channels: max(AVAudioChannelCount(2), sourceFormat.channelCount),
             interleaved: false
         )!
-
-        do {
+        try AudioPreparationFailure.at(.offlineBudget) {
             let sourceLength = try checkedAudioFrameCount(
-                audioFile.length,
-                format: sourceFormat,
-                failure: .sourceBufferFailed
-            )
+                audioFile.length, format: sourceFormat, failure: .sourceBufferFailed)
             try validateOfflineProcessingFootprint(
-                sourceFrameCount: sourceLength,
-                sourceFormat: sourceFormat,
-                targetFormat: targetFormat,
-                upsamplingMode: upsamplingMode
-            )
-            return true
-        } catch {
-            return false
+                sourceFrameCount: sourceLength, sourceFormat: sourceFormat,
+                targetFormat: targetFormat, upsamplingMode: upsamplingMode)
         }
     }
 
@@ -2062,9 +2204,10 @@ final class HiResPlaybackEngine {
 
     private func applyGainStaging(effectSettings: [RealtimeAudioEffectSetting]) {
         guard pendingHandoff == nil else { return }
-        let sourceRMS = signalDiagnostics?.sourceRMSDBFS ?? Self.floatPipelineTargetRMSDBFS
-        let sourceLoudness = signalDiagnostics?.sourceIntegratedLoudnessLUFS ?? -120
-        let sourcePeak = signalDiagnostics?.sourcePeakDBFS ?? -12.0
+        let gainDiagnostics = preservesQualityUpgradeGainReference ? qualityUpgradeGainReference : signalDiagnostics
+        let sourceRMS = gainDiagnostics?.sourceRMSDBFS ?? Self.floatPipelineTargetRMSDBFS
+        let sourceLoudness = gainDiagnostics?.sourceIntegratedLoudnessLUFS ?? -120
+        let sourcePeak = gainDiagnostics?.sourcePeakDBFS ?? -12.0
 
         _ = refreshEffectLevelAudits()
         let measuredBoost = measuredEffectBoostFromAudits(effectSettings: effectSettings)
@@ -3096,6 +3239,7 @@ final class HiResPlaybackEngine {
     }
 
     private func scheduleBuffer(from time: TimeInterval, autoplay: Bool) {
+        transportReachedEnd = false
         invalidateEffectLevelAudits()
         cancelPendingHandoff()
         guard let sourceBuffer = convertedBuffer, let playbackFormat = convertedFormat else {
@@ -3136,10 +3280,7 @@ final class HiResPlaybackEngine {
             completionCallbackType: .dataPlayedBack,
             completionHandler: { [weak self] _ in
                 DispatchQueue.main.async {
-                    guard let self, self.playbackGeneration == generation else { return }
-                    self.playbackStartedAt = nil
-                    self.playbackOffset = self.duration
-                    self.onPlaybackEnded?()
+                    self?.handlePlaybackEnd(generation: generation)
                 }
             }
         )
@@ -3189,10 +3330,7 @@ final class HiResPlaybackEngine {
             completionCallbackType: .dataPlayedBack
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, self.playbackGeneration == generation else { return }
-                self.playbackStartedAt = nil
-                self.playbackOffset = self.duration
-                self.onPlaybackEnded?()
+                self?.handlePlaybackEnd(generation: generation)
             }
         }
 
@@ -3630,7 +3768,7 @@ final class HiResPlaybackEngine {
         storeSynchronously: Bool = false
     ) throws -> PreparedPlaybackData {
         migratePreparedAudioDiskCacheIfNeeded()
-        let audioFile = try AVAudioFile(forReading: url)
+        let audioFile = try AudioPreparationFailure.at(.offlineOpen) { try AVAudioFile(forReading: url) }
         let bitDepth = audioFile.fileFormat.streamDescription.pointee.mBitsPerChannel
         let sourceSampleRate = audioFile.fileFormat.sampleRate
         let targetSampleRate = skipDSPAnalysis ? sourceSampleRate : Self.resolvedProcessingSampleRate(for: sourceSampleRate)
@@ -3653,17 +3791,19 @@ final class HiResPlaybackEngine {
         // PCM allocations. Apply the same live-memory budget before reading it;
         // otherwise a cache hit could bypass the allocation guard used by a
         // fresh conversion and trigger jetsam during playback.
-        let sourceLength = try Self.checkedAudioFrameCount(
-            audioFile.length,
-            format: audioFile.processingFormat,
-            failure: .sourceBufferFailed
-        )
-        try Self.validateOfflineProcessingFootprint(
-            sourceFrameCount: sourceLength,
-            sourceFormat: audioFile.processingFormat,
-            targetFormat: targetFormat,
-            upsamplingMode: upsamplingMode
-        )
+        try AudioPreparationFailure.at(.offlineBudget) {
+            let sourceLength = try Self.checkedAudioFrameCount(
+                audioFile.length,
+                format: audioFile.processingFormat,
+                failure: .sourceBufferFailed
+            )
+            try Self.validateOfflineProcessingFootprint(
+                sourceFrameCount: sourceLength,
+                sourceFormat: audioFile.processingFormat,
+                targetFormat: targetFormat,
+                upsamplingMode: upsamplingMode
+            )
+        }
 
         if upsamplingMode.isPrecisionSinc,
            !skipDSPAnalysis,
@@ -3681,17 +3821,15 @@ final class HiResPlaybackEngine {
         }
         try Task.checkCancellation()
 
-        let convertedBuffer = try Self.makePlaybackBuffer(
-            from: audioFile,
-            targetFormat: targetFormat,
-            upsamplingMode: upsamplingMode
-        )
+        let convertedBuffer = try AudioPreparationFailure.at(.offlineConversion) {
+            try Self.makePlaybackBuffer(from: audioFile, targetFormat: targetFormat, upsamplingMode: upsamplingMode)
+        }
         try Task.checkCancellation()
         if upsamplingMode.isPrecisionSinc {
             let remainingMemory = availableAudioProcessMemoryBytes()
             if remainingMemory > 0,
                remainingMemory < proactiveMemoryPressureThresholdBytes {
-                throw HiResEngineError.offlineBufferTooLarge
+                throw AudioPreparationFailure.tagging(HiResEngineError.offlineBufferTooLarge, stage: .offlineBudget)
             }
         }
         let needsSpatialProcessingCopy = spatialProcessingApplied
@@ -3700,18 +3838,18 @@ final class HiResPlaybackEngine {
             // Preserve an unprocessed base only when spatial processing will
             // actually mutate samples. Otherwise both properties can safely
             // reference the same allocation, avoiding a full-song copy.
-            playbackBuffer = try Self.clonePlaybackBuffer(from: convertedBuffer)
-            try Self.applyHeadphoneVirtualizationIfNeeded(
-                to: playbackBuffer,
-                settings: headphoneSpatialSettings,
-                routeSupportsSpatial: spatialProcessingApplied
-            )
+            playbackBuffer = try AudioPreparationFailure.at(.offlineSpatial) {
+                let copy = try Self.clonePlaybackBuffer(from: convertedBuffer)
+                try Self.applyHeadphoneVirtualizationIfNeeded(
+                    to: copy, settings: headphoneSpatialSettings, routeSupportsSpatial: spatialProcessingApplied)
+                return copy
+            }
         } else {
             playbackBuffer = convertedBuffer
         }
         if !skipDSPAnalysis {
             guard Self.isFiniteAudioBuffer(playbackBuffer) else {
-                throw HiResEngineError.upconvertFailed
+                throw AudioPreparationFailure.tagging(HiResEngineError.upconvertFailed, stage: .offlineValidation)
             }
         }
         let cacheKey = Self.makeAnalysisCacheKey(
@@ -3843,6 +3981,7 @@ final class HiResPlaybackEngine {
         shouldResume: Bool
     ) throws {
         guard pendingHandoff == nil, effectDeclickRestoreVolume == nil,
+              pendingTransportPause == nil, !transportFadeInPending,
               currentAudioURL == prepared.url,
               let graphFormat = configuredProcessingFormat,
               graphFormat == prepared.targetFormat else {
@@ -3947,11 +4086,17 @@ final class HiResPlaybackEngine {
         headphoneSpatialProcessingApplied = !effectsBypassed && prepared.spatialProcessingApplied
         convertedFormat = prepared.targetFormat
         isFastFilePlayback = false
+        if !preservesQualityUpgradeGainReference {
+            qualityUpgradeGainReference = signalDiagnostics // nil intentionally means unmeasured native playback.
+            preservesQualityUpgradeGainReference = true
+        }
         signalDiagnostics = prepared.diagnostics
-        automaticDSPProfile = prepared.automaticDSPProfile
+        deferredQualityDSPProfile = prepared.automaticDSPProfile
         lastAutomaticDSPCacheHit = prepared.analysisCacheHit
         currentUpsamplingMode = prepared.upsamplingMode
-        applyAutomaticDSPProfile(prepared.automaticDSPProfile)
+        // Analysis remains visible, but a quality upgrade is not permission to
+        // remaster the currently audible track. Explicit DSP controls still work.
+        PlaybackDebugLogger.event("audio.handoff.level_policy normalization=preserved automaticDSP=preserved")
         duration = prepared.duration
         estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames } + finalOutputProtectionLatencyFrames
         currentFormat = prepared.formatDescription
@@ -4001,6 +4146,19 @@ final class HiResPlaybackEngine {
         commitPendingDSPChangesIfReady()
     }
 
+    private func handlePlaybackEnd(generation: UInt64) {
+        guard playbackGeneration == generation else { return }
+        // The audible schedules remain alive during a transport fade. Their
+        // natural EOF must not override a newer pause/seek intent.
+        if pendingTransportPause != nil || transportSeekPending {
+            transportReachedEnd = true
+            return
+        }
+        playbackStartedAt = nil
+        playbackOffset = duration
+        onPlaybackEnded?()
+    }
+
     private func schedulePreparedBuffer(
         _ sourceBuffer: AVAudioPCMBuffer,
         startingFrame startFrame: AVAudioFramePosition,
@@ -4025,11 +4183,8 @@ final class HiResPlaybackEngine {
             completionCallbackType: .dataPlayedBack
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, self.playbackGeneration == generation,
-                      self.handoffScheduleToken == scheduleToken else { return }
-                self.playbackStartedAt = nil
-                self.playbackOffset = self.duration
-                self.onPlaybackEnded?()
+                guard let self, self.handoffScheduleToken == scheduleToken else { return }
+                self.handlePlaybackEnd(generation: generation)
             }
         }
     }
@@ -4548,8 +4703,11 @@ final class HiResPlaybackEngine {
         format: AVAudioFormat,
         failure: HiResEngineError
     ) throws -> AVAudioFrameCount {
-        guard frameCount.isFinite, frameCount >= 0, frameCount <= Double(UInt32.max) else {
+        guard frameCount.isFinite, frameCount >= 0 else {
             throw failure
+        }
+        guard frameCount <= Double(UInt32.max) else {
+            throw HiResEngineError.offlineBufferTooLarge
         }
 
         let roundedFrameCount = UInt32(frameCount.rounded(.up))

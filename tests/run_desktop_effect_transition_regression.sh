@@ -27,11 +27,15 @@ swiftc -parse-as-library -O -D DESKTOP_FULL_PEAK_AUDIT \
  tests/EffectAuditSupport.swift tests/ReconstructedPeak.swift tests/DesktopEffectTransitionRegression.swift -o "$audit_dir/test"
 "$audit_dir/test" "$@"
 
-for defect in unprotected mute; do
+for defect in unprotected mute unsafe-bypass; do
  if "$audit_dir/test" "--$defect-fixture" > "$audit_dir/$defect.log" 2>&1; then
   echo "FAIL: $defect defect escaped continuity checks" >&2; exit 1
  fi
- if [[ "$defect" == unprotected ]]; then expected='Continuous update bypassed interpolation'; else expected='Continuous controls changed output envelope'; fi
+ case "$defect" in
+  unprotected) expected='Continuous update bypassed interpolation' ;;
+  mute) expected='Continuous controls changed output envelope' ;;
+  unsafe-bypass) expected='Audible bypass committed without zero-gain protection' ;;
+ esac
  rg -q "$expected" "$audit_dir/$defect.log" || { cat "$audit_dir/$defect.log"; exit 1; }
  echo "PASS: rejected $defect continuity defect"
 done

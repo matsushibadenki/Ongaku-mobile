@@ -1,11 +1,16 @@
 import CryptoKit
 import Foundation
 
-nonisolated enum RemoteAudioCacheError: LocalizedError {
+nonisolated enum RemoteAudioCacheError: LocalizedError, AudioPreparationFailureReasonProviding {
     case sourceUnavailable
     case fileTooLarge(Int64)
     case copyFailed
     case cacheBusy
+
+    var preparationFailureReason: AudioPreparationFailure.Reason {
+        if case .fileTooLarge = self { return .capacityExceeded }
+        return .preparationFailed
+    }
 
     var errorDescription: String? {
         switch self {

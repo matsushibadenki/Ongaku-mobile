@@ -21,7 +21,12 @@ nonisolated enum MusicAssetPreparation {
         init(_ session: AVAssetExportSession) { self.session = session }
     }
 
-    enum Failure: Error { case protected, unsupported, incomplete, tooLarge, timedOut }
+    enum Failure: Error, AudioPreparationFailureReasonProviding {
+        case protected, unsupported, incomplete, tooLarge, timedOut
+        var preparationFailureReason: AudioPreparationFailure.Reason {
+            self == .tooLarge ? .capacityExceeded : .preparationFailed
+        }
+    }
 
 
     /// Passthrough containers are not necessarily readable by AVAudioFile

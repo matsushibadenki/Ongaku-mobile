@@ -1,11 +1,35 @@
 # #Ongaku Roadmap
 
 
+## iPhone speaker playback continuity — 2026-10-17
+
+- 🟢 [Done] Preserve the current track's normalization reference (including deliberately unmeasured native playback) and automatic EQ through Precision Sinc/spatial PCM replacement. New analysis stays available without implicitly remastering the playing track; explicit DSP controls and new-track analysis remain effective.
+- 🟢 [Done] Give iPhone start/resume, pause and seek an independent final-mixer envelope: nominal 24 ms, 48 cosine steps, render-gated startup and a silent buffer drain before physical pause. Preserve immediate paused UI intent, coalesce seeks and reject stale callbacks after resume/stop. Existing seek-then-play callers retain the latest destination; EOF during a fade cannot override pause/seek intent.
+- 🟢 [Done] Verify shipping transport state transitions, six real stock-mixer PCM cases at 44.1/48/96 kHz and measured/unmeasured gain references, including negative controls. Pass 17 production-engine Simulator checks and the ordinary iPhone build. Recheck 48 effect and 72 gain/loudness cases; synchronize the common policy with Mac and pass its 19 focused tests. See [validation and limits](PLAYBACK_CONTINUITY_VALIDATION.md).
+- 🟠 [Next] Extend orderly fade-out to destructive track/resource teardown (`stop()`/load/recovery), qualify sample-accurate handoff and tail handling, and apply the same transport/late-analysis criteria to Mac. Resource teardown is still immediate; it is not covered by the new user-pause protection.
+- ⭕️ [Pending] Confirm the reported sudden loudness changes and plug-like clicks on the physical iPhone built-in speaker: start/pause/resume/seek, quality replacement, effect ON/OFF, different system volumes and UI load. Check external outputs and Mac listening separately. Control-thread fades and Simulator PCM do not establish inaudibility or hardware/session behavior.
+
+## Preparation failure diagnostics — 2026-10-17
+
+- 🟢 [Done] Separate actual streaming failure stages from the requested Precision Sinc mode. Preserve opening, budget, conversion, spatial processing, PCM validation and handoff context with original error domain/code. Distinguish explicit capacity limits, other preparation failures and unsupported mode; preserve cancellation and existing localized messages.
+- 🟢 [Done] Replace the Boolean preflight in current-track upgrades, next-track caching and memory recovery. Report preparation workers as prepared/failed/cancelled without confusing preparation success with completed handoff. Optional failures retain native playback.
+- 🟢 [Done] Pass diagnostic classification/cancellation tests and the capacity-for-all negative control, streaming/asset/remote regressions, the 12-check production-engine Simulator audit and the iPhone Simulator build. See [diagnostic fields, evidence and limits](PREPARATION_DIAGNOSTICS_VALIDATION.md).
+- ⭕️ [Pending] Collect the new stage/reason/domain/code logs from affected Music tracks on a physical iPhone, including real memory pressure, account/download timing and audio-session/decoder failures; confirm audible continuity and performance. The supplied signal-9 termination was a manual debugger stop.
+
+## Effect ON/OFF protection — 2026-10-17
+
+- 🟢 [Done] Protect Mac module ON/OFF and global OFF/restore with the iPhone-identical envelope policy: nominal 8 ms descent, commit at zero, 16 ms recovery without a silent hold. Multiply the latest user volume by an independent protection gain before the final true-peak candidate; keep its downstream mixer at unity.
+- 🟢 [Done] Coalesce rapid toggles, defer shared-rack commits around song crossfades, recover and retry if overlap begins during descent, and cancel queued gains/settings on stop/pause/seek/rebuild. Stop/resume cannot leave the protection gain attenuated. Continuous controls retain their existing interpolation.
+- 🟢 [Done] Pass 96 Mac PCM cases covering Basic/Pro, 44.1/48/96 kHz, ordinary/candidate output, OFF/edit/restore, overlap and stop/resume in both ramp phases. Reject 3 intentional faults. Pass 19 focused tests in each Mac build, iPhone 48 effect and 72 gain cases, and all three app builds. See [verification, measurements and scope](EFFECT_BYPASS_PROTECTION_VALIDATION.md).
+- 🟠 [Next] Add latency-aligned bypass reference/residual measurements, particularly Space/Gloss/reverb tails, to define acceptance criteria before sample-accurate protection. The current envelope does not compensate algorithm latency.
+- ⭕️ [Pending] Physical iPhone/Mac listening for clicks and brief attenuation, live file crossfades, stop/resume/seek tails, main-queue/UI contention, output changes and sustained CPU/energy/thermal behavior. Keep ordinary true-peak activation pending its existing device gates.
+- 🔴 [Later] Sample-accurate ramps on both platforms and residual/alias-driven nonlinear oversampling.
+
 ## Effect parameter parity — 2026-10-17
 
 - 🟢 [Done] Prioritize Mac continuous-control parity after final true-peak integration. Share the exact eight-step / nominal 10 ms interpolation policy with iPhone, coalesce rapid gestures, skip unchanged module writes, preserve output volume, hold continuous updates during active song overlaps, and reject queued updates after OFF/stop/seek/rebuild. iPhone's existing interpolation behavior is retained.
 - 🟢 [Done] Pass 48 Mac waveform cases across Basic/Pro, 44.1/48/96 kHz output and ordinary/true-peak paths, plus immediate-write/mute negative controls. Pass 4 Mac state tests and 14 integrated qualification tests; recheck iPhone 48 effect cases, 72 gain cases, meter freshness and 3 combined feedback cases. Both Mac products and the iPhone Simulator build pass. See [validation and measured limits](EFFECT_PARAMETER_PARITY_VALIDATION.md).
-- 🟠 [Next] Protect Mac enable/disable and OFF/restore commits, including latency/topology changes and song overlaps. Continuous parameter updates now match iPhone; Mac bypass still applies immediately. Retain saved settings, cancellation and final-output protection.
+- 🟢 [Done] Mac ON/OFF protection now shares iPhone’s nominal 8 ms descent / 16 ms recovery policy, keeps user volume independent, defers during song overlap and cancels on stop/rebuild. See [current bypass implementation and validation](EFFECT_BYPASS_PROTECTION_VALIDATION.md). Latency compensation and device audibility remain separate work.
 - ⭕️ [Pending] Physical iPhone/Mac listening during gestures, OFF/restore, seek and song transitions; device clock/tap timing, UI-load scheduling and sustained CPU/energy behavior. Keep ordinary true-peak activation pending the existing device gates.
 - 🔴 [Later] Replace control-rate updates with validated sample-accurate parameter/bypass ramps on both platforms; measure residual/alias behavior before nonlinear oversampling.
 

@@ -19,7 +19,7 @@ import Foundation
         for rate in [44_100.0, 48_000, 96_000] {
         for protected in [false, true] {
         for tab in [AudioEffectPageTab.basic, .pro] {
-        for scenario in ["coalesce", "gesture", "overlap", "offRestore"] {
+        for scenario in ["coalesce", "gesture", "overlap", "offRestore", "bypassOverlap", "lateOverlap", "stopOut", "stopIn"] {
             let engine = AVAudioEngine(), a = AVAudioPlayerNode(), b = AVAudioPlayerNode(), sourceMixer = AVAudioMixerNode()
             let input = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!
             let output = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
@@ -40,10 +40,11 @@ import Foundation
             let envelope = final.inputNode(in: engine) as! AVAudioMixerNode
             try engine.enableManualRenderingMode(.offline, format: output, maximumFrameCount: 512)
             let clock = EffectTestClock()
-            let host = ShippingDesktopEffectTransition(a,b,effects,protection,envelope,clock)
+            let host = ShippingDesktopEffectTransition(a,b,effects,protection,envelope,clock,engine,final)
             host.effectSettings = settings(tab, 0.25); host.applyEffectSettings(immediately: true, force: true)
-            host.writes.removeAll()
+            host.writes.removeAll(); host.bypassCommits.removeAll()
             host.immediateDefect = CommandLine.arguments.contains("--unprotected-fixture")
+            host.unsafeBypassDefect = CommandLine.arguments.contains("--unsafe-bypass-fixture")
             host.muteDefect = CommandLine.arguments.contains("--mute-fixture")
             let source = AVAudioPCMBuffer(pcmFormat: input, frameCapacity: 57_600)!
             source.frameLength = source.frameCapacity
@@ -54,8 +55,14 @@ import Foundation
             a.volume = 1; b.volume = 0
             a.scheduleBuffer(source); b.scheduleBuffer(source)
             try engine.start(); a.play(); b.play()
-            if scenario == "overlap" { clock.schedule(0.145) { host.prerolledTrack = .init() } }
-            clock.schedule(0.15) { host.effectSettings = settings(tab, 0.75); host.applyEffectSettings() }
+            let bypassScenario = !["coalesce", "gesture", "overlap"].contains(scenario)
+            if ["overlap", "bypassOverlap"].contains(scenario) { clock.schedule(0.145) { host.prerolledTrack = .init() } }
+            if scenario == "lateOverlap" { clock.schedule(0.154) { host.prerolledTrack = .init() } }
+            clock.schedule(0.15) {
+                host.effectSettings = settings(tab, 0.75)
+                if bypassScenario { host.effectsBypassed = true }
+                host.applyEffectSettings()
+            }
             switch scenario {
             case "coalesce":
                 clock.schedule(0.155) { host.effectSettings = settings(tab, 0.3); host.applyEffectSettings() }
@@ -64,12 +71,19 @@ import Foundation
                 for n in 0..<40 { clock.schedule(0.151 + Double(n) * 0.003) {
                     host.effectSettings = settings(tab, 0.25 + Double(n) / 39 * 0.5); host.applyEffectSettings()
                 } }
-            case "overlap":
+            case "overlap", "bypassOverlap", "lateOverlap":
                 clock.schedule(0.20) { host.effectSettings = settings(tab, 0.65); host.applyEffectSettings() }
                 clock.schedule(0.25) { host.prerolledTrack = nil }
+                if bypassScenario { clock.schedule(0.30) { host.effectsBypassed = false; host.applyEffectSettings() } }
+            case "stopOut", "stopIn":
+                clock.schedule(scenario == "stopOut" ? 0.154 : 0.162) { host.stopPlayerNodes() }
+                clock.schedule(0.18) { host.effectSettings = settings(tab, 0.65); host.effectsBypassed = false; host.applyEffectSettings() }
+                clock.schedule(0.19) {
+                    a.scheduleBuffer(source); b.scheduleBuffer(source)
+                    try! engine.start(); a.play(); b.play(); a.volume = 1; b.volume = 0
+                }
             default:
-                clock.schedule(0.155) { host.effectsBypassed = true; host.applyEffectSettings() }
-                clock.schedule(0.16) { host.effectSettings = settings(tab, 0.9); host.applyEffectSettings() }
+                clock.schedule(0.155) { host.effectSettings = settings(tab, 0.9); host.applyEffectSettings() }
                 clock.schedule(0.17) { host.effectsBypassed = false; host.applyEffectSettings() }
                 clock.schedule(0.18) { host.effectSettings = settings(tab, 0.65); host.applyEffectSettings() }
             }
@@ -78,19 +92,27 @@ import Foundation
             let blocks = [127,512,61,256]
             while pcm[0].count < Int(rate * 0.5) {
                 clock.advance(to: Double(pcm[0].count) / rate)
-                if scenario == "overlap" {
+                if ["overlap", "bypassOverlap", "lateOverlap"].contains(scenario) {
                     let gain = Float(min(1, max(0, (clock.now - 0.145) / 0.105)))
                     a.volume = 1-gain; b.volume = gain
                 }
-                try require(envelope.outputVolume == 0.67, "Continuous controls changed output envelope")
+                if !bypassScenario || clock.now >= 0.36 {
+                    try require(envelope.outputVolume == 0.67, "Continuous controls changed output envelope")
+                }
+                if protected { try require(engine.mainMixerNode.outputVolume == 1, "Gain placed after true-peak stage") }
                 let n = min(blocks[index % blocks.count], Int(rate * 0.5) - pcm[0].count); index += 1
+                if !engine.isRunning {
+                    for c in 0..<2 { pcm[c].append(contentsOf: repeatElement(0, count: n)) }
+                    continue
+                }
                 try require(try engine.renderOffline(AVAudioFrameCount(n), to: buffer) == .success, "render failed")
                 for c in 0..<2 { pcm[c].append(contentsOf: UnsafeBufferPointer(start: buffer.floatChannelData![c], count: n)) }
             }
             a.stop(); b.stop(); engine.stop()
+            try require(host.bypassCommits.allSatisfy { !$0.audible || $0.gain == 0 }, "Audible bypass committed without zero-gain protection")
             let first = host.writes.filter { $0.1.isEnabled }.first?.0 ?? -1
-            try require(first >= 0.159, "Continuous update bypassed interpolation")
-            if scenario == "overlap" {
+            if !bypassScenario { try require(first >= 0.159, "Continuous update bypassed interpolation") }
+            if ["overlap", "bypassOverlap", "lateOverlap"].contains(scenario) {
                 try require(!host.writes.contains { $0.0 < 0.25 }, "Shared rack changed during overlap")
             }
             if scenario == "offRestore" {
@@ -117,7 +139,9 @@ import Foundation
                 for start in stride(from: 0.14, through: 0.4, by: 0.01) {
                     let ratio = rms(start,start+0.01) / floor
                     minRatio = min(minRatio,ratio)
-                    try require(ratio > 0.1, "10 ms audio dropout")
+                    // Bypass deliberately contains a short attenuation. Test resumed/recovered
+                    // audio outside that window; continuous gestures still forbid any dropout.
+                    if !bypassScenario || start >= 0.36 { try require(ratio > 0.1, "10 ms audio dropout") }
                 }
             }
             let reconstructed = protected ? ReconstructedPeak.measure(pcm, factor: 16) : peak
@@ -129,6 +153,6 @@ import Foundation
         if let report = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("--") }) {
             try JSONSerialization.data(withJSONObject: ["cases":rows,"count":rows.count], options:[.prettyPrinted,.sortedKeys]).write(to:URL(fileURLWithPath:report))
         }
-        print("PASS: \(rows.count) desktop continuous-control PCM cases")
+        print("PASS: \(rows.count) desktop transition PCM cases")
     }
 }

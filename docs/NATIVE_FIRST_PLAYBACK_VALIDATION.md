@@ -62,3 +62,16 @@ Verification:
 - All 216 existing shared-clock waveform/seek comparisons passed, including the intentionally misaligned replacement rejection. These comparisons concern the in-engine quality crossfade, not the system Music overlap.
 
 ⭕️ [Pending] Listen to the affected non-DRM Music track on physical iPhone, including speaker/headphones/Bluetooth. The system Music daemon does not expose the same render clock or independent fade envelope as the app engine. This removes the application's intentional silent startup interval but does not establish sample-accurate alignment or absence of route-dependent artifacts between those independent players. Temporary overlap and restoration of exclusive session options need real-device confirmation.
+
+## Preparation diagnostics — 2026-10-17
+
+🟢 [Done] Replace ambiguous mode-based failure messages and Boolean allocation preflight with stage/reason/domain/code diagnostics. Missing/unreadable files no longer become capacity errors. The updated production-engine Simulator audit confirms failure context, continued native playback, EOF deferral and subsequent handoff/cache/pause/stop behavior. See [diagnostic verification](PREPARATION_DIAGNOSTICS_VALIDATION.md).
+
+⭕️ [Pending] Recheck affected physical Music assets and live memory pressure using the new diagnostics; simulator source errors cannot reproduce account/service behavior.
+
+
+## Speaker continuity follow-up — 2026-10-17
+
+🟢 [Done] The current production-engine audit passes 17 checks, including default fade-in, pause/resume and seek cancellation, gain/EQ preservation through Precision Sinc replacement, pause before the incoming node starts and rapid resume during an active quality overlap. The confirmed EOF deferral/cached retry remains bounded. See [transport and gain verification](PLAYBACK_CONTINUITY_VALIDATION.md).
+
+⭕️ [Pending] Reproduce the reported click/level symptoms on the physical iPhone built-in speaker. Simulator success does not validate its hardware/session behavior or every destructive track teardown.

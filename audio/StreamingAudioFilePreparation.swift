@@ -14,8 +14,10 @@ nonisolated enum StreamingAudioFilePreparation {
         try Task.checkCancellation()
         let worker = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            try RemoteAudioReadiness.validate(url: url)
-            let file = try opener(url)
+            let file = try AudioPreparationFailure.at(.streamingOpen) {
+                try RemoteAudioReadiness.validate(url: url)
+                return try opener(url)
+            }
             try Task.checkCancellation()
             return OpenedFile(file: file)
         }

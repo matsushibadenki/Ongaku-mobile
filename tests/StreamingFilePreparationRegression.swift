@@ -35,7 +35,10 @@ import Foundation
                     preconditionFailure("Staging data reached AVAudioFile")
                 }
                 preconditionFailure("Staging file accepted")
-            } catch is CocoaError {}
+            } catch let failure as AudioPreparationFailure {
+                precondition(failure.stage == .streamingOpen && failure.reason == .preparationFailed)
+                precondition(failure.underlying is CocoaError)
+            }
         }
         print("PASS: incomplete staging files never reach the audio decoder")
 

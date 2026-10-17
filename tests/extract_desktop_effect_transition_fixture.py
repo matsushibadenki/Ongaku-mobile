@@ -13,6 +13,7 @@ for anchor in ['    func setEffectsBypassed(', '    func resetEffect(', '    pri
     assert 'applyEffectSettings()' in block(anchor), anchor
 stop = block('    private func stopPlayerNodes(')
 assert stop.index('secondaryPlayerNode.stop()') < stop.index('applyEffectSettings(immediately: true)')
+assert 'guard !effectParameterTransition.isProtectingOutput else { return }' in block('    private func prepareNextTrackIfNeeded(')
 assert 'applyEffectSettings(immediately: true, force: true)' in block('    private func configureEngine(')
 lazy = source[source.index('    private lazy var effectParameterTransition ='):source.index('    private let outputManager =')]
 lazy = lazy.replace('        commit:', '        schedule: { [unowned self] delay, action in self.clock.schedule(delay, action) },\n        commit:')
@@ -41,19 +42,31 @@ import Foundation
     let primaryPlayerNode: AVAudioPlayerNode, secondaryPlayerNode: AVAudioPlayerNode
     let effectPipeline: [AudioEffectNode]
     let effectOutputProtection: EffectOutputProtection
+    let engine: AVAudioEngine
+    let finalOutputProtection: FinalOutputProtection
+    var activePlayerIndex = 0
+    func stopCrossfadeTimer() {}
     let output: AVAudioMixerNode
     let clock: EffectTestClock
     var writes: [(Double, RealtimeAudioEffectSetting)] = []
+    var bypassCommits: [(audible: Bool, gain: Float)] = []
+    var unsafeBypassDefect = false
     var immediateDefect = false, muteDefect = false
     init(_ a: AVAudioPlayerNode, _ b: AVAudioPlayerNode, _ effects: [AudioEffectNode],
-         _ protection: EffectOutputProtection, _ output: AVAudioMixerNode, _ clock: EffectTestClock) {
+         _ protection: EffectOutputProtection, _ output: AVAudioMixerNode, _ clock: EffectTestClock,
+         _ engine: AVAudioEngine, _ final: FinalOutputProtection) {
+        self.engine = engine; finalOutputProtection = final
         primaryPlayerNode = a; secondaryPlayerNode = b; effectPipeline = effects
         effectOutputProtection = protection; self.output = output; self.clock = clock
     }
 '''+lazy
-text += '\n' + block('    private func applyEffectSettings(').replace('private func','func',1).replace('immediately: immediately,','immediately: immediately || immediateDefect,')
+text += '\n' + block('    private func applyEffectSettings(').replace('private func','func',1).replace('immediately: immediately,','immediately: immediately || immediateDefect || (unsafeBypassDefect && effectsBypassed),')
 text += '\n' + block('    private func commitEffectSettings(').replace('        for setting in settings {','''        for setting in settings {
+            if effectPipeline.first(where: { $0.kind == setting.kind })?.isEnabled != setting.isEnabled {
+                bypassCommits.append((primaryPlayerNode.isPlaying || secondaryPlayerNode.isPlaying, output.outputVolume))
+            }
             writes.append((clock.now, setting))
             if muteDefect { output.outputVolume = 0 }''')
+text += '\n' + stop.replace('private func','func',1)
 text += '\n}\n'
 Path(sys.argv[1]).write_text(text)

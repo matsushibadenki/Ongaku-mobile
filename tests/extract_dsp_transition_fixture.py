@@ -77,6 +77,9 @@ output.append('''
     let outputSafetyEQ = AVAudioUnitEQ(numberOfBands: 0)
     var outputLimiter: AVAudioUnit?
     var plannedOutputTrimDB: Float = 0
+    var preservesQualityUpgradeGainReference = false
+    var qualityUpgradeGainReference: SignalLevelDiagnostics?
+    var deferredQualityDSPProfile: AutomaticDSPProfile?
     var signalDiagnostics: SignalLevelDiagnostics?
     var effectLevelAudits: [EffectLevelAudit] = []
     var controlledEffectLevelAudits: [EffectLevelAudit] = []
@@ -152,7 +155,7 @@ for name in methods:
     text = text.replace('        automaticDSPEQ.bypass = scaled.shouldBypass', '        record("automaticDSP")\n        automaticDSPEQ.bypass = scaled.shouldBypass')
     text = text.replace("let shouldDeclick = activePlayerNode.isPlaying && changed", "let shouldDeclick = activePlayerNode.isPlaying && changed && !bypassMuteGateForNegativeControl")
     text = text.replace('        loudnessCompensationEQ.bypass = amount < 0.02', '        record("loudness")\n        loudnessCompensationEQ.bypass = amount < 0.02')
-    text = text.replace('        let sourceRMS = signalDiagnostics?', '        record("gain")\n        guard useRealGainPath else { return }\n        let sourceRMS = signalDiagnostics?')
+    text = text.replace('        let sourceRMS = gainDiagnostics?', '        record("gain")\n        guard useRealGainPath else { return }\n        let sourceRMS = gainDiagnostics?')
     text = text.replace('AVAudioTime.seconds(forHostTime: mach_absolute_time())', 'DispatchQueue.main.seconds')
     text = text.replace('lastGainStagingDate = Date()', 'lastGainStagingDate = Date(timeIntervalSince1970: DispatchQueue.main.seconds)')
     text = text.replace('let now = Date()', 'let now = Date(timeIntervalSince1970: DispatchQueue.main.seconds)')

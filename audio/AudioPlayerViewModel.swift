@@ -1224,19 +1224,19 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         if recoveryMode == .normal,
            playbackSource == .local,
            hiResPlaybackEngine.hasTrack,
-           let currentURL = hiResPlaybackEngine.currentAudioURL,
-           !HiResPlaybackEngine.canPrepareOffline(
-               url: musicPlaybackSnapshot?.url ?? currentURL,
-               upsamplingMode: recoveryMode.automaticUpsamplingMode
-           ) {
-            // General headroom has recovered, but this particular track still
-            // cannot fit with the required reserve. Re-evaluate later without
-            // interrupting its AVAudioConverter playback.
-            memoryRecoveryNotBefore = CFAbsoluteTimeGetCurrent() + 30
-            PlaybackDebugLogger.event(
-                "memory.safety.recovery_deferred reason=track_allocation_budget"
-            )
-            return
+           let currentURL = hiResPlaybackEngine.currentAudioURL {
+            do {
+                try HiResPlaybackEngine.validateOfflinePreparation(
+                    url: musicPlaybackSnapshot?.url ?? currentURL,
+                    upsamplingMode: recoveryMode.automaticUpsamplingMode)
+            } catch {
+                // Defer any failed preflight without mistaking unreadable metadata
+                // for a capacity limit or interrupting native playback.
+                memoryRecoveryNotBefore = CFAbsoluteTimeGetCurrent() + 30
+                PlaybackDebugLogger.event(
+                    "memory.safety.recovery_deferred \(AudioPreparationFailure.diagnostic(error, fallbackStage: .offlinePreflight))")
+                return
+            }
         }
 
         recoverMemorySafetyMode(to: recoveryMode, availableMemory: availableMemory)
@@ -4820,7 +4820,6 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                print("[HiResPlayback] load failed with \(restoreUpsamplingMode ?? self.upsamplingMode): \(error.localizedDescription)")
                 // Music asset URLs are not guaranteed to remain readable by
                 // AVAudioFile, even when hasProtectedAsset is false. Let Music
                 // resolve its own asset instead of repeatedly decoding that URL.
@@ -4828,6 +4827,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                       self.playbackPreparationToken == preparationToken,
                       self.selectedSystemSongID == song.id,
                       self.playbackSource == .local else { return }
+                PlaybackDebugLogger.warning(
+                    "audio.prepare.failed songID=\(song.id) path=streaming requestedMode=\(self.upsamplingMode.rawValue) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .streamingStart))")
                 if let mediaItem {
                     PlaybackDebugLogger.warning("audio.asset.fallback songID=\(song.id) reason=local_prepare_failed")
                     // Detach this task before transition cleanup cancels local work.
@@ -5303,9 +5304,11 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 guard position.isFinite, position >= 0, duration.isFinite else { return }
                 guard position + 1 < duration else { completedAttempt = true; return }
                 self.hiResPlaybackEngine.apply(effectSettings: self.playbackEffectSettings)
-                try self.hiResPlaybackEngine.seek(to: position)
-                try self.hiResPlaybackEngine.play(fadeInDuration: 0.012)
-                try await self.hiResPlaybackEngine.waitForSystemHandoffRender()
+                do {
+                    try self.hiResPlaybackEngine.seek(to: position)
+                    try self.hiResPlaybackEngine.play(fadeInDuration: 0.012)
+                    try await self.hiResPlaybackEngine.waitForSystemHandoffRender()
+                } catch { throw AudioPreparationFailure.tagging(error, stage: .streamingStart) }
                 try Task.checkCancellation()
                 guard self.playbackPreparationToken == token,
                       self.userPauseIntentToken == pauseToken,
@@ -5345,7 +5348,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                       self.playbackPreparationToken == token, self.selectedSystemSongID == song.id else { return }
                 completedAttempt = true
                 self.systemAssetRecoveryFailure = L10n.tr("effects.availability.preparation_failed")
-                PlaybackDebugLogger.warning("audio.asset.recovery_unavailable songID=\(song.id) error=\(error.localizedDescription)")
+                PlaybackDebugLogger.warning("audio.asset.recovery_unavailable songID=\(song.id) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .assetSnapshot))")
             }
         }
     }
@@ -5384,7 +5387,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 PlaybackDebugLogger.event("audio.quality_cache.prepared songID=\(nextSong.id)")
             } catch is CancellationError { }
             catch {
-                PlaybackDebugLogger.warning("audio.quality_cache.deferred songID=\(nextSong.id) error=\(error.localizedDescription)")
+                guard !Task.isCancelled else { return }
+                PlaybackDebugLogger.warning("audio.quality_cache.deferred songID=\(nextSong.id) mode=\(preloadMode.rawValue) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .cachePreparation))")
             }
         }
     }
@@ -5416,17 +5420,27 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 if let retained = self.musicPlaybackSnapshot { snapshot = retained }
                 else { snapshot = assetURL.isFileURL ? nil : try await MusicAssetPreparation.playableSnapshot(url: assetURL) }
             } catch {
-                PlaybackDebugLogger.warning("audio.quality_snapshot.skipped songID=\(songID) error=\(error.localizedDescription)")
+                guard !Task.isCancelled else { return }
+                PlaybackDebugLogger.warning("audio.quality_snapshot.skipped songID=\(songID) mode=\(targetUpsampling.rawValue) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .assetSnapshot))")
                 return
             }
             let preparationURL = snapshot?.url ?? assetURL
             guard !Task.isCancelled, self.playbackPreparationToken == tokenAtStart,
                   self.selectedSystemSongID == songID, self.memorySafetyMode == .normal else { return }
-            guard HiResPlaybackEngine.canPrepareOffline(url: preparationURL, upsamplingMode: targetUpsampling) else { return }
+            do {
+                try HiResPlaybackEngine.validateOfflinePreparation(url: preparationURL, upsamplingMode: targetUpsampling)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                PlaybackDebugLogger.warning(
+                    "audio.quality_upgrade.deferred songID=\(songID) mode=\(targetUpsampling.rawValue) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .offlinePreflight))")
+                return
+            }
             defer { withExtendedLifetime(snapshot) {} }
 
             PlaybackDebugLogger.event(
-                "audio.quality_upgrade.begin \(HiResPlaybackEngine.processMemoryDiagnostic)"
+                "audio.quality_upgrade.begin songID=\(songID) mode=\(targetUpsampling.rawValue) \(HiResPlaybackEngine.processMemoryDiagnostic)"
             )
             let shouldResume = self.hiResPlaybackEngine.isPlaying
             do {
@@ -5448,7 +5462,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 return
             } catch {
                 // Keep playback on the fast path if upgrade fails.
-                print("[HiResPlayback] background quality upgrade failed: \(error.localizedDescription)")
+                guard !Task.isCancelled, self.playbackPreparationToken == tokenAtStart,
+                      self.selectedSystemSongID == songID else { return }
+                PlaybackDebugLogger.warning(
+                    "audio.quality_upgrade.failed songID=\(songID) mode=\(targetUpsampling.rawValue) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .qualityHandoff))")
             }
         }
     }
