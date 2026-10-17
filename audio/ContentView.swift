@@ -10,7 +10,7 @@ import Combine
 import MusicKit
 import UniformTypeIdentifiers
 
-private enum RootTab {
+private enum RootTab: Hashable {
     case nowPlaying, library, effects, search
 }
 
@@ -96,64 +96,54 @@ struct ContentView: View {
                                  width: safeFrame.width + viewport.safeAreaInsets.leading + viewport.safeAreaInsets.trailing,
                                  height: safeFrame.height + viewport.safeAreaInsets.top + viewport.safeAreaInsets.bottom)
             VStack(spacing: 0) {
-                TabView(selection: $selectedTab) {
-                    // NOW PLAYING
-                    NowPlayingView(player: player, artworkMode: $artworkMode, onGoToAlbum: { album in
-                        openNowPlayingAlbum(album, fromArtworkSwipe: false)
-                    }, onSwipeUpToAlbum: { album in
-                        openNowPlayingAlbum(album, fromArtworkSwipe: true)
-                    }, vuScreenFrame: vuFrame)
-                        .tag(RootTab.nowPlaying)
-                        .toolbar(.hidden, for: .tabBar)
-            
-                    // Navigation owners do not observe playback telemetry. Observed
-                    // content sits inside each stack, below destination registration.
-                    GeometryReader { geometry in
-                        NavigationStack(path: $libraryPath) {
-                            LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                RetainedTabContent(selection: selectedTab) { tab in
+                    switch tab {
+                    case .nowPlaying:
+                        // NOW PLAYING
+                        NowPlayingView(player: player, artworkMode: $artworkMode, onGoToAlbum: { album in
+                            openNowPlayingAlbum(album, fromArtworkSwipe: false)
+                        }, onSwipeUpToAlbum: { album in
+                            openNowPlayingAlbum(album, fromArtworkSwipe: true)
+                        }, vuScreenFrame: vuFrame)
+
+                    case .library:
+                        // Navigation owners do not observe playback telemetry. Observed
+                        // content sits inside each stack, below destination registration.
+                        GeometryReader { geometry in
+                            NavigationStack(path: $libraryPath) {
+                                LibraryTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                                    .toolbarBackground(.hidden, for: .navigationBar)
+                                    .toolbar { settingsToolbar(for: .library) }
+                                    .navigationDestination(for: LibraryRoute.self) { route in
+                                        LibraryDestinationView(route: route, player: player,
+                                                               onPlay: { selectedTab = .nowPlaying })
+                                    }
+                            }
+                            .offset(x: isAlbumEnteringFromLeading ? -geometry.size.width : 0)
+                        }
+                    case .effects:
+                        NavigationStack {
+                            EffectsTabContent(player: player,
+                                              isPresented: selectedTab == .effects,
+                                              shouldRenderControls: shouldRenderEffectsControls,
+                                              controlsRenderID: effectsControlsRenderID)
                                 .toolbarBackground(.hidden, for: .navigationBar)
-                                .toolbar { settingsToolbar(for: .library) }
+                                .toolbar { settingsToolbar(for: .effects) }
+                        }
+                    case .search:
+                        NavigationStack(path: $searchPath) {
+                            SearchTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
+                                .toolbarBackground(.hidden, for: .navigationBar)
+                                .toolbar { settingsToolbar(for: .search) }
                                 .navigationDestination(for: LibraryRoute.self) { route in
                                     LibraryDestinationView(route: route, player: player,
                                                            onPlay: { selectedTab = .nowPlaying })
                                 }
                         }
-                        .offset(x: isAlbumEnteringFromLeading ? -geometry.size.width : 0)
                     }
-                    .tag(RootTab.library)
-                    .toolbar(.hidden, for: .tabBar)
-
-                    NavigationStack {
-                        EffectsTabContent(player: player,
-                                          isPresented: selectedTab == .effects,
-                                          shouldRenderControls: shouldRenderEffectsControls,
-                                          controlsRenderID: effectsControlsRenderID)
-                            .toolbarBackground(.hidden, for: .navigationBar)
-                            .toolbar { settingsToolbar(for: .effects) }
-                    }
-                    .tag(RootTab.effects)
-                    .toolbar(.hidden, for: .tabBar)
-
-                    NavigationStack(path: $searchPath) {
-                        SearchTabContent(player: player, onPlay: { selectedTab = .nowPlaying })
-                            .toolbarBackground(.hidden, for: .navigationBar)
-                            .toolbar { settingsToolbar(for: .search) }
-                            .navigationDestination(for: LibraryRoute.self) { route in
-                                LibraryDestinationView(route: route, player: player,
-                                                       onPlay: { selectedTab = .nowPlaying })
-                            }
-                    }
-                    .tag(RootTab.search)
-                    .toolbar(.hidden, for: .tabBar)
                 }
-                // The custom menu owns tab navigation. Hide the native bar on
-                // its container from the first layout, before a selected page
-                // publishes its own toolbar preference (which can flash a
-                // glass capsule above the transport during a cold launch).
-                .toolbar(.hidden, for: .tabBar)
-                .toolbarBackground(.hidden, for: .tabBar)
-                // Give TabView the actual remaining height; a bottom safe-area inset
-                // can overlay its child GeometryReader instead of reducing its size.
+                // The custom menu is the only tab bar. The content container
+                // receives the remaining height above the fixed controls.
                 VStack(spacing: 16) {
                     if selectedTab == .nowPlaying {
                         VStack(spacing: 4) {

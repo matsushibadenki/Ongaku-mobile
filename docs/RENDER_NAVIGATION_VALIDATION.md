@@ -1,5 +1,12 @@
 # Render timing and navigation validation
 
+## Continuous track-name marquee — 2026-10-17
+
+- Replaced the repeated SwiftUI offset animation with a clipped Canvas drawing two identical text copies. Their positions use elapsed time modulo the measured text width plus three font-sized spaces, avoiding a reset phase with no title in view. The separator is capped at one quarter of narrow cells; the scroll speed remains 32 pt/s, with a 1.2-second initial reading pause.
+- Untruncated text is measured independently. Text that fits stays still; a 0.5 pt tolerance avoids scrolling due to fractional measurement noise. Width, text, accessibility or visibility changes restart from a readable first position. Timeline updates are capped at 30 fps and paused for short text, Reduce Motion, inactive scenes and hidden views. VoiceOver receives one full text label.
+- A disposable production-MarqueeView host on SE / iOS 26.2 displayed short Japanese text and overflowing Japanese, English and Simplified Chinese text in 220 pt viewports. Forty screenshots at approximately 0.5-second intervals covered full repeat cycles. Pixel checks excluding borders found visible text in every long-label sample (minimum white-text pixel counts: JA 3,635; ZH 3,845; EN 2,640). The short-label crop was identical in all 40 samples. Visual inspection confirmed the separator and incoming copy at a wrap.
+- Full Debug simulator build passed (`/private/tmp/OngakuMarqueeBuild.log`). Fixture/screenshots: `/private/tmp/OngakuMarqueeAudit`.
+
 ## Evidence from the supplied iPhone log
 
 The old diagnostic recorded `audio.dropout.detected gapMs=887.5`, followed by
@@ -237,6 +244,8 @@ screenshots and state checks do not establish live remote-service behavior.
 
 ## Cold-launch native tab-bar suppression — 2026-10-16
 
+Superseded by the content-only container below: the user still observed the capsule on a physical iPhone after the visibility-only fix.
+
 The reported brief capsule between the progress area and transport is consistent with the native TabView bar: the custom transport is immediately below TabView, whose pages previously supplied all tab-bar visibility preferences. Declare both native tab-bar and tab-bar-background visibility on TabView itself so they are hidden before a page's preference is resolved. Retain page-level hiding for later navigation.
 
 - 🟢 [Done] Debug simulator build succeeded.
@@ -244,3 +253,17 @@ The reported brief capsule between the progress area and transport is consistent
 - ⭕️ [Pending] Confirm the original brief flash is absent on the affected physical device. The host verifies the corrected container's initial visibility, not the original device's library/bootstrap timing or frames preceding the first display-link callback.
 
 Disposable host: `/private/tmp/OngakuStartupAudit`; screenshots: `/private/tmp/OngakuStartupSE.png`, `/private/tmp/OngakuStartupProMax.png`.
+
+## Content-only root tabs — 2026-10-17
+
+The new screenshot shows an empty system-style tab selection capsule directly above the custom transport, matching the bottom of the former native TabView. Visibility preferences did not reliably suppress it during physical-device startup. `ContentView` now uses `RetainedTabContent`: a plain UIKit container with one active SwiftUI hosting controller and a cache of visited pages. It never constructs a UITabBarController or UITabBar. The custom menu remains the sole tab navigation surface.
+
+- Hosts are created lazily. Switching detaches the previous page and sends its disappearance lifecycle, allowing visualization work and view tasks to stop. Reattaching the retained host preserves local SwiftUI state and navigation. Parent environment values are forwarded on update; safe areas remain owned by the outer SwiftUI viewport.
+- 🟢 [Done] Full Debug simulator build passed (`/private/tmp/OngakuCapsuleBuild.log`).
+- 🟢 [Done] `SIMULATOR_UDID=<booted simulator> bash tests/run_retained_tab_content_audit.sh` passed on SE: cached host identity, local state across revisits, NavigationStack paths, balanced appearance/disappearance on switching, no appearance replay on ordinary root refresh, and no native tab-bar view.
+- 🟢 [Done] `bash tests/run_navigation_presentation_regression.sh` passed all six checks.
+- 🟢 [Done] A disposable copy of the production app retained the initial library-loading state and omitted startup service tasks. On iOS 26.2 SE (3rd generation) and iPhone 16 Pro Max, the first 180 display-link samples each reported `nativeTabBarInstances=0`, including while the initial media permission dialog was present. After dismissing that dialog, visual checks showed no capsule between elapsed time and transport. The loading-state screenshots match the user's scenario rather than a ready-track fixture.
+- 🟢 [Done] On the production-view Pro Max host, switched through Library, Effects, Search and back to playback; opened Appearance, selected Light and dismissed it. Content, toolbar, custom menu and appearance updates remained usable and contained.
+- ⭕️ [Pending] Physical-device first-launch confirmation and live audio/navigation checks. The simulator fixture does not exercise account authorization, a real library import or audio playback. This change has not been deployed to App Store Connect.
+
+Disposable startup host: `/private/tmp/OngakuCapsuleAudit`. Persistent regression source: `tests/RetainedTabContentAuditApp.swift`.

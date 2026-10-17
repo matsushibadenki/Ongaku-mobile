@@ -3,6 +3,9 @@
 
 ## Appearance
 
+- 🟢 [Done] Scroll track labels only when measured text exceeds available width. Draw two copies with a three-space separator and a time-based wrap so the next copy enters before the previous one leaves. Pause short/hidden/inactive/Reduce Motion labels; retain one accessibility label. Japanese/English/Simplified Chinese loop checks and the simulator build passed.
+- 🟢 [Done] Replace the root native TabView with a content-only retained hosting container so no empty system tab-bar capsule can be created at startup. Keep visited page state/navigation and appearance lifecycles. SE / 16 Pro Max startup hosts reported zero UITabBar instances across 180 frames each; retention and navigation regressions plus the simulator build passed.
+- ⭕️ [Pending] Confirm the first-launch capsule is absent on the affected physical iPhone after installing this build.
 - 🟢 [Done] Restore downward-swipe visualization selection in every appearance regardless of realtime-effect readiness. Retain the selected mode through playback-route changes; display resting meters when samples are unavailable. Reproduced the old gate with DSP disabled, then verified all four modes in all three appearances on SE / 16 Pro Max simulator hosts, readiness changes without mode resets, and a full simulator build.
 - 🟢 [Done] Bound Original's blurred artwork to a noninteractive background overlay so a square cover cannot widen the player. Reproduced the clipped track/seek labels before the fix; verified contained content and downward-swipe cycling through thumbnail / VU / 2D / 3D on SE and 16 Pro Max simulator hosts. Light/Dark visual checks and the full simulator build passed.
 - ⭕️ [Pending] Confirm the Original layout and visualization switching with the affected music on a physical iPhone; simulator checks use a playback-state fixture.
