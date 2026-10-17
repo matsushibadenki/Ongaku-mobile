@@ -1576,11 +1576,11 @@ final class HiResPlaybackEngine {
         // Both sources share this effect graph and gain stage. Keep their
         // sound stable through the scheduled lead and the entire crossfade.
         if pendingHandoff != nil {
-            scheduleEffectParameterStep(remaining: 8, token: token)
+            scheduleEffectParameterStep(remaining: EffectTransitionPolicy.parameterSteps, token: token)
             return
         }
         guard requiresProtectedEffectCommit(effectSettings) else {
-            scheduleEffectParameterStep(remaining: 8, token: token)
+            scheduleEffectParameterStep(remaining: EffectTransitionPolicy.parameterSteps, token: token)
             return
         }
         let originalOutput = effectDeclickRestoreVolume ?? declickMixer.outputVolume
@@ -1598,7 +1598,7 @@ final class HiResPlaybackEngine {
     }
 
     private func scheduleEffectParameterStep(remaining: Int, token: UInt64) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.010) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + EffectTransitionPolicy.parameterInterval) { [weak self] in
             guard let self, self.declickToken == token,
                   let target = self.pendingDeclickEffectSettings else { return }
             if self.pendingHandoff != nil {
@@ -1620,14 +1620,8 @@ final class HiResPlaybackEngine {
         guard let target = pendingDeclickEffectSettings else { return }
         if fraction == 1 { pendingDeclickEffectSettings = nil }
         let settings = target.map { requested in
-            guard fraction < 1, requested.isEnabled,
-                  let previous = lastAppliedEffectSettings[requested.kind] else { return requested }
-            var interpolated = requested
-            for (key, value) in requested.parameters {
-                let start = previous.parameters[key] ?? value
-                interpolated.parameters[key] = start + (value - start) * Double(fraction)
-            }
-            return interpolated
+            EffectTransitionPolicy.interpolate(requested,
+                from: lastAppliedEffectSettings[requested.kind], fraction: fraction)
         }
         let dspChanged = applyPendingAutomaticDSPProfile(fraction: fraction)
         let loudnessChanged = applyPendingLoudnessCompensation(fraction: fraction)

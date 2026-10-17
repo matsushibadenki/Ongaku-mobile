@@ -122,3 +122,7 @@ separate delayed/stale/reordered-delivery checks; see
 spatial/SRC handoffs with delayed PCM meter replay and fixes shared parameter/
 gain writes during the source fade. Continuous device tap feedback remains
 separate follow-up work.
+
+## Shared desktop parameter policy — 2026-10-17
+
+🟢 [Done] Extract the existing interpolation constants/math into `EffectTransitionPolicy.swift` and share it byte-for-byte with Mac. The desktop now coalesces continuous controls, defers them during song overlaps and invalidates old callbacks on OFF/stop/rebuild. iPhone's 48 effect and 72 gain cases remain passing. See [cross-platform validation](EFFECT_PARAMETER_PARITY_VALIDATION.md) for the Mac waveform matrix and the remaining immediate Mac bypass path.
