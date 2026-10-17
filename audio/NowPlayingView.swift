@@ -27,10 +27,6 @@ struct NowPlayingView: View {
             : CGSize(width: 0, height: dragTranslation.height * 0.7)
     }
     
-    private var canUseVisualizationModes: Bool {
-        player.supportsRealtimeEffects
-    }
-    
     var body: some View {
         ZStack {
             if artworkMode == .vuMeter {
@@ -87,7 +83,9 @@ struct NowPlayingView: View {
                                             else if h < -40 { player.playPreviousTrack() }
                                         } else if v < -60, let album = player.nowPlayingAlbum {
                                             onSwipeUpToAlbum(album)
-                                        } else if v > 60, canUseVisualizationModes {
+                                        } else if v > 60 {
+                                            // Display selection remains available on the system route
+                                            // and while the local audio engine is preparing.
                                             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                                                 let nextRaw = (artworkMode.rawValue + 1) % ArtworkMode.allCases.count
                                                 artworkMode = ArtworkMode(rawValue: nextRaw) ?? .thumbnail
@@ -186,16 +184,6 @@ struct NowPlayingView: View {
             }
         }
         .preferredColorScheme(Theme.appearance.colorScheme)
-        .onAppear {
-            if !canUseVisualizationModes {
-                artworkMode = .thumbnail
-            }
-        }
-        .onChange(of: player.supportsRealtimeEffects) { _, enabled in
-            if !enabled {
-                artworkMode = .thumbnail
-            }
-        }
     }
 }
 
@@ -339,6 +327,10 @@ private struct ArtworkView: View {
     private var displayHeight: CGFloat {
         size + (mode == .classicSpectrum ? max(0, titleGap - 8) : 0)
     }
+
+    private var isVisualizing: Bool {
+        isPlaying && player.supportsRealtimeEffects
+    }
     
     var body: some View {
         ZStack {
@@ -349,11 +341,11 @@ private struct ArtworkView: View {
                 // The root renders VU behind the entire screen; retain the swipe area here.
                 Color.clear.frame(width: size, height: size)
             case .classicSpectrum:
-                ClassicSpectrumView(spectrum: player.currentSpectrum, isPlaying: isPlaying,
+                ClassicSpectrumView(spectrum: player.currentSpectrum, isPlaying: isVisualizing,
                                     accentColor: accentColor, titleGap: titleGap)
                     .frame(width: size, height: displayHeight)
             case .spectrum3D:
-                Spectrum3DView(spectrum: player.currentSpectrum, isPlaying: isPlaying, accentColor: accentColor)
+                Spectrum3DView(spectrum: player.currentSpectrum, isPlaying: isVisualizing, accentColor: accentColor)
                     .frame(width: size, height: size)
             }
             
@@ -550,7 +542,8 @@ struct NowPlayingVUBackground: View {
     var body: some View {
         ZStack {
             HardwareSurface()
-            VUMeterView(value: player.currentVUValue, isPrecisionSinc: player.upsamplingMode.isPrecisionSinc)
+            VUMeterView(value: player.supportsRealtimeEffects ? player.currentVUValue : 0,
+                        isPrecisionSinc: player.upsamplingMode.isPrecisionSinc)
             if Theme.appearance == .light {
                 // Blend only the empty studio backdrop into the app finish.
                 // The meter housing and face remain fully visible and uncropped.

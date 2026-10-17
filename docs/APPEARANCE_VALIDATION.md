@@ -1,5 +1,20 @@
 # Appearance validation — 2026-10-16
 
+## Visualization selection independent of playback route — 2026-10-17
+
+- Follow-up reproduced the missing case in the previous layout check: with `supportsRealtimeEffects = false`, a downward drag left the thumbnail selected. `NowPlayingView` gated switching on realtime-effect readiness and reset selection both on appearance and whenever readiness became false. Native-first system playback therefore disabled the gesture even with a track loaded.
+- Removed the readiness condition from display selection and removed both forced thumbnail resets. Playback/seek readiness rules remain intact. Spectrum rendering uses `isPlaying && supportsRealtimeEffects`, and VU shows zero without sample access, so unavailable telemetry cannot animate old data or imply a measured system/DRM signal.
+- Production-view simulator host: on SE (3rd generation) and iPhone 16 Pro Max / iOS 26.2, actual downward drags with DSP disabled completed thumbnail → VU → 2D → 3D → thumbnail in Original, Light and Dark (24 transitions). On SE, toggling readiness false → true → false in each of VU / 2D / 3D preserved the selection (six state changes).
+- Full Debug simulator build passed; log: `/private/tmp/OngakuVisualizationBuild.log`. Audio engine behavior was not changed. Physical-device playback-route verification remains pending.
+
+## Original artwork layout regression — 2026-10-17
+
+- Reproduced with the production `NowPlayingView`, a square test cover and Original selected: the unbounded aspect-fill background widened the enclosing stack, clipping track information and seek/time controls horizontally. This background image exists only for Original thumbnail mode.
+- `BlurredBackgroundView` now places that image in an explicitly sized, clipped overlay on `AppBackground`. The decorative layer cannot contribute its aspect-fill size to the parent or receive touches/accessibility focus. Foreground dimensions, audio readiness rules and visualization eligibility are unchanged.
+- A disposable simulator host compiled the production Now Playing, background, appearance, marquee, spectrum and slider views with a deterministic player fixture. On iOS 26.2 iPhone SE (3rd generation) and iPhone 16 Pro Max, content stayed within horizontal margins and actual downward drags cycled thumbnail → VU → 2D → 3D → thumbnail. Light on SE and Dark on Pro Max also retained contained layouts after switching appearance.
+- Full Debug simulator build passed using `xcodebuild -project Ongaku.xcodeproj -scheme audio -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath /private/tmp/OngakuOriginalBuild CODE_SIGNING_ALLOWED=NO build`.
+- ⭕️ [Pending] Verify with the affected tracks on a physical device. The fixture provides realtime-effect eligibility and sample meter values; this check does not validate live audio or system-to-local playback handoff. This fix is local and is not part of the already submitted App Store build.
+
 ## Implementation
 
 - Original is the default and retains the existing flat black finish. Realistic Light and Realistic Dark are opt-in choices stored under `interface.appearance`. Unknown saved values fall back to Original.

@@ -3,6 +3,9 @@
 
 ## Appearance
 
+- 🟢 [Done] Restore downward-swipe visualization selection in every appearance regardless of realtime-effect readiness. Retain the selected mode through playback-route changes; display resting meters when samples are unavailable. Reproduced the old gate with DSP disabled, then verified all four modes in all three appearances on SE / 16 Pro Max simulator hosts, readiness changes without mode resets, and a full simulator build.
+- 🟢 [Done] Bound Original's blurred artwork to a noninteractive background overlay so a square cover cannot widen the player. Reproduced the clipped track/seek labels before the fix; verified contained content and downward-swipe cycling through thumbnail / VU / 2D / 3D on SE and 16 Pro Max simulator hosts. Light/Dark visual checks and the full simulator build passed.
+- ⭕️ [Pending] Confirm the Original layout and visualization switching with the affected music on a physical iPhone; simulator checks use a playback-state fixture.
 - 🟢 [Done] Add luminous multicolor 3D spectrum ribbons, perspective grid, signal-driven glow and bounded peak particles. Retain a fixed camera, limit rendering to 30 fps / 24 layers / 96 samples, pause hidden/inactive playback and respect Reduce Motion. Simulator build and Light SE / Dark Pro Max / paused visual checks pass.
 - ⭕️ [Pending] Measure the enhanced 3D spectrum's GPU/energy usage and live signal response on a physical iPhone.
 - 🟢 [Done] Generate and integrate white-studio VU images for Light in orange and green. Aspect-fit the complete images, blend empty backdrop into the shared glossy surface, retain needle alignment and use dark status indicators. Simulator build and SE / Pro Max production-view host checks pass; Dark/Original retain their assets.

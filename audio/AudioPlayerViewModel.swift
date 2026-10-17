@@ -2978,8 +2978,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
 
         guard supportsRealtimeEffects else {
-            // DRM/system playback cannot expose audio samples. Keep visualization meters at rest;
-            // the UI locks these tracks to album artwork.
+            // DRM/system playback cannot expose audio samples. The user can still select
+            // any visualization, but its meters stay at rest until real samples are available.
             resetVisualizationMeters(resetSpectrum: visualizationTickCount % 2 == 0)
             return
         }
