@@ -1,6 +1,18 @@
 # #Ongaku Roadmap
 
 
+## Audio fidelity policy — 2026-10-17
+
+- 🟢 [Done] Classify iPhone built-in/wired-headphone outputs explicitly; keep USB/Bluetooth/AirPlay/line/unknown routes neutral. Add per-device Automatic / Headphones / External selection and an independent low-volume compensation toggle, localized in English/Japanese/Simplified Chinese. SE / 16 Pro Max layout checks passed.
+- 🟢 [Done] Use a shared 96 kHz effect-rack policy on iPhone and Mac, independent of file and hardware rate. Mac 192 kHz files retain Space; source clocks remain at file rate. Desktop controller and nine offline conversion/Space paths passed.
+- 🟢 [Done] Add shared K-weighted, absolute/relative-gated mono/stereo LUFS measurement; stop substituting RMS for unmeasured loudness. Stream full-track Mac loudness/peaks, update cache versions and LUFS targets, and combine album block energies. Independent 24-case FFmpeg comparison has maximum 0.053101 LU error. See [validation and scope](AUDIO_FIDELITY_POLICY_VALIDATION.md).
+- 🟢 [Done] Integrate the common true-peak candidate into the complete Mac final output path after conversion, channel mapping and user volume, independently of effect bypass. See [Mac qualification](MAC_TRUE_PEAK_VALIDATION.md) for the shared ceiling/latency tests and activation limits.
+- 🟢 [Done] Verify Mac with 168 peak probes and independent FFmpeg measurements, 72 controlled overlaps, shared DSP/AU sanitizers, and ordinary/qualification build tests. Repeat iPhone’s 84 peak probes and 18 overlaps under the same criteria.
+- ⭕️ [Pending] Physical playback, pause/seek/final tails, rate/route changes, meter timing and sustained resource use on both platforms. Ordinary activation of `ONGAKU_ENABLE_TRUE_PEAK` remains on hold.
+- ⭕️ [Pending] Physical USB/Bluetooth/DAC routing, per-device preference persistence, matched-loudness listening, live transitions, negotiated rates, and CPU/thermal/energy measurements on iPhone and Mac. Enable the candidate true-peak protector only after its existing device qualification gates pass.
+- 🔴 [Later] Multichannel loudness mapping, iPhone native-only streamed loudness analysis, exact album boundary windows, measured HRTFs, residual/alias measurements and targeted nonlinear oversampling.
+
+
 ## Appearance
 
 - 🟢 [Done] Scroll track labels only when measured text exceeds available width. Draw two copies with a three-space separator and a time-based wrap so the next copy enters before the previous one leaves. Pause short/hidden/inactive/Reduce Motion labels; retain one accessibility label. Japanese/English/Simplified Chinese loop checks and the simulator build passed.

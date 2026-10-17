@@ -96,7 +96,7 @@
 "effects.availability.system" = "当前曲目走的是系统播放路径，因此无法应用应用内效果。仅支持可获取 assetURL 的曲目。";
 "effects.availability.protected" = "此曲目是受保护的 Apple Music / 系统曲目，iOS 不会向应用暴露音频采样。要使用效果，需要本地文件或可获取 assetURL 的曲目。";
 "effects.signal.unavailable" = "无法获取输入电平";
-"effects.signal.summary" = "输入峰值 %.1f dBFS  |  RMS %.1f dBFS  |  响度 %.1f LUFS  |  输入修正 %.1f dB  |  32f 余量 %.1f dB  |  输出修正 %.1f dB  |  FX 余量 %.1f dB";
+"effects.signal.summary" = "输入峰值 %.1f dBFS  |  RMS %.1f dBFS  |  响度 %@ LUFS  |  输入修正 %.1f dB  |  32f 余量 %.1f dB  |  输出修正 %.1f dB  |  FX 余量 %.1f dB";
 "effects.render_health.healthy" = "渲染周期稳定（未检测到调度延迟）";
 "effects.render_health.summary" = "渲染调度延迟 %d 次，最长 %.0f 毫秒 — %@";
 "effects.render_health.stalled" = "等待回调";
@@ -432,3 +432,12 @@
 "effects.availability.source_unavailable" = "App 无法获取此音频。请在“音乐”中下载后重试。";
 "effects.availability.preparation_failed" = "无法准备可应用音效的音频，播放会继续。";
 "effects.preparation.retry" = "重试音频准备";
+
+/* Output route policy */
+"settings.output.kind" = "输出设备";
+"settings.output.kind.automatic" = "自动";
+"settings.output.kind.headphones" = "耳机";
+"settings.output.kind.external" = "外部输出";
+"settings.output.help.title" = "输出设置说明";
+"settings.output.help" = "自动模式识别内置扬声器和有线耳机。USB、蓝牙及其他外部输出保持中性。若要为当前连接启用耳机处理，请选择“耳机”。选择会按设备保存。低音量补偿可增强内置扬声器和指定耳机在低音量下的低音与高音。";
+"settings.output.compensation" = "低音量补偿";

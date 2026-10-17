@@ -46,8 +46,9 @@ enum ReconstructedPeak {
         let tapered = tone.enumerated().map { i, x in x * Float(min(1, Double(min(i, tone.count - 1 - i)) / 128)) }
         let sample = tapered.map { abs($0) }.max()!
         let eight = measure([tapered]), sixteen = measure([tapered], factor: 16)
+        let thirtyTwo = measure([tapered], factor: 32)
         try require(sample < 0.8 && abs(eight - 1.12) < 0.001
-            && abs(eight - sixteen) < 0.0001, "Intersample peak calibration failed")
+            && abs(eight - sixteen) < 0.0001 && abs(sixteen - thirtyTwo) < 0.0001, "Intersample peak calibration failed")
         print("PASS: intersample calibration sample=\(sample) reconstructed8x=\(eight) reconstructed16x=\(sixteen)")
     }
 }

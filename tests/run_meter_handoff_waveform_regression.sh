@@ -7,7 +7,7 @@ python3 tests/extract_dsp_transition_fixture.py "$combined_dir/ShippingDSPTransi
 python3 tests/extract_sinc_measurement_fixture.py "$combined_dir/ShippingSinc.swift"
 python3 tests/extract_meter_handoff_fixture.py "$combined_dir/ShippingHRTF.swift"
 swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$combined_dir/module-cache" \
-    audio/EffectMeterObservation.swift audio/PlaybackHandoffClock.swift audio/ImpulseResponseCatalog.swift \
+    audio/IntegratedLoudnessMeter.swift audio/EffectMeterObservation.swift audio/PlaybackHandoffClock.swift audio/ImpulseResponseCatalog.swift \
     audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     "$combined_dir/ShippingDSPTransition.swift" "$combined_dir/ShippingSinc.swift" "$combined_dir/ShippingHRTF.swift" \
     tests/ReconstructedPeak.swift tests/ContinuousMeterHandoffRegression.swift tests/MeterHandoffWaveformRegression.swift -o "$combined_dir/combined"

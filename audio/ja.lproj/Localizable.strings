@@ -96,7 +96,7 @@
 "effects.availability.system" = "現在の曲はシステム再生経路のため、アプリ内エフェクトは適用されません。assetURL を取得できる曲のみ対応しています。";
 "effects.availability.protected" = "この曲は保護された Apple Music / システム曲のため、iOS が音声サンプルをアプリへ渡せません。エフェクトを使うには端末内ファイルまたは assetURL を取得できる曲が必要です。";
 "effects.signal.unavailable" = "入力レベルを取得できません";
-"effects.signal.summary" = "入力ピーク %.1f dBFS  |  RMS %.1f dBFS  |  ラウドネス %.1f LUFS  |  入力トリム %.1f dB  |  32f 余裕 %.1f dB  |  出力トリム %.1f dB  |  FX 余裕 %.1f dB";
+"effects.signal.summary" = "入力ピーク %.1f dBFS  |  RMS %.1f dBFS  |  ラウドネス %@ LUFS  |  入力トリム %.1f dB  |  32f 余裕 %.1f dB  |  出力トリム %.1f dB  |  FX 余裕 %.1f dB";
 "effects.render_health.healthy" = "レンダー周期は安定（遅延の検出なし）";
 "effects.render_health.summary" = "レンダー周期の遅延 %d 回、最長 %.0f ms — %@";
 "effects.render_health.stalled" = "コールバック待ち";
@@ -432,3 +432,12 @@
 "effects.availability.source_unavailable" = "この曲の音源を取得できません。Musicでダウンロード後、再試行してください。";
 "effects.availability.preparation_failed" = "エフェクト用の音源を準備できませんでした。再生は続きます。";
 "effects.preparation.retry" = "音源の準備を再試行";
+
+/* Output route policy */
+"settings.output.kind" = "出力機器";
+"settings.output.kind.automatic" = "自動";
+"settings.output.kind.headphones" = "ヘッドホン";
+"settings.output.kind.external" = "外部出力";
+"settings.output.help.title" = "出力設定について";
+"settings.output.help" = "自動では内蔵スピーカーと有線ヘッドホンを判別します。USB・Bluetoothなどの外部出力は中立です。この接続でヘッドホン処理を使う場合は「ヘッドホン」を選択してください。選択は接続機器ごとに保存されます。小音量補正は内蔵スピーカーと指定したヘッドホンの低音・高音を補います。";
+"settings.output.compensation" = "小音量補正";

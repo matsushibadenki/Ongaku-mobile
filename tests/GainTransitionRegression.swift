@@ -112,8 +112,8 @@ struct GainTransitionRegression {
                             case "inactiveParameters": host.apply(effectSettings: inactiveSettings(0.65))
                             case "restoreCombined": host.setAutomaticDSPStrength(0.25, effectSettings: latest)
                             case "restoreLoudness":
-                                host.loudnessCompensationRouteProfile = .bluetooth
-                                host.applyLoudnessCompensation(for: 0.8)
+                                host.loudnessCompensationRouteProfile = .neutral
+                                host.applyLoudnessCompensation(for: 0.2)
                             default:
                                 if scenario == "audits" {
                                     host.controlledEffectLevelAudits = AudioEffectModuleRegistry.activeKinds.map {
@@ -157,7 +157,7 @@ struct GainTransitionRegression {
                             try Probe.require(abs(eq.bands[0].gain - profile.lowShelfGainDB * 0.35 * 0.25) < 1e-5, "Latest restore-phase DSP strength/voicing lost")
                         }
                         if scenario == "restoreLoudness" {
-                            try Probe.require(host.loudnessCompensationEQ.bypass && host.appliedLoudnessCompensationVolume == 0.8 && host.appliedLoudnessCompensationRoute == .bluetooth,
+                            try Probe.require(host.loudnessCompensationEQ.bypass && host.appliedLoudnessCompensationVolume == 0.2 && host.appliedLoudnessCompensationRoute == .neutral,
                                               "Latest loudness route/volume lost")
                             host.applyLoudnessCompensation(for: .nan)
                             try Probe.require(host.pendingLoudnessCompensationVolume == nil, "Nonfinite loudness was queued")

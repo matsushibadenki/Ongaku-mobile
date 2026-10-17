@@ -1839,6 +1839,10 @@ struct SettingsView: View {
                 .listRowBackground(Theme.secondaryBackground)
 
                 Section(L10n.tr("settings.section.audio")) {
+                    AudioOutputSettingsRows(
+                        output: Binding(get: { player.audioOutputOverride }, set: { player.setAudioOutputOverride($0) }),
+                        compensationEnabled: Binding(get: { player.loudnessCompensationEnabled }, set: { player.setLoudnessCompensationEnabled($0) })
+                    )
                     LabeledContent(
                         L10n.tr("settings.upsampling_mode"),
                         value: L10n.upsamplingModeTitle(player.upsamplingMode)
@@ -1892,6 +1896,7 @@ struct SettingsView: View {
             .navigationTitle(L10n.tr("settings.title"))
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("common.close")) { isShowing = false } } }
             .onAppear {
+                player.refreshAudioOutputPreferences()
                 player.refreshPreparedAudioCacheStatistics()
                 remoteSources.reload()
                 Task { await googleDrive.refreshConnectionState() }

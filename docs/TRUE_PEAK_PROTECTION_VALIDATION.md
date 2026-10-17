@@ -59,4 +59,8 @@ The ordinary matrix runner without `--protected` still measures the previous pro
 
 ## Remaining device qualification
 
-⭕️ [Pending] Live sound, pause/seek/stop/repeat and final tail delivery; CPU/GPU/energy under UI and thermal load; wired/Bluetooth/USB rate and channel changes; graph reconfiguration at a new final rate; post-effect meter-window alignment after the additional latency; device voice-processing or downstream conversion; full desktop signal-path integration; formal BS.1770 conformance vectors. Route changes must not leave an unmeasured SRC after protection. These are release-enablement gates, not completed checks.
+⭕️ [Pending] Live sound, pause/seek/stop/repeat and final tail delivery; CPU/GPU/energy under UI and thermal load; wired/Bluetooth/USB rate and channel changes; graph reconfiguration at a new final rate; post-effect meter-window alignment after the additional latency; device voice-processing or downstream conversion; formal BS.1770 conformance vectors. Route changes must not leave an unmeasured SRC after protection. These are release-enablement gates, not completed checks.
+
+## Mac integration — 2026-10-17
+
+🟢 [Done] The same AU/DSP now serves the complete desktop qualification graph after its final conversion and user volume. See [Mac validation](MAC_TRUE_PEAK_VALIDATION.md) for full-rack/OFF measurements, controlled handoffs and build results. The shared peak runner retains the 0.08 dB convergence tolerance and uses 32x phase refinement when 8x→16x does not converge. Ordinary activation and physical-device behavior remain ⭕️ [Pending] on both platforms.

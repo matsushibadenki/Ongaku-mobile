@@ -186,7 +186,8 @@ struct SignalLevelDiagnostics: Equatable {
             "effects.signal.summary",
             sourcePeakDBFS,
             sourceRMSDBFS,
-            sourceIntegratedLoudnessLUFS,
+            sourceIntegratedLoudnessLUFS > -70
+                ? String(format: "%.1f", sourceIntegratedLoudnessLUFS) : "—",
             recommendedInputTrimDB,
             inputHeadroomDB,
             outputTrimDB,
@@ -328,8 +329,7 @@ struct HiResPlaybackFormat: Equatable {
 private enum LoudnessCompensationRouteProfile: Sendable, Equatable {
     case speaker
     case headphone
-    case bluetooth
-    case airPlay
+    case neutral
 }
 
 private enum HiResEngineError: LocalizedError, Sendable {
@@ -488,8 +488,7 @@ final class HiResPlaybackEngine {
     
     // 96 kHz is the highest stable format for the AVAudioEngine effect graph.
     // The source can still be 192 kHz; it is converted once into this processing rate.
-    nonisolated private static let preferredSampleRate: Double = 96_000
-    nonisolated private static let maxStableEffectSampleRate: Double = 96_000
+    nonisolated private static let preferredSampleRate = AudioProcessingPolicy.effectSampleRate
     nonisolated private static let floatPipelineTargetRMSDBFS: Float = -18.0
     nonisolated private static let loudnessNormalizationTargetLUFS: Float = -16.0
     nonisolated private static let floatPipelinePeakCeilingDBFS: Float = -6.0
@@ -506,7 +505,7 @@ final class HiResPlaybackEngine {
     // repeatedly rebuilding and discarding a Precision Sinc buffer near the
     // memory boundary.
     nonisolated static let memoryRecoveryThresholdBytes: UInt64 = 1_280 * 1_024 * 1_024
-    nonisolated private static let preparedAudioDiskCacheVersion = 3
+    nonisolated private static let preparedAudioDiskCacheVersion = 4
     nonisolated private static let maxPreparedAudioDiskCacheBytes: UInt64 = 1_536 * 1_024 * 1_024
     nonisolated private static let preparedAudioDiskCacheLock = NSLock()
     nonisolated private static let preparedAudioDiskCacheMigrationLock = NSLock()
@@ -551,7 +550,7 @@ final class HiResPlaybackEngine {
     private var automaticDSPStrength: Float = 1.0
     private var automaticDSPVoicing: AutomaticDSPVoicing = .natural
     private var observedSystemOutputVolume: Float = AVAudioSession.sharedInstance().outputVolume
-    private var loudnessCompensationRouteProfile: LoudnessCompensationRouteProfile = .speaker
+    private var loudnessCompensationRouteProfile: LoudnessCompensationRouteProfile = .neutral
     private var lastAutomaticDSPCacheHit = false
     private var preloadedPlaybackCache: [PreloadedPlaybackKey: PreparedPlaybackData] = [:]
     private var preloadTasks: [PreloadedPlaybackKey: Task<Void, Never>] = [:]
@@ -1684,8 +1683,7 @@ final class HiResPlaybackEngine {
     }
 
     nonisolated static func resolvedProcessingSampleRate(for sourceSampleRate: Double) -> Double {
-        let upsampled = max(sourceSampleRate, preferredSampleRate)
-        return min(upsampled, maxStableEffectSampleRate)
+        AudioProcessingPolicy.processingSampleRate(for: sourceSampleRate)
     }
 
     /// Performs the cheap metadata-only part of the offline allocation check.
@@ -1933,18 +1931,10 @@ final class HiResPlaybackEngine {
             loudnessCompensationEQ.bands[1].gain = 1.25 * warmth
             loudnessCompensationEQ.bands[2].gain = -0.65 * amount
             loudnessCompensationEQ.bands[3].gain = 6.4 * amount
-        case .bluetooth:
-            loudnessCompensationEQ.globalGain = -0.26 * amount
-            loudnessCompensationEQ.bands[0].gain = 4.7 * amount
-            loudnessCompensationEQ.bands[1].gain = 1.0 * warmth
-            loudnessCompensationEQ.bands[2].gain = -0.45 * amount
-            loudnessCompensationEQ.bands[3].gain = 4.8 * amount
-        case .airPlay:
-            loudnessCompensationEQ.globalGain = -0.16 * amount
-            loudnessCompensationEQ.bands[0].gain = 3.2 * amount
-            loudnessCompensationEQ.bands[1].gain = 0.75 * warmth
-            loudnessCompensationEQ.bands[2].gain = -0.30 * amount
-            loudnessCompensationEQ.bands[3].gain = 3.4 * amount
+        case .neutral:
+            loudnessCompensationEQ.globalGain = 0
+            for band in loudnessCompensationEQ.bands { band.gain = 0 }
+            loudnessCompensationEQ.bypass = true
         }
     }
 
@@ -1957,24 +1947,12 @@ final class HiResPlaybackEngine {
     }
 
     nonisolated private static func currentLoudnessCompensationRouteProfile() -> LoudnessCompensationRouteProfile {
-        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-        if outputs.contains(where: { $0.portType == .airPlay }) {
-            return .airPlay
+        guard AudioOutputPolicy.compensationEnabled else { return .neutral }
+        switch AudioOutputPolicy.currentKind {
+        case .builtInSpeaker: return .speaker
+        case .headphones: return .headphone
+        case .external: return .neutral
         }
-        if outputs.contains(where: {
-            switch $0.portType {
-            case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
-                return true
-            default:
-                return false
-            }
-        }) {
-            return .bluetooth
-        }
-        if outputs.contains(where: { $0.portType == .headphones }) {
-            return .headphone
-        }
-        return .speaker
     }
 
     private func applyAutomaticDSPProfile(_ profile: AutomaticDSPProfile) {
@@ -2091,7 +2069,7 @@ final class HiResPlaybackEngine {
     private func applyGainStaging(effectSettings: [RealtimeAudioEffectSetting]) {
         guard pendingHandoff == nil else { return }
         let sourceRMS = signalDiagnostics?.sourceRMSDBFS ?? Self.floatPipelineTargetRMSDBFS
-        let sourceLoudness = signalDiagnostics?.sourceIntegratedLoudnessLUFS ?? sourceRMS
+        let sourceLoudness = signalDiagnostics?.sourceIntegratedLoudnessLUFS ?? -120
         let sourcePeak = signalDiagnostics?.sourcePeakDBFS ?? -12.0
 
         _ = refreshEffectLevelAudits()
@@ -2121,7 +2099,8 @@ final class HiResPlaybackEngine {
         let loudnessBasedTrim = Self.loudnessNormalizationTargetLUFS - sourceLoudness
         let preFXPeakLimit = Self.floatPipelinePeakCeilingDBFS - Self.intersamplePeakReserveDB
         let peakSafeTrim = preFXPeakLimit - sourcePeak
-        let normalizationTrim = min(loudnessBasedTrim, rmsBasedTrim + 3.0)
+        let normalizationTrim: Float = sourceLoudness > -70 && sourceLoudness.isFinite
+            ? min(loudnessBasedTrim, rmsBasedTrim + 3.0) : 0
         let inputTrimDB = min(Self.maxInputBoostDB, max(Self.maxInputCutDB, min(normalizationTrim, peakSafeTrim)))
 
         let preFXPeak = sourcePeak + inputTrimDB
@@ -2548,7 +2527,7 @@ final class HiResPlaybackEngine {
             lowShelf = min(lowShelf, max(-2.0, lowShelf * restraint))
             highShelf = min(highShelf, max(-1.8, highShelf * restraint))
             presence = min(presence, max(-0.9, presence * restraint - 0.25))
-        } else if loudness < -22.0 && crestDB > 12.0 {
+        } else if loudness > -70 && loudness < -22.0 && crestDB > 12.0 {
             lowShelf += 0.22
             presence += 0.25
             highShelf += 0.22
@@ -2691,52 +2670,17 @@ final class HiResPlaybackEngine {
         frameLength: Int,
         sampleRate: Double
     ) -> Float {
-        guard channelCount > 0, frameLength > 0, sampleRate > 0 else { return -120 }
-
-        let blockSize = max(1, min(frameLength, Int(sampleRate * 0.400)))
-        let hopSize = max(1, Int(sampleRate * 0.100))
-        var blockMeanSquares: [Float] = []
-        var start = 0
-
-        while start < frameLength {
-            let end = min(frameLength, start + blockSize)
-            let frames = end - start
-            guard frames > 0 else { break }
-
-            var squareSum: Float = 0
-            for channel in 0..<channelCount {
-                let samples = channelData[channel].advanced(by: start)
-                var channelSquareSum: Float = 0
-                vDSP_svesq(samples, 1, &channelSquareSum, vDSP_Length(frames))
-                squareSum += channelSquareSum
+        guard var meter = IntegratedLoudnessMeter(sampleRate: sampleRate, channelCount: channelCount) else { return -120 }
+        // Keep cancellation responsive while reading existing offline PCM.
+        for start in stride(from: 0, to: frameLength, by: 16_384) {
+            if Task.isCancelled { return -120 }
+            meter.process(frameCount: min(16_384, frameLength - start)) { channel, frame in
+                channelData[channel][start + frame]
             }
-
-            let meanSquare = squareSum / Float(frames * channelCount)
-            if meanSquare > 0 {
-                blockMeanSquares.append(meanSquare)
-            }
-
-            if end == frameLength { break }
-            start += hopSize
         }
-
-        guard !blockMeanSquares.isEmpty else { return -120 }
-
-        let absoluteGateLUFS: Float = -70
-        let absoluteGated = blockMeanSquares.filter { loudnessLUFS(meanSquare: $0) > absoluteGateLUFS }
-        let firstPassBlocks = absoluteGated.isEmpty ? blockMeanSquares : absoluteGated
-        let firstPassMeanSquare = firstPassBlocks.reduce(Float(0), +) / Float(firstPassBlocks.count)
-        let relativeGateLUFS = max(absoluteGateLUFS, loudnessLUFS(meanSquare: firstPassMeanSquare) - 10.0)
-
-        let gatedBlocks = firstPassBlocks.filter { loudnessLUFS(meanSquare: $0) > relativeGateLUFS }
-        let finalBlocks = gatedBlocks.isEmpty ? firstPassBlocks : gatedBlocks
-        let integratedMeanSquare = finalBlocks.reduce(Float(0), +) / Float(finalBlocks.count)
-        return loudnessLUFS(meanSquare: integratedMeanSquare)
-    }
-
-    nonisolated private static func loudnessLUFS(meanSquare: Float) -> Float {
-        guard meanSquare > 0 else { return -120 }
-        return max(-120, -0.691 + 10.0 * log10(meanSquare))
+        // Existing diagnostics use -120 for unavailable/silence. Gain planning
+        // explicitly skips normalization for unavailable or fully gated audio.
+        return meter.integratedLUFS.map(Float.init) ?? -120
     }
 
     private func clamped(_ value: Double?, defaultValue: Double) -> Float {
@@ -3090,15 +3034,7 @@ final class HiResPlaybackEngine {
     }
 
     nonisolated private static var shouldApplyHeadphoneVirtualization: Bool {
-        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-        return outputs.contains { output in
-            switch output.portType {
-            case .headphones, .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
-                return true
-            default:
-                return false
-            }
-        }
+        AudioOutputPolicy.currentKind == .headphones
     }
 
     // MARK: - Private: Buffer Scheduling
@@ -3799,7 +3735,7 @@ final class HiResPlaybackEngine {
             diagnostics = .init(
                 sourcePeakDBFS: 0,
                 sourceRMSDBFS: -14,
-                sourceIntegratedLoudnessLUFS: -14,
+                sourceIntegratedLoudnessLUFS: -120,
                 recommendedInputTrimDB: 0,
                 inputHeadroomDB: 3,
                 outputTrimDB: 0,

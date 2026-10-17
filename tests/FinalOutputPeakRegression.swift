@@ -1,12 +1,34 @@
 import AVFoundation
 import Foundation
 
-@main struct FinalOutputPeakRegression {
+@main @MainActor struct FinalOutputPeakRegression {
     static func render(rate: Double, kind: String, frequency: Double, phase: Double, amplitude: Double, bypass: Bool = false) throws -> [[Float]] {
         let engine = AVAudioEngine(), player = AVAudioPlayerNode()
         let input = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!
         let output = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
-        #if DESKTOP_PEAK_AUDIT
+        #if DESKTOP_FULL_PEAK_AUDIT
+        let protection = EffectOutputProtection()
+        let finalStage = FinalOutputProtection(enabled: CommandLine.arguments.contains("--protected") && !bypass)
+        let sourceMixer = AVAudioMixerNode()
+        let effects = AudioEffectModuleRegistry.makePipeline()
+        engine.attach(player); engine.attach(sourceMixer)
+        protection.attach(to: engine); finalStage.attach(to: engine)
+        engine.connect(player, to: sourceMixer, format: input)
+        var upstream: AVAudioNode = sourceMixer
+        for effect in effects {
+            effect.attach(to: engine)
+            engine.connect(upstream, to: effect.inputNode, format: input)
+            effect.connectInternalNodes(engine: engine, format: input)
+            effect.apply(setting: RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: false))
+            upstream = effect.outputNode
+        }
+        protection.connect(from: upstream, engine: engine, format: input,
+                           destination: finalStage.inputNode(in: engine))
+        protection.setEnabled(!CommandLine.arguments.contains("--effects-off"))
+        let limiter = protection.limiter
+        try finalStage.connect(engine: engine, outputFormat: output)
+        finalStage.setVolume(1, engine: engine)
+        #elseif DESKTOP_PEAK_AUDIT
         let protection = EffectOutputProtection()
         engine.attach(player)
         protection.attach(to: engine)
@@ -25,7 +47,8 @@ import Foundation
         EffectOutputSafety.configure(limiter:limiter)
         ceiling.globalGain = EffectOutputSafety.ceilingDB
         #endif
-        limiter.bypass = bypass
+        if bypass { limiter.bypass = true }
+        #if !DESKTOP_FULL_PEAK_AUDIT
         if CommandLine.arguments.contains("--protected") && !bypass {
             let finalProtector = OngakuTruePeakAudioUnit.makeNode()
             let conversionMixer = AVAudioMixerNode()
@@ -40,6 +63,7 @@ import Foundation
             engine.connect(conversionMixer, to: finalProtector, format: output)
             engine.connect(finalProtector, to: engine.mainMixerNode, format: output)
         }
+        #endif
         let count = 16_384
         let source = AVAudioPCMBuffer(pcmFormat:input,frameCapacity:AVAudioFrameCount(count))!
         source.frameLength = source.frameCapacity
@@ -87,9 +111,14 @@ import Foundation
                 guard pcm.joined().allSatisfy(\.isFinite) else { throw CocoaError(.fileReadCorruptFile) }
                 let sample=pcm.joined().map { abs($0) }.max()!
                 let eight=ReconstructedPeak.measure(pcm), sixteen=ReconstructedPeak.measure(pcm,factor:16)
-                let delta=20*log10(max(1e-12,sixteen)/max(1e-12,eight))
-                guard delta >= -0.0001 && delta < 0.08 else { throw NSError(domain:"Reconstruction convergence \(delta)",code:1) }
-                maximum=max(maximum,sixteen)
+                let coarseDelta=20*log10(max(1e-12,sixteen)/max(1e-12,eight))
+                // An untrimmed OFF-mode chirp can need more phase resolution.
+                // Keep the same convergence tolerance and ceiling; refine the meter.
+                let phases = coarseDelta >= 0.08 ? 32 : 16
+                let measured = phases == 32 ? ReconstructedPeak.measure(pcm,factor:32) : sixteen
+                let delta = phases == 32 ? 20*log10(max(1e-12,measured)/max(1e-12,sixteen)) : coarseDelta
+                guard coarseDelta >= -0.0001 && delta >= -0.0001 && delta < 0.08 else { throw NSError(domain:"Reconstruction convergence \(delta)",code:1) }
+                maximum=max(maximum,measured)
                 if let directory = ProcessInfo.processInfo.environment["ONGAKU_PEAK_PCM_DIRECTORY"] {
                     let root = URL(fileURLWithPath: directory)
                     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -102,14 +131,18 @@ import Foundation
                 }
                 let row: [String:Any] = ["outputRate":rate,"kind":kind,"frequency":frequency,"phase":phase,
                     "inputAmplitude":level,"samplePeak":sample,"reconstructed8x":eight,"reconstructed16x":sixteen,
-                    "estimateDeltaDB":delta,"exceedsTarget":sixteen>pow(10,-1.0/20)]
+                    "estimate8to16DeltaDB":coarseDelta,"estimateDeltaDB":delta,
+                    "measurementPhases":phases,"reconstructedPeak":measured,
+                    "exceedsTarget":measured>pow(10,-1.0/20)]
                 rows.append(row)
-                print("PEAK rate=\(Int(rate)) \(kind) f=\(Int(frequency)) phase=\(phase) level=\(level) sample=\(sample) reconstructed=\(sixteen)")
+                print("PEAK rate=\(Int(rate)) \(kind) f=\(Int(frequency)) phase=\(phase) level=\(level) sample=\(sample) reconstructed=\(measured) phases=\(phases)")
             } }
         }
         let broken=try render(rate:48_000,kind:"tone",frequency:997,phase:0,amplitude:4,bypass:true)
         guard ReconstructedPeak.measure(broken)>2 else { throw NSError(domain:"Bypassed limiter negative control escaped",code:1) }
-        #if DESKTOP_PEAK_AUDIT
+        #if DESKTOP_FULL_PEAK_AUDIT
+        let implementation = CommandLine.arguments.contains("--effects-off") ? "desktop-full-rack-off" : "desktop-full-rack-sample-protection"
+        #elseif DESKTOP_PEAK_AUDIT
         let implementation = "desktop-protection"
         #else
         let implementation = "ios-protection"

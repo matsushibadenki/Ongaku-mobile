@@ -167,8 +167,7 @@ for anchor in ['nonisolated static func analyzeSignalLevels(',
                'nonisolated private static func emptySignalDiagnostics(',
                'nonisolated private static func analyzeAutomaticDSP(',
                'nonisolated private static func clamp(',
-               'nonisolated private static func estimateIntegratedLoudnessLUFS(',
-               'nonisolated private static func loudnessLUFS(']:
+               'nonisolated private static func estimateIntegratedLoudnessLUFS(']:
     output.append(block(source, anchor).replace('nonisolated private static', 'nonisolated static', 1))
 output.append('}')
 Path(sys.argv[1]).write_text('\n\n'.join(output))

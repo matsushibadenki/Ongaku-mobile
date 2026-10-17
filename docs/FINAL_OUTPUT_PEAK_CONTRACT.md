@@ -30,7 +30,7 @@ The ordinary runner passes when measurement/calibration/render integrity checks 
 
 Both 84-case runs completed on macOS Apple Audio Units. Each recorded six cases above the proposed −1 dB target; four exceeded a reconstructed amplitude of 1.0. Maximum reconstructed amplitude was **1.175459 (approximately +1.404 dBFS reconstructed)** for the 96 kHz alternating signal at input amplitude 0.8; its output sample peak was only 0.713001. Thus the problem is visible without forcing the limiter into sample overload.
 
-Maximum 8x→16x estimate difference was 0.078087 dB. The largest per-case iOS/desktop estimate difference was 0.017230 amplitude; these separately initialized Audio Unit runs are not sample-identical and the shared contract does not assert a null. Both have the same worst-case failure and require actual final-output protection. The desktop runtime normally processes at file rate; this shared stage-level probe deliberately uses 96 kHz input for comparability. Other desktop processing rates remain pending.
+Maximum 8x→16x estimate difference was 0.078087 dB. The largest per-case iOS/desktop estimate difference was 0.017230 amplitude; these separately initialized Audio Unit runs are not sample-identical and the shared contract does not assert a null. Both have the same worst-case failure and require actual final-output protection. At the time of this 2026-10-16 baseline, the desktop runtime processed at file rate; this shared stage-level probe deliberately uses 96 kHz input for comparability. The 2026-10-17 common-rate and final-protection work supersedes that runtime policy; the historical measurements remain unchanged.
 
 Full observations: [iOS protection](measurements/final-output-ios-2026-10-16.json), [desktop protection](measurements/final-output-desktop-2026-10-16.json). Production limiter/gain settings were not silently changed based on a finite fixture matrix.
 
@@ -38,4 +38,4 @@ Full observations: [iOS protection](measurements/final-output-ios-2026-10-16.jso
 
 🟢 [Done] Implemented the bounded protector and qualification path. All 84 protected cases, independent-meter checks and protected DSP/handoff tests pass; see [implementation validation](TRUE_PEAK_PROTECTION_VALIDATION.md). Ordinary builds retain the baseline until device qualification.
 
-⭕️ [Pending] Physical iPhone/Bluetooth/DAC validation, device output formats and desktop full-path/source-rate coverage. No claim is made about DAC analog reconstruction, codec re-encoding or system Music protection.
+⭕️ [Pending] Physical iPhone/Bluetooth/DAC validation, device output formats. Desktop full-path/source-rate offline coverage was subsequently added; see [Mac validation](MAC_TRUE_PEAK_VALIDATION.md). No claim is made about DAC analog reconstruction, codec re-encoding or system Music protection.

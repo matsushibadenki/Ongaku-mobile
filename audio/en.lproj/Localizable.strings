@@ -96,7 +96,7 @@
 "effects.availability.system" = "Effects are unavailable for the current track because it is using the system playback path. Only tracks with an accessible assetURL are supported.";
 "effects.availability.protected" = "Effects cannot be applied to this protected Apple Music/system track because iOS does not expose its audio samples to the app.";
 "effects.signal.unavailable" = "Input level unavailable";
-"effects.signal.summary" = "Input Peak %.1f dBFS  |  RMS %.1f dBFS  |  Loudness %.1f LUFS  |  In Trim %.1f dB  |  32f Headroom %.1f dB  |  Out Trim %.1f dB  |  FX Headroom %.1f dB";
+"effects.signal.summary" = "Input Peak %.1f dBFS  |  RMS %.1f dBFS  |  Loudness %@ LUFS  |  In Trim %.1f dB  |  32f Headroom %.1f dB  |  Out Trim %.1f dB  |  FX Headroom %.1f dB";
 "effects.render_health.healthy" = "Render cycles stable — no scheduling gaps detected";
 "effects.render_health.summary" = "Render scheduling: %d gap(s), longest %.0f ms — %@";
 "effects.render_health.stalled" = "no callback yet";
@@ -432,3 +432,12 @@
 "effects.availability.source_unavailable" = "The audio is unavailable to the app. Download the track in Music, then retry.";
 "effects.availability.preparation_failed" = "Could not prepare this track for effects. Playback continues.";
 "effects.preparation.retry" = "Retry audio preparation";
+
+/* Output route policy */
+"settings.output.kind" = "Output";
+"settings.output.kind.automatic" = "Automatic";
+"settings.output.kind.headphones" = "Headphones";
+"settings.output.kind.external" = "External output";
+"settings.output.help.title" = "Output settings";
+"settings.output.help" = "Automatic detects built-in speakers and wired headphones. USB, Bluetooth and other external outputs stay neutral. Choose Headphones to enable headphone processing for this connection. The choice is saved for each connected device. Loudness compensation adjusts bass and treble at low volume for built-in speakers and selected headphones.";
+"settings.output.compensation" = "Low-volume compensation";

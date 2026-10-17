@@ -90,6 +90,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     @Published var effectSettings = AudioEffectModuleRegistry.makeDefaultSettings()
     @Published private(set) var selectedEffectPageTab: AudioEffectPageTab = .basic
     @Published var headphoneSpatialSettings = HeadphoneSpatialSettings.default
+    @Published private(set) var audioOutputOverride = AudioOutputPolicy.currentOverride
+    @Published private(set) var loudnessCompensationEnabled = AudioOutputPolicy.compensationEnabled
     @Published var automaticDSPStrength: Double = 1.0
     @Published var automaticDSPVoicing: AutomaticDSPVoicing = .natural
     @Published private(set) var isABReferenceMode = false
@@ -1033,6 +1035,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func handleAudioRouteChange(_ notification: Notification) {
         resumePendingInterruptionIfNeeded()
+        refreshAudioOutputPreferences()
         guard hasInitializedHiResPlaybackEngine else { return }
         hiResPlaybackEngine.refreshLoudnessCompensationRoute()
         applyHeadphoneSpatialSettingsIfNeeded(immediately: true)
@@ -1317,6 +1320,26 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         
         applyRealtimeEffects()
         persistLibraryState()
+    }
+
+    func refreshAudioOutputPreferences() {
+        audioOutputOverride = AudioOutputPolicy.currentOverride
+        loudnessCompensationEnabled = AudioOutputPolicy.compensationEnabled
+    }
+
+    func setAudioOutputOverride(_ value: AudioOutputOverride) {
+        AudioOutputPolicy.currentOverride = value
+        audioOutputOverride = value
+        guard hasInitializedHiResPlaybackEngine else { return }
+        hiResPlaybackEngine.refreshLoudnessCompensationRoute()
+        applyHeadphoneSpatialSettingsIfNeeded(immediately: true)
+    }
+
+    func setLoudnessCompensationEnabled(_ enabled: Bool) {
+        AudioOutputPolicy.compensationEnabled = enabled
+        loudnessCompensationEnabled = enabled
+        guard hasInitializedHiResPlaybackEngine else { return }
+        hiResPlaybackEngine.refreshLoudnessCompensationRoute()
     }
 
     func setHeadphoneSpatialEnabled(_ isEnabled: Bool) {

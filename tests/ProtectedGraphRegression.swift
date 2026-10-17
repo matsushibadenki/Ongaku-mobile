@@ -1,17 +1,39 @@
 import AVFoundation
 import Foundation
 
-@main struct ProtectedGraphRegression {
-    static func render(rate: Double, level: Double, effectKind: RealtimeAudioEffectKind?, handoff: Bool) throws -> [[Float]] {
+@main @MainActor struct ProtectedGraphRegression {
+    static func render(rate: Double, sourceRate: Double = 96_000, level: Double, effectKind: RealtimeAudioEffectKind?, handoff: Bool) throws -> [[Float]] {
         let engine=AVAudioEngine(), a=AVAudioPlayerNode(), b=AVAudioPlayerNode()
-        let mix=AVAudioMixerNode(), conversion=AVAudioMixerNode()
-        let protector=OngakuTruePeakAudioUnit.makeNode()
+        let sourceFormat=AVAudioFormat(standardFormatWithSampleRate:sourceRate,channels:2)!
         let input=AVAudioFormat(standardFormatWithSampleRate:96_000,channels:2)!
         let final=AVAudioFormat(standardFormatWithSampleRate:rate,channels:2)!
+        #if DESKTOP_FULL_PEAK_AUDIT
+        let mix=AVAudioMixerNode()
+        let protection=EffectOutputProtection(), finalStage=FinalOutputProtection(enabled:true)
+        let effects=AudioEffectModuleRegistry.makePipeline()
+        for node in [a,b,mix] as [AVAudioNode] { engine.attach(node) }
+        protection.attach(to:engine); finalStage.attach(to:engine)
+        engine.connect(a,to:mix,fromBus:0,toBus:0,format:sourceFormat)
+        engine.connect(b,to:mix,fromBus:0,toBus:1,format:sourceFormat)
+        var upstream:AVAudioNode=mix
+        for effect in effects {
+            effect.attach(to:engine)
+            engine.connect(upstream,to:effect.inputNode,format:input)
+            effect.connectInternalNodes(engine:engine,format:input)
+            var setting=RealtimeAudioEffectSetting(kind:effect.kind,isEnabled:effect.kind==effectKind)
+            setting.parameters["flutter"]=0
+            effect.apply(setting:setting); upstream=effect.outputNode
+        }
+        protection.connect(from:upstream,engine:engine,format:input,destination:finalStage.inputNode(in:engine))
+        protection.setEnabled(effectKind != nil)
+        try finalStage.connect(engine:engine,outputFormat:final)
+        finalStage.setVolume(1,engine:engine)
+        #else
+        let mix=AVAudioMixerNode(), conversion=AVAudioMixerNode()
+        let protector=OngakuTruePeakAudioUnit.makeNode()
         for node in [a,b,mix,conversion,protector] as [AVAudioNode] { engine.attach(node) }
         engine.connect(a,to:mix,fromBus:0,toBus:0,format:input)
         engine.connect(b,to:mix,fromBus:0,toBus:1,format:input)
-        var effect: (any AudioEffectNode)?
         if let kind=effectKind {
             let module=AudioEffectModuleRegistry.makePipeline().first { $0.kind==kind }!
             module.attach(to:engine); module.connectInternalNodes(engine:engine,format:input)
@@ -19,23 +41,24 @@ import Foundation
             engine.connect(module.outputNode,to:conversion,format:input)
             var setting=RealtimeAudioEffectSetting(kind:kind,isEnabled:true)
             setting.parameters["flutter"]=0
-            module.apply(setting:setting); effect=module
+            module.apply(setting:setting)
         } else { engine.connect(mix,to:conversion,format:input) }
         engine.connect(conversion,to:protector,format:final)
         engine.connect(protector,to:engine.mainMixerNode,format:final)
+        #endif
         try engine.enableManualRenderingMode(.offline,format:final,maximumFrameCount:512)
-        let count=24000
-        let source=AVAudioPCMBuffer(pcmFormat:input,frameCapacity:AVAudioFrameCount(count))!
+        let count=Int(sourceRate*0.25)
+        let source=AVAudioPCMBuffer(pcmFormat:sourceFormat,frameCapacity:AVAudioFrameCount(count))!
         source.frameLength=source.frameCapacity
         for ch in 0..<2 { for i in 0..<count {
-            let t=Double(i)/96_000
+            let t=Double(i)/sourceRate
             let taper=min(1,Double(min(i,count-1-i))/512)
             source.floatChannelData![ch][i]=Float(level*taper*(0.6*sin(2 * .pi*997*t)+0.4*sin(2 * .pi*12001*t)))*(ch==0 ? 1 : -0.5)
         } }
         a.volume=1;b.volume=0
         a.scheduleBuffer(source);b.scheduleBuffer(source)
         try engine.start();a.play();b.play()
-        defer { a.stop();b.stop();engine.stop(); if let effect { effect.detach(from:engine) } }
+        defer { a.stop();b.stop();engine.stop() }
         let buffer=AVAudioPCMBuffer(pcmFormat:final,frameCapacity:512)!
         let length=Int(rate*0.25)+2048
         var pcm=[[Float](),[Float]()]
@@ -55,9 +78,15 @@ import Foundation
     static func main() throws {
         setbuf(stdout,nil)
         var cases=0;var maximum:Float=0;var null:Float=0
+        #if DESKTOP_FULL_PEAK_AUDIT
+        let sourceRates=[44_100.0,48_000,96_000,192_000]
+        #else
+        let sourceRates=[96_000.0]
+        #endif
+        for sourceRate in sourceRates {
         for rate in [44_100.0,48_000,96_000] { for kind in [nil, RealtimeAudioEffectKind.exciter, RealtimeAudioEffectKind.warm] { for level in [0.1,4.0] {
-            let reference=try render(rate:rate,level:level,effectKind:kind,handoff:false)
-            let transition=try render(rate:rate,level:level,effectKind:kind,handoff:true)
+            let reference=try render(rate:rate,sourceRate:sourceRate,level:level,effectKind:kind,handoff:false)
+            let transition=try render(rate:rate,sourceRate:sourceRate,level:level,effectKind:kind,handoff:true)
             let error=zip(reference.joined(),transition.joined()).map { abs($0-$1) }.max()!
             guard error<0.0001 && transition.joined().allSatisfy(\.isFinite) else { throw NSError(domain:"Protected handoff waveform changed: \(error)",code:1) }
             let peak=ReconstructedPeak.measure(transition,factor:16)
@@ -65,8 +94,9 @@ import Foundation
             let energy=transition[0].dropFirst(Int(rate*0.07)).prefix(Int(rate*0.04)).reduce(0.0) { $0+Double($1)*Double($1) }
             guard energy>0.01 else { throw NSError(domain:"Silent protected handoff",code:1) }
             maximum=max(maximum,peak);null=max(null,error);cases+=1
-            print("PROTECTED GRAPH rate=\(rate) effect=\(String(describing:kind)) level=\(level) null=\(error) peak=\(peak)")
+            print("PROTECTED GRAPH source=\(sourceRate) rate=\(rate) effect=\(String(describing:kind)) level=\(level) null=\(error) peak=\(peak)")
         } } }
+        }
         print("PASS: \(cases) protected DSP/handoff pairs, max sample difference \(null), max reconstructed peak \(maximum)")
     }
 }
