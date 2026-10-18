@@ -441,3 +441,9 @@
 "settings.output.help.title" = "输出设置说明";
 "settings.output.help" = "自动模式识别内置扬声器和有线耳机。USB、蓝牙及其他外部输出保持中性。若要为当前连接启用耳机处理，请选择“耳机”。选择会按设备保存。低音量补偿可增强内置扬声器和指定耳机在低音量下的低音与高音。";
 "settings.output.compensation" = "低音量补偿";
+
+// Pastel hardware finishes
+"appearance.pink" = "粉色";
+"appearance.purple" = "紫色";
+"appearance.green" = "绿色";
+"appearance.beige" = "米色";

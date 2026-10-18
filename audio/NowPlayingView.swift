@@ -544,7 +544,10 @@ struct NowPlayingVUBackground: View {
             HardwareSurface()
             VUMeterView(value: player.supportsRealtimeEffects ? player.currentVUValue : 0,
                         isPrecisionSinc: player.upsamplingMode.isPrecisionSinc)
-            if Theme.appearance == .light {
+            if Theme.appearance.isPastel {
+                // Pastel assets blend their empty edges into the exact theme color.
+                Color.clear
+            } else if Theme.appearance == .light {
                 // Blend only the empty studio backdrop into the app finish.
                 // The meter housing and face remain fully visible and uncropped.
                 HardwareSurface()
@@ -567,7 +570,7 @@ struct NowPlayingVUBackground: View {
     }
 }
 
-private struct VUMeterView: View {
+struct VUMeterView: View {
     let value: Double
     let isPrecisionSinc: Bool
 
@@ -575,17 +578,23 @@ private struct VUMeterView: View {
     // The needle uses the same fitted image coordinates, including letterboxing.
     var body: some View {
         GeometryReader { geometry in
-            let light = Theme.appearance == .light
+            let light = Theme.appearance.isLight
             let sourceSize = light ? CGSize(width: 852, height: 1846) : CGSize(width: 1170, height: 2532)
             let scale = min(geometry.size.width / sourceSize.width, geometry.size.height / sourceSize.height)
-            let assetName = (isPrecisionSinc ? "VUmeter_green" : "VUmeter_orange") + (light ? "_light" : "")
+            let pastel = Theme.appearance.isPastel
+            let assetName = pastel ? "VUmeter_pastel_\(Theme.appearance.rawValue)"
+                : (isPrecisionSinc ? "VUmeter_green" : "VUmeter_orange") + (light ? "_light" : "")
             Image(assetName)
                 .resizable()
                 .frame(width: sourceSize.width * scale, height: sourceSize.height * scale)
                 .overlay {
-                    VUNeedle(value: value)
-                        .stroke(.black, style: StrokeStyle(lineWidth: max(0.75, sourceSize.width * scale * (5.1 / 1170)), lineCap: .round))
-                        .shadow(color: .black.opacity(0.15), radius: 1, x: 0.5, y: 0.5)
+                    if pastel {
+                        PastelVUMeterFace(value: value, isPrecisionSinc: isPrecisionSinc)
+                    } else {
+                        VUNeedle(value: value)
+                            .stroke(.black, style: StrokeStyle(lineWidth: max(0.75, sourceSize.width * scale * (5.1 / 1170)), lineCap: .round))
+                            .shadow(color: .black.opacity(0.15), radius: 1, x: 0.5, y: 0.5)
+                    }
                 }
                 .mask {
                     if light {
@@ -598,6 +607,16 @@ private struct VUMeterView: View {
                     } else {
                         Color.white
                     }
+                }
+                .mask {
+                    if pastel {
+                        LinearGradient(stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .white, location: 0.065),
+                            .init(color: .white, location: 0.43),
+                            .init(color: .clear, location: 0.54)
+                        ], startPoint: .top, endPoint: .bottom)
+                    } else { Color.white }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
         }

@@ -4,10 +4,21 @@ import Observation
 // Hallmark · tactile audio hardware · silver / graphite, amber indicators.
 // Pre-emit critique: Philosophy 4, Hierarchy 4, Execution 4, Specificity 5, Restraint 4, Variety 4.
 enum AppAppearance: String, CaseIterable, Identifiable {
-    case original, light, dark
+    case original, light, dark, pink, purple, green, beige
     var id: String { rawValue }
     var title: String { L10n.tr("appearance.\(rawValue)") }
-    var colorScheme: ColorScheme { self == .light ? .light : .dark }
+    var isPastel: Bool { [.pink, .purple, .green, .beige].contains(self) }
+    var isLight: Bool { self == .light || isPastel }
+    var colorScheme: ColorScheme { isLight ? .light : .dark }
+    var pastelHex: UInt32? {
+        switch self {
+        case .pink: 0xfbeefa
+        case .purple: 0xeeecfe
+        case .green: 0xe1fff4
+        case .beige: 0xfaf7e3
+        default: nil
+        }
+    }
     var isRealistic: Bool { self != .original }
     var palette: HardwarePalette { HardwarePalette(appearance: self) }
 }
@@ -27,20 +38,35 @@ final class AppearanceSettings {
 
 struct HardwarePalette {
     let appearance: AppAppearance
-    private var light: Bool { appearance == .light }
+    private var light: Bool { appearance.isLight }
+    private func rgb(_ hex: UInt32) -> Color {
+        Color(.sRGB, red: Double((hex >> 16) & 255) / 255,
+              green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, opacity: 1)
+    }
+    private var pastel: Color? { appearance.pastelHex.map(rgb) }
     // White finishes use #f4f4f4 / #fbfbfb / #ffffff. Graphite keeps
     // its compact tonal range, with true black reserved for recessed details.
-    var background: Color { light ? Color(white: 244.0 / 255) : (appearance == .original ? .black : Color(white: 0.10)) }
-    var panel: Color { light ? Color(white: 251.0 / 255) : Color(white: appearance == .original ? 0.05 : 0.115) }
+    var background: Color { pastel ?? (light ? Color(white: 244.0 / 255) : (appearance == .original ? .black : Color(white: 0.10))) }
+    var panel: Color { pastel ?? (light ? Color(white: 251.0 / 255) : Color(white: appearance == .original ? 0.05 : 0.115)) }
     var top: Color { light ? .white : Color(white: 0.15) }
-    var bottom: Color { light ? Color(white: 244.0 / 255) : Color(white: 0.09) }
+    var bottom: Color { pastel ?? (light ? Color(white: 244.0 / 255) : Color(white: 0.09)) }
     var ink: Color { light ? Color(white: 0.13) : Color(white: 0.82) }
     var secondary: Color { light ? Color(white: 0.32) : (appearance == .original ? Color.white.opacity(0.55) : Color(white: 0.65)) }
     var edge: Color { light ? Color.black.opacity(0.14) : Color.white.opacity(appearance == .original ? 0.12 : 0.08) }
     var highlight: Color { Color.white.opacity(light ? 0.28 : 0.07) }
     var shadow: Color { Color.black.opacity(light ? 0.12 : 0.22) }
-    var well: Color { light ? Color(white: 0.60) : .black }
-    var signal: Color { appearance == .original ? .orange : (light ? Color(red: 1, green: 121.0 / 255, blue: 0) : Color(red: 1, green: 138.0 / 255, blue: 28.0 / 255)) }
+    var well: Color { appearance.isPastel ? signal.opacity(0.13) : (light ? Color(white: 0.60) : .black) }
+    var signal: Color {
+        switch appearance {
+        case .pink: rgb(0xa83f79)
+        case .purple: rgb(0x7051b4)
+        case .green: rgb(0x24765b)
+        case .beige: rgb(0x856122)
+        case .original: .orange
+        case .light: Color(red: 1, green: 121.0 / 255, blue: 0)
+        case .dark: Color(red: 1, green: 138.0 / 255, blue: 28.0 / 255)
+        }
+    }
     var metal: LinearGradient {
         LinearGradient(colors: [top, panel, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
@@ -68,7 +94,7 @@ private enum HardwareTexture {
     static let dark = makeTile(ink: UIColor.white)
 
     static func image(for appearance: AppAppearance) -> UIImage {
-        appearance == .light ? light : dark
+        appearance.isLight ? light : dark
     }
 
     private static func makeTile(ink: UIColor) -> UIImage {

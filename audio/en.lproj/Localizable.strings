@@ -441,3 +441,9 @@
 "settings.output.help.title" = "Output settings";
 "settings.output.help" = "Automatic detects built-in speakers and wired headphones. USB, Bluetooth and other external outputs stay neutral. Choose Headphones to enable headphone processing for this connection. The choice is saved for each connected device. Loudness compensation adjusts bass and treble at low volume for built-in speakers and selected headphones.";
 "settings.output.compensation" = "Low-volume compensation";
+
+// Pastel hardware finishes
+"appearance.pink" = "Pink";
+"appearance.purple" = "Purple";
+"appearance.green" = "Green";
+"appearance.beige" = "Beige";

@@ -81,7 +81,7 @@ struct Spectrum3DView: View {
     private func drawWaterfall(context: inout GraphicsContext, size: CGSize,
                                layers: [[CGFloat]], travel: Double, time: Double) {
         guard size.width > 0, size.height > 0 else { return }
-        let light = Theme.appearance == .light
+        let light = Theme.appearance.isLight
         let pink = Color(red: 0.94, green: 0.22, blue: 0.48)
         let violet = Color(red: 0.55, green: 0.29, blue: 0.96)
         let blue = Color(red: 0.12, green: light ? 0.48 : 0.67, blue: 0.96)

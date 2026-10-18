@@ -1,5 +1,20 @@
 # #Ongaku Roadmap
 
+## Pastel desktop parity and dial detail — 2026-10-18
+
+- 🟢 [Done] Add the same four pastel backgrounds and playback accents to Mac, with persisted selection and EN/JA/zh-Hans labels. Preserve native desktop proportions with a rounded ceramic-style meter and an unclipped seven-choice appearance menu.
+- 🟢 [Done] Keep every desktop meter enclosure visibly in its selected hue: replace white-to-color shading with three opaque light tones of pink/purple/green/beige, including the rim and fasteners. Re-render all four colors and recheck Mac builds/tests.
+- 🟢 [Done] Refine both pastel dials from the iPhone Realistic Light reference: detailed major/minor scales, red overload region, professional-meter legend and VU/dB labels in rounded typography. Keep `PastelVUMeterScale.swift` byte-identical; derive ticks and needles from the same -18 dBFS = 0 VU calibration.
+- 🟢 [Done] Pass Mac's 28 focused/regression tests, both Mac product builds and the iPhone Simulator build. Verify the Mac live appearance switch with a separate 12-track fixture and retain the selected track. Recheck SE / 16 Pro Max dial placement and all four colors. See [validation and screenshots](PASTEL_DESKTOP_PARITY_VALIDATION.md).
+- ⭕️ [Pending] Live playback needle motion/settling, sustained rendering cost, physical iPhone and other Mac displays, small-text readability and True Tone/Night Shift color appearance.
+
+## Mobile pastel appearance — 2026-10-18
+
+- 🟢 [Done] Add Pink `#fbeefa`, Purple `#eeecfe`, Green `#e1fff4` and Beige `#faf7e3` with coordinated controls, dark text and persisted selection. Localize all four labels in English, Japanese and Simplified Chinese; retain Original/Light/Dark.
+- 🟢 [Done] Generate four matching rounded pastel VU enclosures. Draw the dial labels, calibrated scale and needle in one measured coordinate system, preserving uncropped fitting and a normal/Precision Sinc status lamp. See [assets and generation prompts](PASTEL_VU_IMAGE_GENERATION.md).
+- 🟢 [Done] Pass the ordinary iPhone Simulator build and six appearance audit groups on both SE (3rd generation) and 16 Pro Max. Capture minimum/0 VU/maximum in all four colors, inspect dial placement and production player/picker layouts, and verify exact RGB values, stored selection and all three language labels. See [validation and saved screenshots](PASTEL_APPEARANCE_VALIDATION.md).
+- ⭕️ [Pending] Confirm physical iPhone color reproduction and live VU animation/readability during playback, including True Tone/Night Shift. Device color and rendering performance are not established by Simulator checks.
+
 
 ## iPhone speaker playback continuity — 2026-10-17
 

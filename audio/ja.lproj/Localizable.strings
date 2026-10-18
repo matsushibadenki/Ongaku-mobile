@@ -441,3 +441,9 @@
 "settings.output.help.title" = "出力設定について";
 "settings.output.help" = "自動では内蔵スピーカーと有線ヘッドホンを判別します。USB・Bluetoothなどの外部出力は中立です。この接続でヘッドホン処理を使う場合は「ヘッドホン」を選択してください。選択は接続機器ごとに保存されます。小音量補正は内蔵スピーカーと指定したヘッドホンの低音・高音を補います。";
 "settings.output.compensation" = "小音量補正";
+
+// Pastel hardware finishes
+"appearance.pink" = "ピンク";
+"appearance.purple" = "パープル";
+"appearance.green" = "グリーン";
+"appearance.beige" = "ベージュ";
