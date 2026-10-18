@@ -60,6 +60,11 @@ final class ShippingTransportHost {
     let engine = TestEngine()
     let activePlayerNode = TestNode()
     let renderHealthMonitor = TestMonitor()
+    var transportPauseGeneration: UInt64 = 0
+    var transportStopPending = false
+    var transportStopCompletion: (() -> Void)?
+    var preparationGeneration: UInt64 = 0
+    var resourcesCleared = 0
     var transportToken: UInt64 = 0
     var pendingTransportPause: TimeInterval?
     var transportFadeInPending = false
@@ -84,18 +89,25 @@ final class ShippingTransportHost {
         schedules += 1; playbackOffset = position; livePosition = position
         activePlayerNode.isPlaying = autoplay
     }
-    func currentTime() -> TimeInterval { pendingTransportPause ?? livePosition }
+    func currentTime() -> TimeInterval { transportStopPending ? 0 : (pendingTransportPause ?? livePosition) }
+    func commitPendingDSPChangesIfReady() {}
+    func invalidatePreparationForStop() { preparationGeneration &+= 1; playbackGeneration &+= 1 }
+    func clearStoppedPlaybackResources() {
+        precondition(!engine.isRunning && engine.mainMixerNode.outputVolume == 0)
+        resourcesCleared += 1; activePlayerNode.stop()
+    }
     func cancelPendingHandoff() { handoffCancellations += 1 }
 ''']
 methods = ['    func play(fadeInDuration:', '    private func beginTransportFadeIn(',
            '    private func rampTransportVolume(', '    func pause()',
-           '    private func finishTransportPause(', '    private func handlePlaybackEnd(', '    func seek(to ', '    var isPlaying: Bool']
+           '    private func finishTransportPause(', '    func stop(afterDrain:',
+           '    private func requestTransportStop(', '    private func finishTransportStop(', '    private func handlePlaybackEnd(', '    func seek(to ', '    var isPlaying: Bool']
 for method in methods:
-    out.append(block(method).replace('private func ', 'func ').replace('AVAudioSession.', 'TestSession.'))
-# Stop's transport invalidation is extracted up to the unrelated preparation cleanup.
-out.append(block('    func stop() {').split('        preparationGeneration')[0].replace(
-    '        preservesQualityUpgradeGainReference = false\n        qualityUpgradeGainReference = nil\n        deferredQualityDSPProfile = nil\n', '') +
-    '        activePlayerNode.stop()\n    }')
+    text = block(method).replace('private func ', 'func ').replace('AVAudioSession.', 'TestSession.')
+    if method == '    private func requestTransportStop(':
+        text = text.replace('        guard engine.isRunning else {',
+            '        if CommandLine.arguments.contains("--early-teardown-fixture") { finishTransportStop(token: token); return }\n        guard engine.isRunning else {')
+    out.append(text)
 out.append('}\nfinal class ShippingTransportWaveform {\nlet engine = AVAudioEngine()\nvar transportToken: UInt64 = 0\n')
 out.append(block('    private func rampTransportVolume(').replace('private func ', 'func '))
 out.append('}')

@@ -533,6 +533,9 @@ final class HiResPlaybackEngine {
     private var preservesQualityUpgradeGainReference = false
     private var qualityUpgradeGainReference: SignalLevelDiagnostics?
     private var deferredQualityDSPProfile: AutomaticDSPProfile?
+    private var transportPauseGeneration: UInt64 = 0
+    private var transportStopPending = false
+    private var transportStopCompletion: (() -> Void)?
     private var transportToken: UInt64 = 0
     private var pendingTransportPause: TimeInterval?
     private var transportFadeInPending = false
@@ -579,7 +582,7 @@ final class HiResPlaybackEngine {
     }
 
     var isPlaying: Bool {
-        pendingTransportPause == nil && activePlayerNode.isPlaying && engine.isRunning
+        !transportStopPending && pendingTransportPause == nil && activePlayerNode.isPlaying && engine.isRunning
     }
 
     var isEngineRunning: Bool {
@@ -587,7 +590,7 @@ final class HiResPlaybackEngine {
     }
 
     var hasTrack: Bool {
-        convertedBuffer != nil || currentAudioFile != nil
+        !transportStopPending && (convertedBuffer != nil || currentAudioFile != nil)
     }
 
     var activeUpsamplingMode: UpsamplingMode {
@@ -735,8 +738,9 @@ final class HiResPlaybackEngine {
         skipDSPAnalysis: Bool = false,
         strategy: PlaybackLoadStrategy = .preparedAutomaticQuality
     ) async throws {
-        stop()
-        let generation = preparationGeneration
+        try Task.checkCancellation()
+        let generation = stop()
+        try await waitForStop(generation: generation)
         let resolvedSpatialSettings = memorySafetyMode.safeSpatialSettings(headphoneSpatialSettings ?? .default)
         let resolvedUpsamplingMode: UpsamplingMode
         switch strategy {
@@ -816,8 +820,9 @@ final class HiResPlaybackEngine {
         headphoneSpatialSettings: HeadphoneSpatialSettings,
         mixedHandoff: UUID? = nil
     ) async throws {
-        stop()
-        let generation = preparationGeneration
+        try Task.checkCancellation()
+        let generation = stop()
+        try await waitForStop(generation: generation)
         do {
             if let mixedHandoff {
                 try await PlaybackAudioSession.shared.activate(mixedHandoff: mixedHandoff)
@@ -883,6 +888,7 @@ final class HiResPlaybackEngine {
     }
 
     func play(fadeInDuration: TimeInterval = 0.024) throws {
+        guard !transportStopPending else { throw CancellationError() }
         ensureEffectLevelMetersInstalled()
         try ensureEngineRunning()
         // Existing callers may issue seek(); play(). Keep the pending seek's
@@ -982,7 +988,8 @@ final class HiResPlaybackEngine {
     }
 
     func pause() {
-        guard pendingTransportPause == nil else { return }
+        transportPauseGeneration &+= 1
+        guard !transportStopPending, pendingTransportPause == nil else { return }
         let position = currentTime()
         transportSeekPending = false
         transportToken &+= 1
@@ -1018,21 +1025,83 @@ final class HiResPlaybackEngine {
         pendingTransportPause = nil
     }
 
-    func stop() {
-        transportSeekPending = false
-        transportReachedEnd = false
-        transportToken &+= 1
-        pendingTransportPause = nil
-        transportFadeInPending = false
-        engine.mainMixerNode.outputVolume = 0
-        preservesQualityUpgradeGainReference = false
-        qualityUpgradeGainReference = nil
-        deferredQualityDSPProfile = nil
+    /// Publish stop intent immediately; retain both schedules and their PCM/file
+    /// owners until the final mixer is silent. New loads must await this barrier.
+    @discardableResult
+    func stop(afterDrain: (() -> Void)? = nil) -> UInt64 {
+        invalidatePreparationForStop()
+        requestTransportStop(afterDrain: afterDrain)
+        return preparationGeneration
+    }
+
+    private func invalidatePreparationForStop() {
         preparationGeneration &+= 1
         playbackGeneration &+= 1
         headphoneSpatialUpdateToken &+= 1
         spatialPreparationCancellation?.cancel()
         spatialPreparationCancellation = nil
+        qualityUpgradeWorker?.cancel()
+        qualityUpgradeWorker = nil
+        qualityUpgradeWorkerGeneration &+= 1
+        // Freeze the current rack gain during descent, without restoring a
+        // half-finished effect fade to unity while it is still audible.
+        declickToken &+= 1
+    }
+
+    private func requestTransportStop(afterDrain: (() -> Void)?) {
+        // A newer request owns session cleanup. Coalesce repeated stops without
+        // extending the fade or allowing an old deactivation to stop a new load.
+        transportStopCompletion = afterDrain
+        guard !transportStopPending else { return }
+        transportStopPending = true
+        transportSeekPending = false
+        transportReachedEnd = false
+        transportToken &+= 1
+        let token = transportToken
+        pendingTransportPause = nil
+        transportFadeInPending = false
+        guard engine.isRunning else {
+            finishTransportStop(token: token)
+            return
+        }
+        rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
+            guard let self else { return }
+            let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
+                self?.finishTransportStop(token: token)
+            }
+        }
+    }
+
+    private func finishTransportStop(token: UInt64) {
+        guard transportStopPending, transportToken == token else { return }
+        engine.mainMixerNode.outputVolume = 0
+        engine.pause()
+        // Only now may schedules, active PCM, EQ and gain staging be reset.
+        clearStoppedPlaybackResources()
+        transportStopPending = false
+        commitPendingDSPChangesIfReady()
+        let completion = transportStopCompletion
+        transportStopCompletion = nil
+        completion?()
+    }
+
+    /// Cancellable wait without a continuation that a superseded fade can lose.
+    /// The generation fence also rejects older loads waiting on the same drain.
+    func waitForStop(generation: UInt64? = nil) async throws {
+        let expected = generation ?? preparationGeneration
+        while true {
+            try Task.checkCancellation()
+            guard preparationGeneration == expected else { throw CancellationError() }
+            if !transportStopPending { return }
+            try await Task.sleep(for: .milliseconds(4))
+        }
+    }
+
+    private func clearStoppedPlaybackResources() {
+        preservesQualityUpgradeGainReference = false
+        qualityUpgradeGainReference = nil
+        deferredQualityDSPProfile = nil
         headphoneSpatialProcessingApplied = false
         renderHealthMonitor.endMonitoring()
         pendingHandoff = nil
@@ -1129,6 +1198,7 @@ final class HiResPlaybackEngine {
         forceRebuild: Bool = false,
         completion: @escaping (Error?) -> Void
     ) {
+        guard !transportStopPending else { completion(CancellationError()); return }
         var resolved = memorySafetyMode.safeSpatialSettings(settings)
         if effectsBypassed { resolved.isEnabled = false }
         let safeSettings = resolved
@@ -1294,11 +1364,11 @@ final class HiResPlaybackEngine {
         resumeTime: TimeInterval,
         shouldResume: Bool
     ) async throws {
-        preparationGeneration &+= 1
-        let generation = preparationGeneration
-        await fadeOutOutput(duration: 0.100)
-        try? await Task.sleep(nanoseconds: 100 * 1_000_000)
-        
+        try Task.checkCancellation()
+        let pauseGeneration = transportPauseGeneration
+        let generation = stop()
+        try await waitForStop(generation: generation)
+
         let preloadKey = Self.makePreloadedPlaybackKey(
             url: url,
             upsamplingMode: upsamplingMode,
@@ -1328,12 +1398,9 @@ final class HiResPlaybackEngine {
         if resumeTime > 0 {
             try seek(to: resumeTime)
         }
-        if shouldResume {
+        if shouldResume, transportPauseGeneration == pauseGeneration {
             try play()
         }
-        
-        try? await Task.sleep(nanoseconds: 50 * 1_000_000)
-        await fadeInOutput(duration: 0.200)
     }
 
     func seamlessUpgrade(
@@ -1346,6 +1413,7 @@ final class HiResPlaybackEngine {
         shouldResume: Bool,
         onHandoffReady: (() -> Void)? = nil
     ) async throws {
+        guard !transportStopPending else { throw CancellationError() }
         preparationGeneration &+= 1
         let generation = preparationGeneration
         let spatialToken = headphoneSpatialUpdateToken
@@ -1511,6 +1579,7 @@ final class HiResPlaybackEngine {
     }
 
     func seek(to time: TimeInterval) throws {
+        guard !transportStopPending else { throw CancellationError() }
         let clamped = min(max(0, time), duration)
         let shouldResume = isPlaying
         try ensureEngineRunning()
@@ -1549,6 +1618,7 @@ final class HiResPlaybackEngine {
     }
 
     func currentTime() -> TimeInterval {
+        if transportStopPending { return 0 }
         if let position = pendingTransportPause { return position }
         guard currentAudioFile != nil else { return 0 }
         // The replacement can be scheduled but not yet rendering. Until its
@@ -1655,6 +1725,7 @@ final class HiResPlaybackEngine {
             return bypassed
         }
         latestRequestedEffectSettings = safeEffectSettings
+        guard !transportStopPending else { return }
         let requested = Dictionary(safeEffectSettings.map { ($0.kind, $0) }, uniquingKeysWith: { _, latest in latest })
         let changed = effectPipeline.contains { effect in
             let target = requested[effect.kind] ?? RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: false)
@@ -2101,7 +2172,7 @@ final class HiResPlaybackEngine {
     private func commitPendingDSPChangesIfReady() {
         // The EQ is shared by both players. Do not change the old source's
         // sound before the replacement starts or while its fade is in flight.
-        guard pendingHandoff == nil,
+        guard !transportStopPending, pendingHandoff == nil,
               pendingAutomaticDSPProfile != nil || pendingLoudnessCompensationVolume != nil,
               pendingDeclickEffectSettings == nil else { return }
         if activePlayerNode.isPlaying {
@@ -3980,7 +4051,7 @@ final class HiResPlaybackEngine {
         effectSettings: [RealtimeAudioEffectSetting],
         shouldResume: Bool
     ) throws {
-        guard pendingHandoff == nil, effectDeclickRestoreVolume == nil,
+        guard !transportStopPending, pendingHandoff == nil, effectDeclickRestoreVolume == nil,
               pendingTransportPause == nil, !transportFadeInPending,
               currentAudioURL == prepared.url,
               let graphFormat = configuredProcessingFormat,
@@ -4147,7 +4218,7 @@ final class HiResPlaybackEngine {
     }
 
     private func handlePlaybackEnd(generation: UInt64) {
-        guard playbackGeneration == generation else { return }
+        guard !transportStopPending, playbackGeneration == generation else { return }
         // The audible schedules remain alive during a transport fade. Their
         // natural EOF must not override a newer pause/seek intent.
         if pendingTransportPause != nil || transportSeekPending {

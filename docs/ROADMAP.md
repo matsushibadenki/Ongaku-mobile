@@ -1,5 +1,12 @@
 # #Ongaku Roadmap
 
+## Destructive playback shutdown — 2026-10-18
+
+- 🟢 [Done] Extend iPhone transport protection to destructive stop/load/recovery: retain active files/PCM and both handoff schedules through the final-mixer fade and silent drain, then pause and reset resources. Report stopped intent immediately; reject stale preparation and coalesce repeated stops.
+- 🟢 [Done] Defer session release until drain completion, preserve latest-request ownership, reject pre-cancelled loads without stopping playback, and respect a newer pause during reload. Pass 11 transport state groups, 6 PCM cases with negative controls, 6 final production-engine Simulator groups, gain-reference/session regressions, 48 effect and 72 gain cases, and the ordinary iPhone build. See [verification and limits](DESTRUCTIVE_STOP_VALIDATION.md).
+- 🟠 [Next] Apply transport and late album-analysis gain protection to Mac; qualify signal alignment and handoff/effect tails with latency-aligned reference/residual measurements. Mac runtime transport is not changed by this iPhone step.
+- ⭕️ [Pending] Physical iPhone speaker clicks/loudness during stop/start, track and quality changes, recovery, Music session transfers, UI load and route changes; corresponding Mac listening and sustained resource use.
+
 ## Pastel desktop parity and dial detail — 2026-10-18
 
 - 🟢 [Done] Add the same four pastel backgrounds and playback accents to Mac, with persisted selection and EN/JA/zh-Hans labels. Preserve native desktop proportions with a rounded ceramic-style meter and an unclipped seven-choice appearance menu.
@@ -21,7 +28,8 @@
 - 🟢 [Done] Preserve the current track's normalization reference (including deliberately unmeasured native playback) and automatic EQ through Precision Sinc/spatial PCM replacement. New analysis stays available without implicitly remastering the playing track; explicit DSP controls and new-track analysis remain effective.
 - 🟢 [Done] Give iPhone start/resume, pause and seek an independent final-mixer envelope: nominal 24 ms, 48 cosine steps, render-gated startup and a silent buffer drain before physical pause. Preserve immediate paused UI intent, coalesce seeks and reject stale callbacks after resume/stop. Existing seek-then-play callers retain the latest destination; EOF during a fade cannot override pause/seek intent.
 - 🟢 [Done] Verify shipping transport state transitions, six real stock-mixer PCM cases at 44.1/48/96 kHz and measured/unmeasured gain references, including negative controls. Pass 17 production-engine Simulator checks and the ordinary iPhone build. Recheck 48 effect and 72 gain/loudness cases; synchronize the common policy with Mac and pass its 19 focused tests. See [validation and limits](PLAYBACK_CONTINUITY_VALIDATION.md).
-- 🟠 [Next] Extend orderly fade-out to destructive track/resource teardown (`stop()`/load/recovery), qualify sample-accurate handoff and tail handling, and apply the same transport/late-analysis criteria to Mac. Resource teardown is still immediate; it is not covered by the new user-pause protection.
+- 🟢 [Done] Extend protection to destructive stop/load/recovery with deferred resource/session release; see [2026-10-18 validation](DESTRUCTIVE_STOP_VALIDATION.md).
+- 🟠 [Next] Apply the transport/late-analysis criteria to Mac and qualify signal alignment, sample-accurate handoff and tail handling.
 - ⭕️ [Pending] Confirm the reported sudden loudness changes and plug-like clicks on the physical iPhone built-in speaker: start/pause/resume/seek, quality replacement, effect ON/OFF, different system volumes and UI load. Check external outputs and Mac listening separately. Control-thread fades and Simulator PCM do not establish inaudibility or hardware/session behavior.
 
 ## Preparation failure diagnostics — 2026-10-17

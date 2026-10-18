@@ -18,6 +18,12 @@ import AVFoundation
         catch { fputs("FAIL: \(error)\n", stderr); exit(1) }
     }
     static func run() throws {
+        if CommandLine.arguments.contains("--early-teardown-fixture") {
+            let host = try ready(); host.stop()
+            try require(host.resourcesCleared == 0 && host.activePlayerNode.isPlaying,
+                        "shutdown released source before fade and drain")
+            return
+        }
         let stalled = ShippingTransportHost()
         stalled.activePlayerNode.lastRenderTime = nil
         try stalled.play()
@@ -53,9 +59,51 @@ import AVFoundation
 
         let stopped = try ready()
         stopped.pause(); DispatchQueue.main.advance(to: 0.105)
-        stopped.stop(); try stopped.play(); DispatchQueue.main.advance(to: 0.3)
+        stopped.stop()
+        do { try stopped.play(); throw NSError(domain: "play during teardown accepted", code: 1) }
+        catch is CancellationError { }
+        DispatchQueue.main.advance(to: 0.15)
+        try stopped.play(); DispatchQueue.main.advance(to: 0.3)
         try require(stopped.isPlaying && stopped.engine.mainMixerNode.outputVolume == 1, "old pause muted new track")
         print("PASS: stop invalidates transport callbacks before new playback")
+
+        let retiring = try ready()
+        var cleanup = 0
+        retiring.stop(afterDrain: { cleanup += 1 })
+        try require(!retiring.isPlaying && retiring.currentTime() == 0, "stop intent not immediate")
+        try require(retiring.activePlayerNode.isPlaying && retiring.resourcesCleared == 0, "stop released active source before fade")
+        DispatchQueue.main.advance(to: 0.112)
+        retiring.pause() // Must not replace/cancel the pending destructive drain.
+        do { try retiring.seek(to: 5); throw NSError(domain: "seek during teardown accepted", code: 1) }
+        catch is CancellationError { }
+        let originalToken = retiring.transportToken
+        retiring.stop(afterDrain: { cleanup += 10 })
+        try require(retiring.transportToken == originalToken, "repeated stop restarted its fade")
+        DispatchQueue.main.advance(to: 0.125)
+        try require(retiring.engine.mainMixerNode.outputVolume == 0 && retiring.resourcesCleared == 0 && cleanup == 0, "stop skipped silent drain")
+        retiring.handlePlaybackEnd(generation: retiring.playbackGeneration)
+        DispatchQueue.main.advance(to: 0.137)
+        try require(retiring.resourcesCleared == 1 && !retiring.engine.isRunning && cleanup == 10, "stop cleanup/latest completion failed")
+        print("PASS: stop retains sources through fade/drain; repeated stop coalesces and only latest session cleanup runs")
+
+        let loading = try ready()
+        var staleRelease = 0
+        let obsoleteGeneration = loading.stop(afterDrain: { staleRelease += 1 })
+        DispatchQueue.main.advance(to: 0.105)
+        let nextGeneration = loading.stop() // New load owns the existing drain.
+        try require(nextGeneration != obsoleteGeneration, "new load failed to invalidate old preparation")
+        DispatchQueue.main.advance(to: 0.2)
+        try require(staleRelease == 0 && loading.resourcesCleared == 1, "old session release survived superseding load")
+        try loading.play(); DispatchQueue.main.advance(to: 0.3)
+        try require(loading.isPlaying && loading.engine.mainMixerNode.outputVolume == 1, "new source was cleared by old stop")
+        print("PASS: a superseding load cancels old preparation/session release and survives the old stop callbacks")
+
+        DispatchQueue.main.reset()
+        let idle = ShippingTransportHost()
+        var idleCleanup = 0
+        idle.stop(afterDrain: { idleCleanup += 1 })
+        try require(idle.resourcesCleared == 1 && idleCleanup == 1 && DispatchQueue.main.events.isEmpty, "idle stop scheduled an unnecessary fade")
+        print("PASS: an already-stopped engine releases resources synchronously")
 
         let seek = try ready()
         try seek.seek(to: 7); DispatchQueue.main.advance(to: 0.105)
@@ -127,7 +175,13 @@ import AVFoundation
                     if negative {
                         if direction { player.play() } else { player.stop() }
                     }
-                    else { host.rampTransportVolume(to: direction ? 1 : 0, duration: 0.024, token: 0, completion: {}) }
+                    else {
+                        host.rampTransportVolume(to: direction ? 1 : 0, duration: 0.024, token: 0) {
+                            if !direction {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.012) { player.stop() }
+                            }
+                        }
+                    }
                 }
                 let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 32)!
                 var samples = [Float]()

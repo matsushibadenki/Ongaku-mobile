@@ -13,3 +13,9 @@ if "$transport_dir/transport" --abrupt-fixture > "$transport_dir/negative.log" 2
 fi
 rg -q 'transport PCM contains abrupt boundary' "$transport_dir/negative.log"
 echo 'PASS: PCM guard rejects abrupt source start/stop'
+
+if "$transport_dir/transport" --early-teardown-fixture > "$transport_dir/early.log" 2>&1; then
+ echo 'FAIL: early teardown escaped state guard'; exit 1
+fi
+rg -q 'shutdown released source before fade and drain' "$transport_dir/early.log"
+echo 'PASS: state guard rejects resource teardown before fade/drain'

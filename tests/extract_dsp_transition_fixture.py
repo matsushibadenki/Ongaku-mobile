@@ -17,7 +17,7 @@ def block(text, anchor):
     return text[start:end]
 # Stop must invalidate pending callbacks before requesting a neutral profile.
 # Otherwise a queued effect fade can swallow the neutral reset and retain EQ.
-stop_body = block(source, '    func stop() {')
+stop_body = block(source, '    private func clearStoppedPlaybackResources() {')
 if stop_body.index('cancelEffectTransitionForStop()') > stop_body.index('applyAutomaticDSPProfile(.neutral)'):
     raise RuntimeError('Stop cancellation must precede neutral DSP reset')
 methods = ['invalidateEffectLevelAudits()', 'apply(effectSettings:', 'applyImmediate(effectSettings:', 'applyWithDeclick(effectSettings:',
@@ -118,6 +118,7 @@ output.append('''
     var forceMuteForNegativeControl = false
     var duplicateGainForNegativeControl = false
     var recomputeInactiveGainForNegativeControl = false
+    var transportStopPending = false
     var hasTrack = true
     var mutations: [(String, Double, Float, Bool)] = []
     func record(_ kind: String) { mutations.append((kind, DispatchQueue.main.seconds, declickMixer.outputVolume, activePlayerNode.isPlaying)) }

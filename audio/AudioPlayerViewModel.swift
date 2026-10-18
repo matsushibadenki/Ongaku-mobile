@@ -3102,7 +3102,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         localPlaybackLoadTask?.cancel()
         localPlaybackLoadTask = nil
         hiResPlaybackEngine.cancelBackgroundPreparation()
-        hiResPlaybackEngine.stop()
+        hiResPlaybackEngine.stop(afterDrain: { PlaybackAudioSession.shared.deactivate() })
         remotePlaybackFile = nil
         musicPlaybackSnapshot = nil
         localPlaybackFormatDescription = L10n.playbackFormatUnavailable()
@@ -3114,8 +3114,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             selectedSystemSongID = nil
         }
         
-        // 停止時はセッションを非アクティブにしてシステムに通知する
-        PlaybackAudioSession.shared.deactivate()
+        // Session release is queued only after the final output has drained.
         
         reinforceNowPlayingTransportState()
     }
@@ -4561,13 +4560,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     && self.selectedSystemSongID == expectedSongID
             }
 
-            // stop() clears tracks but deliberately keeps the engine warm.
-            // Stop its render I/O before deactivating the app's session.
-            if self.hasInitializedHiResPlaybackEngine {
-                self.hiResPlaybackEngine.pause()
-            }
-            // Release the app's session; activating it here competes with Music.
+            // Await local fade/drain before handing the session to Music.
+            // Recheck intent after waiting so an old task cannot release a new session.
             do {
+                guard requestIsCurrent() else { return }
+                if self.hasInitializedHiResPlaybackEngine {
+                    let generation = self.hiResPlaybackEngine.stop()
+                    try await self.hiResPlaybackEngine.waitForStop(generation: generation)
+                }
+                guard requestIsCurrent() else { return }
                 try await PlaybackAudioSession.shared.releaseForSystemPlayback()
             } catch {
                 return
@@ -5148,7 +5149,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             isProcessing = false
             isChangingUpsamplingMode = false
             
-            if shouldResume {
+            if hiResPlaybackEngine.isPlaying {
                 clearForcedPausedWindow()
                 isPlaying = true
                 startTimer()
@@ -5220,9 +5221,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         systemAssetRecoveryGate.reset()
         if let owner = systemHandoffEngineOwner {
             systemHandoffEngineOwner = nil
-            hiResPlaybackEngine.stop()
-            hiResPlaybackEngine.pause()
-            PlaybackAudioSession.shared.cancelMixedHandoff(owner)
+            hiResPlaybackEngine.stop(afterDrain: {
+                PlaybackAudioSession.shared.cancelMixedHandoff(owner)
+            })
         }
     }
 
@@ -5261,9 +5262,9 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             defer {
                 if self.systemHandoffEngineOwner == requestID {
                     self.systemHandoffEngineOwner = nil
-                    self.hiResPlaybackEngine.stop()
-                    self.hiResPlaybackEngine.pause()
-                    PlaybackAudioSession.shared.cancelMixedHandoff(requestID)
+                    self.hiResPlaybackEngine.stop(afterDrain: {
+                        PlaybackAudioSession.shared.cancelMixedHandoff(requestID)
+                    })
                 }
                 if self.systemAssetRecoveryID == requestID {
                     self.systemAssetRecoveryTask = nil
