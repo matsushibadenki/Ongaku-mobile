@@ -2,6 +2,7 @@
 
 ## Effect tails and latency-change protection — 2026-10-19
 
+- 🟢 [Done] Mark the stateless tail scheduler `nonisolated` in both apps so default-argument evaluation is valid under iPhone default MainActor isolation; callbacks still execute on the main queue. Rebuild iPhone Simulator and Mac Debug successfully with no `scheduleOnMain` actor-isolation diagnostic (2026-10-19). Device listening checks below remain Pending.
 - 🟢 [Done] Retain CPU upsampling. Share Space/Gloss/Body/Warm wet-input gating and bounded tail release: 24 ms input fade, 160 ms history hold, 240 ms wet release; cancel stale callbacks on ON/rebuild and clear history after silent transport drain. Idle wet units are bypassed.
 - 🟢 [Done] Protect changed algorithmic latency at zero output before restoring; include intensity-zero and Space-amount-zero boundaries. Align Mac Warm's direct bypass and Flutter gain behavior with iPhone; keep Mac's final sample limiter/−1 dB trim fixed during user-effect OFF, preserving safety and latency through tails.
 - 🟢 [Done] Qualify 144 shared-rack Sinc/Space/Gloss handoffs, 12 effect/rate tail cases from each repository, latency-state/cancellation regressions, 96 Mac transition PCM cases, transport/gain-reference regressions and all three app builds. Correlation lag is 0 output samples at measured resolution; completed-window level difference stays within 0.039 dB. See [verification, evidence and scope](TAIL_LATENCY_VALIDATION.md).
