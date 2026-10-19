@@ -36,14 +36,22 @@ import AVFoundation
 
         let paused = try ready()
         paused.livePosition = 3
+        paused.declickMixer.outputVolume = 0.2
+        paused.effectDeclickRestoreVolume = 1
         paused.pause()
+        try require(paused.declickToken == 1 && paused.declickMixer.outputVolume == 0.2 && paused.effectCommits == 0,
+                    "pause did not freeze effect protection")
         try require(!paused.isPlaying && paused.engine.isRunning && paused.currentTime() == 3, "pause intent not immediate")
         DispatchQueue.main.advance(to: 0.112)
         try require(paused.activePlayerNode.isPlaying && paused.handoffCancellations == 0, "handoff stopped before fade")
+        try require(paused.effectPipeline[0].resets == 0, "tail reset before silent pause")
         DispatchQueue.main.advance(to: 0.125)
         try require(paused.engine.mainMixerNode.outputVolume == 0 && paused.engine.isRunning, "pause skipped silent drain")
         DispatchQueue.main.advance(to: 0.15)
         try require(!paused.engine.isRunning && paused.playbackOffset == 3, "pause did not commit at zero")
+        try require(paused.effectPipeline[0].resets == 1, "pause retained stale tail history")
+        try require(paused.effectCommits == 1 && paused.effectDeclickRestoreVolume == nil && paused.declickMixer.outputVolume == 1,
+                    "pause did not settle effect protection at silence")
         try paused.play(); DispatchQueue.main.advance(to: 0.2)
         try require(paused.isPlaying && paused.schedules == 2 && paused.engine.mainMixerNode.outputVolume == 1, "paused resume failed")
         print("PASS: pause intent, silent drain, position and restart")

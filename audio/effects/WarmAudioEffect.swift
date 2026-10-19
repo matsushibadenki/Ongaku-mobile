@@ -14,6 +14,15 @@ import Foundation
 final class WarmAudioEffect: AudioEffectNode {
     let kind: RealtimeAudioEffectKind = .warm
     private(set) var isEnabled: Bool = false
+    private let wetInputMixer = AVAudioMixerNode()
+    private weak var attachedEngine: AVAudioEngine?
+    private let tailSchedule: EffectTailGate.Schedule
+    private lazy var tailGate = EffectTailGate(input: wetInputMixer, outputs: [highWetMixer],
+                                               wetUnits: [highDoubler, highReverb], schedule: tailSchedule)
+    init(tailSchedule: @escaping EffectTailGate.Schedule = EffectTailGate.scheduleOnMain) {
+        self.tailSchedule = tailSchedule
+    }
+
 
     // Direct unity bypass avoids varispeed latency while this module is off.
     private let inputSplitter = AVAudioMixerNode()
@@ -46,7 +55,7 @@ final class WarmAudioEffect: AudioEffectNode {
 
     var nodes: [AVAudioNode] { 
         [
-            inputSplitter,
+            wetInputMixer, inputSplitter,
             bypassMixer,
             dryMixer,
             preEQ,
@@ -74,6 +83,8 @@ final class WarmAudioEffect: AudioEffectNode {
     }
 
     func attach(to engine: AVAudioEngine) {
+        attachedEngine = engine
+        wetInputMixer.outputVolume = 0
         for node in nodes {
             engine.attach(node)
         }
@@ -130,6 +141,7 @@ final class WarmAudioEffect: AudioEffectNode {
     }
 
     func connectInternalNodes(engine: AVAudioEngine, format: AVAudioFormat?) {
+        tailGate.reset()
         engine.connect(inputSplitter, to: [
             AVAudioConnectionPoint(node: bypassMixer, bus: 0),
             AVAudioConnectionPoint(node: preEQ, bus: 0)
@@ -163,19 +175,24 @@ final class WarmAudioEffect: AudioEffectNode {
         engine.connect(highSat, to: highDownsampleMixer, format: format)
         engine.connect(highDownsampleMixer, to: [
             AVAudioConnectionPoint(node: mainMixer, bus: 2),
-            AVAudioConnectionPoint(node: highDoubler, bus: 0)
+            AVAudioConnectionPoint(node: wetInputMixer, bus: 0)
         ], fromBus: 0, format: format)
+        engine.connect(wetInputMixer, to: highDoubler, format: format)
         engine.connect(highDoubler, to: highReverb, format: format)
         engine.connect(highReverb, to: highWetMixer, format: format)
         engine.connect(highWetMixer, to: mainMixer, fromBus: 0, toBus: 3, format: format)
     }
 
     func detach(from engine: AVAudioEngine) {
+        tailGate.reset()
+        attachedEngine = nil
         stopModulation()
         for node in nodes {
             engine.detach(node)
         }
     }
+
+    func resetTailState() { tailGate.resetPreservingEnabledState() }
 
     func apply(setting: RealtimeAudioEffectSetting) {
         let intensity = clamped(setting.parameters["intensity"], defaultValue: 0.78)
@@ -195,7 +212,7 @@ final class WarmAudioEffect: AudioEffectNode {
         guard isEnabled else {
             stopModulation()
             for node in nodes {
-                if let effect = node as? AVAudioUnitEffect { effect.bypass = true }
+                if let effect = node as? AVAudioUnitEffect, node !== highDoubler, node !== highReverb { effect.bypass = true }
             }
             varispeed.rate = 1.0
             bypassMixer.outputVolume = 1
@@ -203,7 +220,7 @@ final class WarmAudioEffect: AudioEffectNode {
             mainMixer.outputVolume = 1
             lowDownsampleMixer.outputVolume = 0
             highDownsampleMixer.outputVolume = 0
-            highWetMixer.outputVolume = 0
+            tailGate.stop(rendering: attachedEngine?.isRunning == true)
             estimatedGainBoostDB = 0.0
             return
         }
@@ -247,6 +264,7 @@ final class WarmAudioEffect: AudioEffectNode {
         highDoubler.wetDryMix = 100
         highReverb.wetDryMix = 100
         highWetMixer.outputVolume = min(0.14, Float((toneCurve * 0.14) * intensityCurve))
+        tailGate.activate()
         let hasWetSignal = highWetMixer.outputVolume > 0.0001
         highDoubler.bypass = !hasWetSignal
         highReverb.bypass = !hasWetSignal

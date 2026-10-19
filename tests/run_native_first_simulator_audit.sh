@@ -6,6 +6,8 @@ audit_device="$1"
 audit_source=tests/NativeFirstPlaybackAuditApp.swift
 if [[ "${2:-}" == "--destructive-stop" ]]; then
  audit_source=tests/DestructiveStopAuditApp.swift
+elif [[ "${2:-}" == "--foreground-recovery" ]]; then
+ audit_source=tests/ForegroundRecoveryAuditApp.swift
 elif [[ -n "${2:-}" ]]; then
  echo 'Unknown audit mode'; exit 2
 fi
@@ -20,7 +22,8 @@ for name in ('audio','Ongaku.xcodeproj'):
 shutil.copy2('AppInfo.plist',root/'AppInfo.plist')
 shutil.copy2(sys.argv[2],root/'audio/audioApp.swift')
 p=root/'Ongaku.xcodeproj/project.pbxproj'
-bundle='local.ongaku.stop-audit' if 'DestructiveStop' in sys.argv[2] else 'local.ongaku.native-first-audit'
+bundle={'DestructiveStopAuditApp.swift': 'local.ongaku.stop-audit',
+        'ForegroundRecoveryAuditApp.swift': 'local.ongaku.foreground-audit'}.get(Path(sys.argv[2]).name, 'local.ongaku.native-first-audit')
 p.write_text(p.read_text().replace('PRODUCT_BUNDLE_IDENTIFIER = littlebuddha.audio;', 'PRODUCT_BUNDLE_IDENTIFIER = '+bundle+';'))
 PY
 xcodebuild -project "$audit_dir/Ongaku.xcodeproj" -scheme audio -configuration Debug \
@@ -30,6 +33,7 @@ xcrun simctl boot "$audit_device" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$audit_device" -b
 audit_bundle=local.ongaku.native-first-audit
 if [[ "${2:-}" == "--destructive-stop" ]]; then audit_bundle=local.ongaku.stop-audit; fi
+if [[ "${2:-}" == "--foreground-recovery" ]]; then audit_bundle=local.ongaku.foreground-audit; fi
 xcrun simctl install "$audit_device" "$audit_dir/build/Build/Products/Debug-iphonesimulator/audio.app"
 audit_container=$(xcrun simctl get_app_container "$audit_device" "$audit_bundle" data)
 rm -f "$audit_container/Documents/native-first-result.txt"

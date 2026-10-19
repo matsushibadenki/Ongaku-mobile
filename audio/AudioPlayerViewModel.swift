@@ -1054,6 +1054,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     @objc private func handleAppDidBecomeActive() {
         isApplicationActive = true
+        reconcileLocalPlaybackAfterForeground()
         resumePendingInterruptionIfNeeded()
         if playbackSource == .system {
             // Music may have resumed from the lock screen while this app was
@@ -1078,6 +1079,40 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         startSystemAssetRecoveryIfNeeded()
         scheduleDeferredSystemLibraryRefresh()
         scheduleLocalLibraryChangeRefresh(delay: .milliseconds(250))
+    }
+
+    /// Reconcile before refreshPlaybackState overwrites the pre-suspension intent.
+    /// Foreground alone is not permission to take audio from another app.
+    private func reconcileLocalPlaybackAfterForeground() {
+        guard playbackSource == .local, hasInitializedHiResPlaybackEngine,
+              hiResPlaybackEngine.hasTrack, !isInForcedPausedWindow else { return }
+        audioRenderHealth = hiResPlaybackEngine.pollRenderHealth()
+        let otherAudioPlaying = AVAudioSession.sharedInstance().isOtherAudioPlaying
+        if isInterrupted {
+            guard wasPlayingBeforeSessionInterruption,
+                  interruptedPlaybackSource == .local,
+                  userPauseIntentToken == interruptionPauseIntentBaseline,
+                  playbackPreparationToken == interruptionPlaybackPreparationBaseline,
+                  !otherAudioPlaying else { return }
+            // iOS may suspend us without delivering an interruption-end event.
+            // Permit an activation attempt; the session still arbitrates calls.
+            isInterrupted = false
+            interruptionAllowsImmediateResume = false
+            PlaybackDebugLogger.event("audio.foreground.reconcile missing_end=true")
+        } else if isPlaying, !isPlaybackStarting,
+                  interruptionResumeTask == nil, unexpectedPlaybackRecoveryTask == nil,
+                  !hiResPlaybackEngine.isPlaying || audioRenderHealth.isStalled {
+            interruptionGeneration &+= 1
+            wasPlayingBeforeSessionInterruption = true
+            interruptedPlaybackSource = .local
+            interruptionPauseIntentBaseline = userPauseIntentToken
+            interruptionPlaybackPreparationBaseline = playbackPreparationToken
+            interruptionAllowsImmediateResume = false
+            isPlaying = false
+            PlaybackDebugLogger.event(
+                "audio.foreground.reconcile stale_playing=true otherAudio=\(otherAudioPlaying) stalled=\(audioRenderHealth.isStalled)"
+            )
+        }
     }
 
     @objc private func handleAppWillResignActive() {
@@ -2652,7 +2687,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         
         switch playbackSource {
         case .local:
-            guard hasInitializedHiResPlaybackEngine else { return .paused }
+            guard hasInitializedHiResPlaybackEngine,
+                  !wasPlayingBeforeSessionInterruption,
+                  unexpectedPlaybackRecoveryTask == nil,
+                  !audioRenderHealth.isStalled else { return .paused }
             return PlaybackTransportPolicy.isPlaying(
                 nodePlaying: hiResPlaybackEngine.isPlaying,
                 engineRunning: hiResPlaybackEngine.isEngineRunning,
@@ -3152,7 +3190,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             let isEnginePlaying = hiResPlaybackEngine.isPlaying
             let reachedEnd = hasTrack && duration > 0 && current >= max(0, duration - 0.03)
 
-            if isPlaying && !isEnginePlaying {
+            if isPlaying && (!isEnginePlaying || renderHealth.isStalled) {
                 if isInForcedPausedWindow {
                     return
                 }
@@ -3161,7 +3199,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 } else {
                     // Route changes and transient media-service failures can
                     // stop the node while its track remains valid.
-                    scheduleUnexpectedLocalPlaybackRecovery(reason: "render_node_stopped")
+                    scheduleUnexpectedLocalPlaybackRecovery(reason: renderHealth.isStalled
+                        ? "render_stalled" : "render_node_stopped")
                 }
                 return
             }
@@ -3544,12 +3583,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                             self.interruptionResumeTask = nil
                             return
                         }
-                        if !self.hiResPlaybackEngine.isPlaying {
-                            try self.hiResPlaybackEngine.play()
-                        }
-                        try? await Task.sleep(nanoseconds: 160_000_000)
+                        // A node's playing flag may survive loss of render I/O.
+                        // Rebuild its schedule at the retained position, through
+                        // the existing protected seek/start envelope.
+                        try self.hiResPlaybackEngine.seek(to: self.hiResPlaybackEngine.currentTime())
+                        try self.hiResPlaybackEngine.play()
+                        try await self.hiResPlaybackEngine.waitForPlaybackProgress()
+                        self.audioRenderHealth = self.hiResPlaybackEngine.pollRenderHealth()
                         didResume = self.hiResPlaybackEngine.isPlaying
-                            && self.hiResPlaybackEngine.isEngineRunning
+                            && !self.audioRenderHealth.isStalled
                     case .system:
                         self.ensureSystemPlayerConfigured()
                         self.systemPlayer.play()
@@ -3580,6 +3622,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                        self.interruptionGeneration == generation,
                        self.userPauseIntentToken == self.interruptionPauseIntentBaseline,
                        self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline {
+                        self.clearInterruptionResumeState()
                         self.clearForcedPausedWindow()
                         self.isPlaying = true
                         self.isProcessing = false
@@ -3607,7 +3650,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             guard !Task.isCancelled, self.interruptionGeneration == generation,
                   self.userPauseIntentToken == self.interruptionPauseIntentBaseline,
                   self.playbackPreparationToken == self.interruptionPlaybackPreparationBaseline else { return }
-            if self.actualPlaybackState == .playing {
+            if source == .system, self.actualPlaybackState == .playing {
                 self.clearInterruptionResumeState()
                 self.refreshPlaybackState()
                 self.startTimer()
@@ -3622,6 +3665,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             PlaybackDebugLogger.warning(
                 "audio.interruption.resume ready=false source=\(String(describing: source))"
             )
+            if source == .local { self.hiResPlaybackEngine.pause() }
             self.isPlaying = false
             self.stopTimer()
             self.refreshPlaybackState()
@@ -3686,6 +3730,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     return
                 }
 
+                guard !AVAudioSession.sharedInstance().isOtherAudioPlaying else { continue }
                 do {
                     try await PlaybackAudioSession.shared.activate()
                     if backgroundLease.expired { break }
@@ -3704,10 +3749,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     )
                     try self.hiResPlaybackEngine.seek(to: safeResumeTime)
                     try self.hiResPlaybackEngine.play()
-                    try await Task.sleep(nanoseconds: 180_000_000)
+                    try await self.hiResPlaybackEngine.waitForPlaybackProgress()
 
-                    guard !Task.isCancelled else { return }
-                    if self.hiResPlaybackEngine.isPlaying {
+                    guard PlaybackTransportPolicy.requestIsCurrent(
+                        pauseToken: pauseIntentToken, currentPauseToken: self.userPauseIntentToken,
+                        preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
+                        interrupted: self.isInterrupted, cancelled: Task.isCancelled
+                    ) else { return }
+                    self.audioRenderHealth = self.hiResPlaybackEngine.pollRenderHealth()
+                    if self.hiResPlaybackEngine.isPlaying && !self.audioRenderHealth.isStalled {
                         self.clearForcedPausedWindow()
                         self.isPlaying = true
                         self.isProcessing = false
@@ -3729,12 +3779,19 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 }
             }
 
-            guard self.playbackPreparationToken == preparationToken,
-                  self.userPauseIntentToken == pauseIntentToken else {
-                self.unexpectedPlaybackRecoveryTask = nil
-                return
-            }
+            guard !Task.isCancelled, !self.isInterrupted, self.playbackSource == .local,
+                  self.hiResPlaybackEngine.currentAudioURL == expectedURL,
+                  self.playbackPreparationToken == preparationToken,
+                  self.userPauseIntentToken == pauseIntentToken else { return }
 
+            // Retain the original request for a later foreground/route retry.
+            // The token checks above prevent reviving a user pause or new track.
+            self.wasPlayingBeforeSessionInterruption = true
+            self.interruptedPlaybackSource = .local
+            self.interruptionPauseIntentBaseline = pauseIntentToken
+            self.interruptionPlaybackPreparationBaseline = preparationToken
+            self.interruptionAllowsImmediateResume = false
+            self.hiResPlaybackEngine.pause()
             self.unexpectedPlaybackRecoveryTask = nil
             self.isPlaybackStarting = false
             self.isProcessing = false
@@ -3942,7 +3999,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
         // A native-ready engine already owns an active session. Do not enqueue
         // another media-service activation before scheduling its first samples.
-        if !wasInterrupted, hasInitializedHiResPlaybackEngine,
+        if !wasInterrupted, hasInitializedHiResPlaybackEngine, !audioRenderHealth.isStalled,
            hiResPlaybackEngine.isEngineRunning, hiResPlaybackEngine.hasTrack {
             return startRemotePlaybackAfterActivation()
         }
@@ -4006,7 +4063,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 return .commandFailed
             }
             guard !PlaybackTransportPolicy.isPlaying(
-                nodePlaying: hiResPlaybackEngine.isPlaying,
+                nodePlaying: hiResPlaybackEngine.isPlaying && !audioRenderHealth.isStalled,
                 engineRunning: hiResPlaybackEngine.isEngineRunning,
                 interrupted: isInterrupted, explicitlyPaused: isInForcedPausedWindow
             ) else {
@@ -4016,9 +4073,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 return .success
             }
             do {
-                if hiResPlaybackEngine.isPlaying && !hiResPlaybackEngine.isEngineRunning {
-                    // Save the last rendered position before rebuilding a stale schedule.
-                    hiResPlaybackEngine.pause()
+                if audioRenderHealth.isStalled {
+                    try hiResPlaybackEngine.seek(to: hiResPlaybackEngine.currentTime())
                 }
                 try hiResPlaybackEngine.play()
                 clearForcedPausedWindow()

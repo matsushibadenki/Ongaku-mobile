@@ -119,6 +119,8 @@ output.append('''
     var duplicateGainForNegativeControl = false
     var recomputeInactiveGainForNegativeControl = false
     var transportStopPending = false
+    var pendingTransportPause: TimeInterval?
+    var transportSeekPending = false
     var hasTrack = true
     var mutations: [(String, Double, Float, Bool)] = []
     func record(_ kind: String) { mutations.append((kind, DispatchQueue.main.seconds, declickMixer.outputVolume, activePlayerNode.isPlaying)) }

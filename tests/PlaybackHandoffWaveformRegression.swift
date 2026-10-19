@@ -14,14 +14,22 @@ struct PlaybackHandoffWaveformRegression {
     }
     static func render(file: AVAudioFile, pcm: AVAudioPCMBuffer, seek: Double,
                        outputRate: Double, path: Int, block: Int, blockPattern: [Int] = [],
-                       controlInterval: Double = 0) throws -> ([[Float]], PlaybackHandoffClock.Plan) {
+                       controlInterval: Double = 0, effect: AudioEffectNode? = nil, resetTailAtHandoff: Bool = false) throws -> ([[Float]], PlaybackHandoffClock.Plan) {
         let engine = AVAudioEngine(), old = AVAudioPlayerNode(), new = AVAudioPlayerNode(), mixer = AVAudioMixerNode()
         let graph = AVAudioFormat(standardFormatWithSampleRate: graphRate, channels: 2)!
         let output = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 2)!
         for node in [old, new, mixer] as [AVAudioNode] { engine.attach(node) }
         engine.connect(old, to: mixer, format: graph)
         engine.connect(new, to: mixer, format: graph)
-        engine.connect(mixer, to: engine.mainMixerNode, format: graph)
+        if let effect {
+            effect.attach(to: engine)
+            effect.connectInternalNodes(engine: engine, format: graph)
+            engine.connect(mixer, to: effect.inputNode, format: graph)
+            engine.connect(effect.outputNode, to: engine.mainMixerNode, format: graph)
+            effect.apply(setting: RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: true))
+        } else {
+            engine.connect(mixer, to: engine.mainMixerNode, format: graph)
+        }
         try engine.enableManualRenderingMode(.offline, format: output, maximumFrameCount: 1024)
         let sourceFrame = Int64(seek * file.processingFormat.sampleRate)
         let offset = Double(sourceFrame) / file.processingFormat.sampleRate
@@ -43,6 +51,7 @@ struct PlaybackHandoffWaveformRegression {
         var result = [[Float](), [Float]()]
         var blockIndex = 0
         var nextControlTime = 0.0
+        var completedHandoff = false
         while result[0].count < Int(outputRate * 0.5) {
             let renderSeconds = Double(engine.manualRenderingSampleTime) / outputRate
             if path == 2 && renderSeconds >= nextControlTime {
@@ -51,6 +60,11 @@ struct PlaybackHandoffWaveformRegression {
                 let elapsed = Double(engine.manualRenderingSampleTime) / outputRate - plan.delayFromRenderTime
                 let progress = PlaybackHandoffClock.fadeProgress(renderedFrames: Int64(max(0, elapsed * graphRate).rounded()), sampleRate: graphRate)!
                 old.volume = 1 - progress; new.volume = progress
+                if effect != nil && progress >= 1 && !completedHandoff {
+                    completedHandoff = true
+                    old.stop() // Production retires only the old source, not the shared rack.
+                    if resetTailAtHandoff { effect?.resetTailState() }
+                }
                 nextControlTime = renderSeconds + controlInterval
             }
             let requestedBlock = blockPattern.isEmpty ? block : blockPattern[blockIndex % blockPattern.count]

@@ -34,6 +34,7 @@ protocol AudioEffectNode: AnyObject {
     /// Known algorithmic latency. Parallel dry/wet effects report zero here;
     /// callers can still aggregate explicit look-ahead stages consistently.
     var estimatedLatencyFrames: AVAudioFramePosition { get }
+    var transitionLatency: TimeInterval { get }
     
     /// エンジンにノードをアタッチし、内部の初期接続を行います。
     /// - Parameter engine: 接続対象の AVAudioEngine
@@ -52,10 +53,19 @@ protocol AudioEffectNode: AnyObject {
     /// エフェクトパラメータを適用し、内部状態を更新します。
     /// - Parameter setting: UIから渡されたエフェクト設定
     func apply(setting: RealtimeAudioEffectSetting)
+    func resetTailState()
 }
 
 extension AudioEffectNode {
+    func resetTailState() {}
     var estimatedLatencyFrames: AVAudioFramePosition { 0 }
+    var transitionLatency: TimeInterval {
+        guard isEnabled else { return 0 }
+        return nodes.compactMap { $0 as? AVAudioUnit }.reduce(0) { sum, unit in
+            let latency = unit.auAudioUnit.latency
+            return sum + (latency.isFinite && latency > 0 ? latency : 0)
+        }
+    }
 }
 
 /// Shared with Ongaku desktop: Apple dynamics parameters use seconds and stable
@@ -78,6 +88,76 @@ enum EffectDynamicsParameters {
         for (id, value) in values {
             if let parameter = tree.parameter(withAddress: AUParameterAddress(id)) {
                 parameter.value = min(parameter.maxValue, max(parameter.minValue, value))
+            }
+        }
+    }
+}
+
+/// Control-thread wet-path gate. OFF stops new excitation, retains the delay/reverb
+/// state, then releases the tail. Callbacks are generation-checked across ON/rebuild.
+/// AVAudioEngine control writes and the injected scheduler must use one thread.
+final class EffectTailGate: @unchecked Sendable {
+    typealias Schedule = (TimeInterval, @escaping @Sendable () -> Void) -> Void
+    static func scheduleOnMain(_ delay: TimeInterval, _ action: @escaping @Sendable () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+    }
+    static let inputFade = 0.024
+    static let tailHold = 0.160 // Covers Space's longest intentional predelay.
+    static let tailRelease = 0.240
+    private let input: AVAudioMixerNode
+    private let outputs: [AVAudioMixerNode]
+    private let wetUnits: [AVAudioNode]
+    private let schedule: Schedule
+    private var generation: UInt64 = 0
+    private var enabled = false
+    private(set) var isDraining = false
+
+    init(input: AVAudioMixerNode, outputs: [AVAudioMixerNode], wetUnits: [AVAudioNode],
+         schedule: @escaping Schedule = EffectTailGate.scheduleOnMain) {
+        self.input = input; self.outputs = outputs; self.wetUnits = wetUnits; self.schedule = schedule
+    }
+
+    func activate() {
+        generation &+= 1
+        enabled = true; isDraining = false
+        wetUnits.compactMap { $0 as? AVAudioUnitEffect }.forEach { $0.bypass = false }
+        input.outputVolume = 1
+    }
+
+    func reset() {
+        generation &+= 1
+        enabled = false; isDraining = false
+        input.outputVolume = 0
+        outputs.forEach { $0.outputVolume = 0 }
+        wetUnits.forEach { $0.reset() }
+        wetUnits.compactMap { $0 as? AVAudioUnitEffect }.forEach { $0.bypass = true }
+    }
+
+    func resetPreservingEnabledState() {
+        let wasEnabled = enabled, levels = outputs.map(\.outputVolume)
+        reset()
+        if wasEnabled {
+            for (node, level) in zip(outputs, levels) { node.outputVolume = level }
+            activate()
+        }
+    }
+
+    func stop(rendering: Bool) {
+        guard rendering else { reset(); return }
+        guard enabled else { return } // Repeated OFF must not extend the tail.
+        enabled = false; isDraining = true; generation &+= 1
+        let token = generation, inputStart = input.outputVolume
+        let levels = outputs.map(\.outputVolume)
+        for step in 1...48 {
+            let factor = Float((1 + cos(Double.pi * Double(step) / 48)) * 0.5)
+            schedule(Self.inputFade * Double(step) / 48) { [weak self] in
+                guard let self, self.generation == token else { return }
+                self.input.outputVolume = step == 48 ? 0 : inputStart * factor
+            }
+            schedule(Self.inputFade + Self.tailHold + Self.tailRelease * Double(step) / 48) { [weak self] in
+                guard let self, self.generation == token else { return }
+                for (node, level) in zip(self.outputs, levels) { node.outputVolume = step == 48 ? 0 : level * factor }
+                if step == 48 { self.reset() }
             }
         }
     }

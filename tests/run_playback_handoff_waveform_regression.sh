@@ -6,6 +6,7 @@ trap 'rm -rf "$handoff_wave_dir"' EXIT
 python3 tests/extract_sinc_measurement_fixture.py "$handoff_wave_dir/ShippingSincMeasurement.swift"
 swiftc -parse-as-library -O -suppress-warnings \
     -module-cache-path "$handoff_wave_dir/module-cache" \
+    audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     audio/PlaybackHandoffClock.swift "$handoff_wave_dir/ShippingSincMeasurement.swift" \
     tests/PlaybackHandoffWaveformRegression.swift \
     -o "$handoff_wave_dir/handoff-waveform"

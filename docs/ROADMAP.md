@@ -1,10 +1,44 @@
 # #Ongaku Roadmap
 
+## Effect tails and latency-change protection — 2026-10-19
+
+- 🟢 [Done] Retain CPU upsampling. Share Space/Gloss/Body/Warm wet-input gating and bounded tail release: 24 ms input fade, 160 ms history hold, 240 ms wet release; cancel stale callbacks on ON/rebuild and clear history after silent transport drain. Idle wet units are bypassed.
+- 🟢 [Done] Protect changed algorithmic latency at zero output before restoring; include intensity-zero and Space-amount-zero boundaries. Align Mac Warm's direct bypass and Flutter gain behavior with iPhone; keep Mac's final sample limiter/−1 dB trim fixed during user-effect OFF, preserving safety and latency through tails.
+- 🟢 [Done] Qualify 144 shared-rack Sinc/Space/Gloss handoffs, 12 effect/rate tail cases from each repository, latency-state/cancellation regressions, 96 Mac transition PCM cases, transport/gain-reference regressions and all three app builds. Correlation lag is 0 output samples at measured resolution; completed-window level difference stays within 0.039 dB. See [verification, evidence and scope](TAIL_LATENCY_VALIDATION.md).
+- 🟠 [Next] Move qualified control-thread envelopes toward sample-accurate audio-thread protection while retaining reference/residual and fault-injection gates. Current mixer writes remain sensitive to UI scheduling delays.
+- 🔴 [Later] Extend aligned references to simultaneous nonlinear changes, moving Flutter and different headphone spatial/HRTF preparations; evaluate longer natural tails only with bounded resource ownership.
+- ⭕️ [Pending] Physical iPhone speaker/headphone and Mac/DAC listening, rapid toggles under UI load, background/sleep/route changes, device-specific latency/drain sufficiency, sustained CPU/thermal/energy use and ordinary true-peak activation. A 424 ms bounded release does not preserve an arbitrarily long natural reverb decay.
+
+## CPU / Metal upsampling comparison — 2026-10-19
+
+- 🟢 [Done] Benchmark the shipping iPhone CPU Precision Sinc arithmetic against an equivalent Metal prototype on the real M4 development Mac: 29 stereo settings, two complete runs, seven warm repeats plus first-use timing, separate peak RSS/physical-footprint/Metal-allocation readings. Share the exact harness and evidence with Mac; no production audio path changes.
+- 🟢 [Done] Pass all 58 CPU/GPU pair comparisons and sampled Float64-reference gates, both corrupted-shader negative controls and the shipping file-reader/throttle probe. Maximum CPU/GPU error is 2.98e-7 FS. See [full results, scope and reproduction](CPU_METAL_UPSAMPLING_VALIDATION.md).
+- 🟢 [Done] Keep CPU as the shipping default. Non-tiny GPU speedups range from 0.765× to 2.948×; tiny jobs are about 9–11× slower, setup adds 22.58–53.47 ms and memory rises. Mac's existing AVAudioEngine SRC remains distinct from iPhone Precision Sinc; the benchmark does not claim otherwise.
+- 🟢 [Done] Qualify the first shared-rack latency/residual and bounded-tail stage; see [effect-tail validation](TAIL_LATENCY_VALIDATION.md). GPU integration remains Later.
+- 🔴 [Later] Revisit an optional GPU backend for large repeated offline jobs only after a measured device-specific benefit, with bounded buffers, CPU fallback and transport/cancellation ownership.
+- ⭕️ [Pending] Physical iPhone speed/memory/energy/thermal testing, sustained playback and UI/GPU contention, other Mac families, long-song memory pressure and any future GPU handoff/cancellation/listening qualification. M4 standalone compute measurements above are complete; they do not establish app-level device qualification.
+
+## Mac transport and late-analysis parity — 2026-10-19
+
+- 🟢 [Done] Add independent Mac start/pause/resume/seek/stop/load/recovery protection using iPhone's byte-identical 24 ms / 48-step cosine policy. Retain both overlap schedules until zero output and drain; coalesce requests, gate startup on rendering and reject stale EOF/transport callbacks.
+- 🟢 [Done] Freeze current and incoming track/album normalization references, including missing measurements and repeat-one. Late analysis updates caches without changing the playing gain; new loads/schedules and explicit normalization changes adopt available analysis.
+- 🟢 [Done] Pass 43 regressions plus 4 real-controller tests in each ordinary/true-peak candidate configuration, 6 stereo PCM cases at 44.1/48/96 kHz and two fault-injection controls. Recheck iPhone transport/gain-reference regressions and all three app builds. See [verification, measurements and scope](MAC_TRANSPORT_PARITY_VALIDATION.md).
+- 🟢 [Done] Complete the shared-rack Space/Gloss residual and bounded-tail stage; see [effect-tail validation](TAIL_LATENCY_VALIDATION.md). Sample-accurate envelopes remain Next.
+- ⭕️ [Pending] Physical iPhone/Mac listening, rapid operations under UI load, live route/rate changes, sleep/wake and sustained CPU/thermal/energy behavior. Ordinary true-peak activation remains gated by device qualification.
+- 🟢 [Done] Complete the development-Mac CPU/Metal comparison and retain CPU as default; see [measured results and remaining device qualification](CPU_METAL_UPSAMPLING_VALIDATION.md). Optional production GPU integration remains Later.
+
+## Foreground recovery after other-app audio — 2026-10-19
+
+- 🟢 [Done] Preserve Music-managed non-DRM local playback intent before foreground refresh, retry a missing interruption end only when other audio is absent and the original request is current, and detect stalled rendering despite stale playing flags.
+- 🟢 [Done] Confirm fresh source progress after protected rescheduling before reporting recovery. Keep unsuccessful recovery paused with retry intent; preserve user pause/selection and other-app ownership. Pass 10 production-method regression groups plus a negative control, 5 production-engine Simulator groups, existing transport/session/render/fade regressions and the ordinary iPhone build. See [verification and limits](FOREGROUND_RECOVERY_VALIDATION.md).
+- ⭕️ [Pending] Reproduce with the user's real Music-managed non-DRM songs: other app takes audio, other audio stops, foreground Ongaku; confirm sound, position and button state. Include long suspension, missing end, calls/routes and pause/track changes during recovery.
+
 ## Destructive playback shutdown — 2026-10-18
 
 - 🟢 [Done] Extend iPhone transport protection to destructive stop/load/recovery: retain active files/PCM and both handoff schedules through the final-mixer fade and silent drain, then pause and reset resources. Report stopped intent immediately; reject stale preparation and coalesce repeated stops.
 - 🟢 [Done] Defer session release until drain completion, preserve latest-request ownership, reject pre-cancelled loads without stopping playback, and respect a newer pause during reload. Pass 11 transport state groups, 6 PCM cases with negative controls, 6 final production-engine Simulator groups, gain-reference/session regressions, 48 effect and 72 gain cases, and the ordinary iPhone build. See [verification and limits](DESTRUCTIVE_STOP_VALIDATION.md).
-- 🟠 [Next] Apply transport and late album-analysis gain protection to Mac; qualify signal alignment and handoff/effect tails with latency-aligned reference/residual measurements. Mac runtime transport is not changed by this iPhone step.
+- 🟢 [Done] Mac transport and late-analysis gain protection now implement the shared acceptance criteria; see [2026-10-19 validation](MAC_TRANSPORT_PARITY_VALIDATION.md).
+- 🟢 [Done] Complete the first latency/residual and bounded-tail stage; see [effect-tail validation](TAIL_LATENCY_VALIDATION.md).
 - ⭕️ [Pending] Physical iPhone speaker clicks/loudness during stop/start, track and quality changes, recovery, Music session transfers, UI load and route changes; corresponding Mac listening and sustained resource use.
 
 ## Pastel desktop parity and dial detail — 2026-10-18
@@ -29,7 +63,8 @@
 - 🟢 [Done] Give iPhone start/resume, pause and seek an independent final-mixer envelope: nominal 24 ms, 48 cosine steps, render-gated startup and a silent buffer drain before physical pause. Preserve immediate paused UI intent, coalesce seeks and reject stale callbacks after resume/stop. Existing seek-then-play callers retain the latest destination; EOF during a fade cannot override pause/seek intent.
 - 🟢 [Done] Verify shipping transport state transitions, six real stock-mixer PCM cases at 44.1/48/96 kHz and measured/unmeasured gain references, including negative controls. Pass 17 production-engine Simulator checks and the ordinary iPhone build. Recheck 48 effect and 72 gain/loudness cases; synchronize the common policy with Mac and pass its 19 focused tests. See [validation and limits](PLAYBACK_CONTINUITY_VALIDATION.md).
 - 🟢 [Done] Extend protection to destructive stop/load/recovery with deferred resource/session release; see [2026-10-18 validation](DESTRUCTIVE_STOP_VALIDATION.md).
-- 🟠 [Next] Apply the transport/late-analysis criteria to Mac and qualify signal alignment, sample-accurate handoff and tail handling.
+- 🟢 [Done] Mac transport and late-analysis gain protection now implement the shared acceptance criteria; see [2026-10-19 validation](MAC_TRANSPORT_PARITY_VALIDATION.md).
+- 🟢 [Done] Complete the first latency/residual and bounded-tail stage; see [effect-tail validation](TAIL_LATENCY_VALIDATION.md).
 - ⭕️ [Pending] Confirm the reported sudden loudness changes and plug-like clicks on the physical iPhone built-in speaker: start/pause/resume/seek, quality replacement, effect ON/OFF, different system volumes and UI load. Check external outputs and Mac listening separately. Control-thread fades and Simulator PCM do not establish inaudibility or hardware/session behavior.
 
 ## Preparation failure diagnostics — 2026-10-17

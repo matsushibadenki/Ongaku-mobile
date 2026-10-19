@@ -23,7 +23,18 @@ import Foundation
             let engine = AVAudioEngine(), a = AVAudioPlayerNode(), b = AVAudioPlayerNode(), sourceMixer = AVAudioMixerNode()
             let input = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!
             let output = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
-            let effects = AudioEffectModuleRegistry.makePipeline(), protection = EffectOutputProtection()
+            let clock = EffectTestClock()
+            let tailSchedule: EffectTailGate.Schedule = { delay, action in clock.schedule(delay) { action() } }
+            let effects: [AudioEffectNode] = AudioEffectModuleRegistry.makePipeline().map { effect in
+                switch effect.kind {
+                case .space: return SpaceAudioEffect(tailSchedule: tailSchedule)
+                case .gloss: return GlossAudioEffect(tailSchedule: tailSchedule)
+                case .body: return BodyAudioEffect(tailSchedule: tailSchedule)
+                case .warm: return WarmAudioEffect(tailSchedule: tailSchedule)
+                default: return effect
+                }
+            }
+            let protection = EffectOutputProtection()
             let final = FinalOutputProtection(enabled: protected)
             for node in [a,b,sourceMixer] as [AVAudioNode] { engine.attach(node) }
             protection.attach(to: engine); final.attach(to: engine)
@@ -39,7 +50,6 @@ import Foundation
             final.setVolume(0.67, engine: engine)
             let envelope = final.inputNode(in: engine) as! AVAudioMixerNode
             try engine.enableManualRenderingMode(.offline, format: output, maximumFrameCount: 512)
-            let clock = EffectTestClock()
             let host = ShippingDesktopEffectTransition(a,b,effects,protection,envelope,clock,engine,final)
             host.effectSettings = settings(tab, 0.25); host.applyEffectSettings(immediately: true, force: true)
             host.writes.removeAll(); host.bypassCommits.removeAll()
@@ -126,6 +136,8 @@ import Foundation
                 try require(ticks.count == 8 && clock.events.isEmpty, "Coalescing restarted or duplicated interpolation")
             }
             try require(pcm.joined().allSatisfy(\.isFinite), "Nonfinite PCM")
+            try require(!protection.limiter.bypass && protection.trim.globalGain == -1,
+                        "User bypass changed safety latency or trim")
             let peak = pcm.joined().map(abs).max()!
             try require(peak < 1.25, "Unexpected output overload")
             var minRatio = Double.infinity

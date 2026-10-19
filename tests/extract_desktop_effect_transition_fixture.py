@@ -15,7 +15,7 @@ stop = block('    private func stopPlayerNodes(')
 assert stop.index('secondaryPlayerNode.stop()') < stop.index('applyEffectSettings(immediately: true)')
 assert 'guard !effectParameterTransition.isProtectingOutput else { return }' in block('    private func prepareNextTrackIfNeeded(')
 assert 'applyEffectSettings(immediately: true, force: true)' in block('    private func configureEngine(')
-lazy = source[source.index('    private lazy var effectParameterTransition ='):source.index('    private let outputManager =')]
+lazy = source[source.index('    private lazy var effectParameterTransition ='):source.index('    private lazy var transportEnvelope =')]
 lazy = lazy.replace('        commit:', '        schedule: { [unowned self] delay, action in self.clock.schedule(delay, action) },\n        commit:')
 text = '''import AVFoundation
 import Foundation
@@ -44,6 +44,11 @@ import Foundation
     let effectOutputProtection: EffectOutputProtection
     let engine: AVAudioEngine
     let finalOutputProtection: FinalOutputProtection
+    struct FixtureTransport { var isStopping = false }
+    var transportEnvelope = FixtureTransport()
+    struct FixtureTrack { var id: Int }
+    var currentTrack: FixtureTrack?
+    var normalizationReferences: [Int: Int] = [:]
     var activePlayerIndex = 0
     func stopCrossfadeTimer() {}
     let output: AVAudioMixerNode

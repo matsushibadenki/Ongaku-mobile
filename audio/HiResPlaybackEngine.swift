@@ -987,9 +987,33 @@ final class HiResPlaybackEngine {
         throw HiResEngineError.upconvertFailed
     }
 
+    /// Recovery must observe fresh source progress, not a retained playing flag
+    /// or a render timestamp from before another app took the audio session.
+    func waitForPlaybackProgress() async throws {
+        let token = transportToken
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1.5))
+        var baseline: TimeInterval?
+        while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
+            guard transportToken == token, !transportStopPending,
+                  pendingTransportPause == nil, engine.isRunning,
+                  activePlayerNode.isPlaying else { throw CancellationError() }
+            if !transportFadeInPending, !transportSeekPending {
+                let position = currentTime()
+                if let baseline, position - baseline >= 0.02 { return }
+                if baseline == nil { baseline = position }
+            }
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        throw HiResEngineError.upconvertFailed
+    }
+
     func pause() {
         transportPauseGeneration &+= 1
         guard !transportStopPending, pendingTransportPause == nil else { return }
+        // Freeze rack writes and a pending latency restore during transport
+        // descent. Settle the latest rack request only once output is silent.
+        declickToken &+= 1
         let position = currentTime()
         transportSeekPending = false
         transportToken &+= 1
@@ -1022,6 +1046,11 @@ final class HiResPlaybackEngine {
         cancelPendingHandoff()
         activePlayerNode.stop()
         engine.pause()
+        declickToken &+= 1 // Also cancel work queued by handoff retirement.
+        effectDeclickRestoreVolume = nil
+        declickMixer.outputVolume = 1
+        applyPendingEffectSettings()
+        effectPipeline.forEach { $0.resetTailState() }
         pendingTransportPause = nil
     }
 
@@ -1107,6 +1136,7 @@ final class HiResPlaybackEngine {
         pendingHandoff = nil
         playerNode.stop()
         upgradePlayerNode.stop()
+        effectPipeline.forEach { $0.resetTailState() }
         cancelEffectTransitionForStop()
         spectrumAnalyzer.reset()
         playerNode.volume = 1.0
@@ -1726,6 +1756,10 @@ final class HiResPlaybackEngine {
         }
         latestRequestedEffectSettings = safeEffectSettings
         guard !transportStopPending else { return }
+        if pendingTransportPause != nil || transportSeekPending {
+            pendingDeclickEffectSettings = safeEffectSettings
+            return
+        }
         let requested = Dictionary(safeEffectSettings.map { ($0.kind, $0) }, uniquingKeysWith: { _, latest in latest })
         let changed = effectPipeline.contains { effect in
             let target = requested[effect.kind] ?? RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: false)
@@ -1795,6 +1829,8 @@ final class HiResPlaybackEngine {
         return needsEffectReapplication || effectDeclickRestoreVolume != nil || effectPipeline.contains { effect in
             let target = requested[effect.kind]?.isEnabled ?? false
             return (lastAppliedEffectSettings[effect.kind]?.isEnabled ?? false) != target
+                || EffectTransitionPolicy.effectiveEnabled(lastAppliedEffectSettings[effect.kind])
+                    != EffectTransitionPolicy.effectiveEnabled(requested[effect.kind])
         }
     }
 
@@ -1813,15 +1849,27 @@ final class HiResPlaybackEngine {
             return
         }
         let originalOutput = effectDeclickRestoreVolume ?? declickMixer.outputVolume
+        let previousLatency = effectPipeline.reduce(0.0) { $0 + $1.transitionLatency }
         effectDeclickRestoreVolume = originalOutput
         rampOutputVolume(to: 0.0, duration: EffectTransitionPolicy.protectionFadeOut, token: token) { [weak self] in
             guard let self, self.declickToken == token else { return }
             self.applyPendingEffectSettings()
-            // No silent settling plateau: the old 90 ms hold was audible as
-            // a dropout, especially when a gesture repeatedly restarted it.
-            self.rampOutputVolume(to: originalOutput, duration: EffectTransitionPolicy.protectionFadeIn, token: token) { [weak self] in
+            let settle = EffectTransitionPolicy.settleDuration(before: previousLatency,
+                after: self.effectPipeline.reduce(0.0) { $0 + $1.transitionLatency })
+            // Only changed algorithmic latency needs a bounded drain. Reverb
+            // tails remain in their wet paths; no fixed 90 ms global mute.
+            DispatchQueue.main.asyncAfter(deadline: .now() + settle) { [weak self] in
                 guard let self, self.declickToken == token else { return }
-                self.effectDeclickRestoreVolume = nil
+                self.rampOutputVolume(to: originalOutput, duration: EffectTransitionPolicy.protectionFadeIn, token: token) { [weak self] in
+                    guard let self, self.declickToken == token else { return }
+                    self.effectDeclickRestoreVolume = nil
+                    // Requests received during drain/restore must get their own
+                    // protected commit; do not leave the latest OFF/ON stranded.
+                    if let pending = self.pendingDeclickEffectSettings {
+                        self.pendingDeclickEffectSettings = nil
+                        self.apply(effectSettings: pending)
+                    }
+                }
             }
         }
     }

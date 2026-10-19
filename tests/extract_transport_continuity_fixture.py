@@ -12,9 +12,12 @@ def block(anchor):
         depth += (source[end] == '{') - (source[end] == '}'); end += 1
     return source[start:end]
 
+assert 'effectPipeline.forEach { $0.resetTailState() }' in block('    private func clearStoppedPlaybackResources()')
+
 out = ['''import Foundation
 import AVFoundation
-struct RealtimeAudioEffectSetting { var isEnabled = false; var parameters: [String: Double] = [:] }
+enum RealtimeAudioEffectKind { case equalizer, space }
+struct RealtimeAudioEffectSetting { var kind: RealtimeAudioEffectKind = .equalizer; var isEnabled = false; var parameters: [String: Double] = [:] }
 struct Deadline {
     let seconds: Double
     static func now() -> Self { Self(seconds: DispatchQueue.main.seconds) }
@@ -51,6 +54,7 @@ final class TestEngine {
     func pause() { isRunning = false }
 }
 struct TestMonitor { func endMonitoring() {} }
+final class TestTail { var resets = 0; func resetTailState() { resets += 1 } }
 struct TestSession {
     static func sharedInstance() -> Self { Self() }
     let ioBufferDuration = 0.005
@@ -60,6 +64,15 @@ final class ShippingTransportHost {
     let engine = TestEngine()
     let activePlayerNode = TestNode()
     let renderHealthMonitor = TestMonitor()
+    let effectPipeline = [TestTail()]
+    var declickToken: UInt64 = 0
+    var effectDeclickRestoreVolume: Float?
+    let declickMixer = TestMixer()
+    var effectCommits = 0
+    func applyPendingEffectSettings() {
+        precondition(!engine.isRunning && engine.mainMixerNode.outputVolume == 0)
+        effectCommits += 1
+    }
     var transportPauseGeneration: UInt64 = 0
     var transportStopPending = false
     var transportStopCompletion: (() -> Void)?
@@ -95,6 +108,7 @@ final class ShippingTransportHost {
     func clearStoppedPlaybackResources() {
         precondition(!engine.isRunning && engine.mainMixerNode.outputVolume == 0)
         resourcesCleared += 1; activePlayerNode.stop()
+        effectPipeline.forEach { $0.resetTailState() }
     }
     func cancelPendingHandoff() { handoffCancellations += 1 }
 ''']
