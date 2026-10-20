@@ -1,5 +1,11 @@
 # #Ongaku Roadmap
 
+## Mobile VU response / Desktop reference — 2026-10-20
+
+- 🟢 [Done] Raise mobile needle polling from 30 to 60 Hz, run its timer in common modes during tracking, and match Desktop's 65 ms attack / 220 ms release using monotonic time. Improve first-frame/small-change response; retain -18 dBFS alignment, face geometry, existing audio measurement/DSP and 15 Hz spectrum publication. Desktop runtime is unchanged.
+- 🟢 [Done] Pass the production tracking-mode timer/invalidation regression, analytical 30/60/120 Hz step response and calibration/budget checks; pass the ordinary iOS Simulator Debug build for arm64/x86_64 and whitespace checks. See [validation and limits](VU_METER_RESPONSE_VALIDATION_2026-10-20.md).
+- ⭕️ [Pending] Physical SE / Pro Max motion, gestures, playback transitions, energy/frame pacing and matched-signal Mac/iPhone comparison. Mobile's longer audio tap window is unchanged; display polling alone does not establish identical transient response.
+
 ## Release 1.0.7 — 2026-10-20
 
 - 🟢 [Done] Bump mobile 1.0.6 (2) to 1.0.7 (3), review recent changes for accidental omissions, pass four playback/EOF recovery regression scripts and locale/plist checks, create and verify the signed Release archive, and upload it to App Store Connect. Save EN/JA/zh-Hans update information and review notes.

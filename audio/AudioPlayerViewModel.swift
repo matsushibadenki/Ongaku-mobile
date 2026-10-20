@@ -2971,12 +2971,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private func startVisualizationTimer() {
         stopVisualizationTimer()
         guard isApplicationActive else { return }
-        visualizationTimer = Timer.scheduledTimer(
-            timeInterval: 1.0 / 30.0, // UI負荷を抑えるため30fpsに制限
-            target: self,
-            selector: #selector(handleVisualizationTimerTick),
-            userInfo: nil,
-            repeats: true
+        visualizationTimer = MeterVisualizationTiming.makeTimer(
+            target: self, selector: #selector(handleVisualizationTimerTick)
         )
     }
 
@@ -3002,7 +2998,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
 
         let levels = hiResPlaybackEngine.finalOutputLevels
-        updateVUMeterValue(rmsDBFS: levels.rmsDBFS, date: Date())
+        updateVUMeterValue(rmsDBFS: levels.rmsDBFS)
 
         // 微小変化の連続Publishを抑えてメインスレッドの再描画負荷を下げる
         if abs(levels.rmsDBFS - currentOutputRMS) > 0.2 {
@@ -3012,8 +3008,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             currentOutputPeak = levels.peakDBFS
         }
 
-        // Spectrumは更新コストが高いため、差分があるときだけ30fps相当で反映
-        if visualizationTickCount % 2 == 0, !levels.spectrum.isEmpty {
+        // Keep spectrum publication at the existing 15 Hz while the needle runs at 60 Hz.
+        if visualizationTickCount % MeterVisualizationTiming.spectrumStride == 0, !levels.spectrum.isEmpty {
             if lastPublishedSpectrum.count != levels.spectrum.count {
                 lastPublishedSpectrum = levels.spectrum
                 currentSpectrum = levels.spectrum
@@ -3035,27 +3031,27 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func updateSyntheticLevelsForSystemPlayback() {
         guard isPlaying else {
-            resetVisualizationMeters(resetSpectrum: visualizationTickCount % 2 == 0)
+            resetVisualizationMeters(resetSpectrum: visualizationTickCount % MeterVisualizationTiming.spectrumStride == 0)
             return
         }
 
         guard supportsRealtimeEffects else {
             // DRM/system playback cannot expose audio samples. The user can still select
             // any visualization, but its meters stay at rest until real samples are available.
-            resetVisualizationMeters(resetSpectrum: visualizationTickCount % 2 == 0)
+            resetVisualizationMeters(resetSpectrum: visualizationTickCount % MeterVisualizationTiming.spectrumStride == 0)
             return
         }
 
-        syntheticVisualizationPhase += 0.08
+        syntheticVisualizationPhase += 0.08 * 30 / MeterVisualizationTiming.refreshRate
         let t = syntheticVisualizationPhase
 
         let rms = -24.0 + Float((sin(t * 1.3) + sin(t * 0.47) * 0.6) * 5.5)
         let peak = rms + 5.0 + Float((sin(t * 2.4) + 1.0) * 1.8)
         currentOutputRMS = min(-6, max(-40, rms))
         currentOutputPeak = min(-1, max(-30, peak))
-        updateVUMeterValue(rmsDBFS: currentOutputRMS, date: Date())
+        updateVUMeterValue(rmsDBFS: currentOutputRMS)
 
-        if visualizationTickCount % 2 != 0 { return }
+        if visualizationTickCount % MeterVisualizationTiming.spectrumStride != 0 { return }
 
         let count = max(64, currentSpectrum.count)
         var pseudo = Array(repeating: Float(-120), count: count)
@@ -3084,10 +3080,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func updateVUMeterValue(rmsDBFS: Float, date: Date) {
+    private func updateVUMeterValue(rmsDBFS: Float) {
         let target = normalizedVUTarget(rmsDBFS: rmsDBFS)
-        let nextValue = vuBallistics.update(target: target, date: date)
-        if abs(nextValue - currentVUValue) > 0.003 {
+        let nextValue = vuBallistics.update(target: target)
+        if abs(nextValue - currentVUValue) > 0.0005 {
             currentVUValue = nextValue
         }
     }
