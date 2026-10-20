@@ -1,5 +1,11 @@
 # #Ongaku Roadmap
 
+## Release 1.0.7 — 2026-10-20
+
+- 🟢 [Done] Bump mobile 1.0.6 (2) to 1.0.7 (3), review recent changes for accidental omissions, pass four playback/EOF recovery regression scripts and locale/plist checks, create and verify the signed Release archive, and upload it to App Store Connect. Save EN/JA/zh-Hans update information and review notes.
+- 🟠 [Next] Publish GitHub source release and complete App Review submission after the export-compliance response is approved. See [deployment record](RELEASE_1.0.7_2026-10-20.md).
+- ⭕️ [Pending] Apple review/public availability and the existing physical-device qualification items.
+
 ## Mac effect-rack layout coordination — 2026-10-20
 
 - 🟢 [Done] Mac now displays the EQ's existing 14 parameters in six localized sections (Filter / LF / LMF / HMF / HF / Output), with Synth-inspired black/silver knobs and appearance-matched active ticks/numeric values. The shared parameter definitions and DSP are unchanged; this is a desktop presentation update with no iPhone runtime changes. Mac's 12 focused tests, Xcode Debug build and three-language localization checks pass; light/dark and four pastel rack renders are recorded in Ongaku-desktop's `docs/EFFECT_RACK_INPUT_VALIDATION.md`. Physical input/display qualification remains Pending.
