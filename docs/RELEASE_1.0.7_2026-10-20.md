@@ -12,10 +12,11 @@
 
 ## 配布
 
-- 🟢 [Done] App Store Connectへのアップロード成功（`Upload succeeded` / `EXPORT SUCCEEDED`）。TestFlightに1.0.7（3）が表示され、処理後の輸出コンプライアンス回答待ち。
+- 🟢 [Done] App Store Connectへのアップロード成功（`Upload succeeded` / `EXPORT SUCCEEDED`）。TestFlightに1.0.7（3）が表示され、処理完了。
 - 🟢 [Done] App Store Connectに1.0.7を作成し、日本語・英語・简体中文の更新情報と審査メモを保存。既存の承認後自動リリース設定を維持。
-- 🟠 [Next] GitHub mainとv1.0.7のソースリリースを公開する。
-- ⭕️ [Pending] 暗号化申告内容へのユーザー承認を得て、ビルドを選択しApp Reviewへ提出する。アップロード成功を審査提出・一般公開とは扱わない。
+- 🟢 [Done] GitHub mainと[v1.0.7](https://github.com/matsushibadenki/Ongaku-mobile/releases/tag/v1.0.7)のソースリリースを公開。
+- 🟢 [Done] ユーザーの明示承認に基づき暗号化申告「上記のアルゴリズムのどれでもない」を保存。ビルド3でApp Reviewへ提出し、1.0.7「審査待ち」を確認。
+- ⭕️ [Pending] Apple審査と承認後の自動公開。
 - ⭕️ [Pending] 実機での音声、出力機器・割込み・曲末の確認は既存の各検証記録に記載した範囲で継続。
 
 成果物・ログはGit管理外の `build/releases/1.0.7/` に保存。

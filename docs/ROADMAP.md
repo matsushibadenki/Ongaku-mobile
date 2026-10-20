@@ -3,7 +3,7 @@
 ## Release 1.0.7 — 2026-10-20
 
 - 🟢 [Done] Bump mobile 1.0.6 (2) to 1.0.7 (3), review recent changes for accidental omissions, pass four playback/EOF recovery regression scripts and locale/plist checks, create and verify the signed Release archive, and upload it to App Store Connect. Save EN/JA/zh-Hans update information and review notes.
-- 🟠 [Next] Publish GitHub source release and complete App Review submission after the export-compliance response is approved. See [deployment record](RELEASE_1.0.7_2026-10-20.md).
+- 🟢 [Done] Publish GitHub v1.0.7 source release, save the explicitly approved export-compliance response and submit build 3 to App Review; confirm Waiting for Review. See [deployment record](RELEASE_1.0.7_2026-10-20.md).
 - ⭕️ [Pending] Apple review/public availability and the existing physical-device qualification items.
 
 ## Mac effect-rack layout coordination — 2026-10-20
