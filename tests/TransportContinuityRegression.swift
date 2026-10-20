@@ -132,6 +132,21 @@ import AVFoundation
         try require(latest.schedules == 2 && latest.playbackOffset == 6 && latest.isPlaying, "obsolete seek won")
         print("PASS: latest seek wins, including immediate seek/play callers")
 
+        let reclaimed = try ready()
+        try reclaimed.seek(to: 7)
+        // Session/route loss can invalidate the node between seek() and the
+        // explicit play request. Its pending silent-drain callback is now stale.
+        reclaimed.activePlayerNode.stop()
+        try reclaimed.play()
+        DispatchQueue.main.advance(to: 0.3)
+        try require(!reclaimed.transportSeekPending && reclaimed.playbackOffset == 7,
+                    "reclaimed playback retained a stranded seek or lost its destination")
+        var recoveredEnds = 0
+        reclaimed.onPlaybackEnded = { recoveredEnds += 1 }
+        reclaimed.handlePlaybackEnd(generation: reclaimed.playbackGeneration)
+        try require(recoveredEnds == 1, "reclaimed playback lost its natural EOF")
+        print("PASS: explicit play after node loss retires the old seek and delivers EOF")
+
         DispatchQueue.main.reset()
         let timeout = ShippingTransportHost()
         timeout.activePlayerNode.lastRenderTime = nil

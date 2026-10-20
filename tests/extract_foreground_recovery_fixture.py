@@ -19,7 +19,8 @@ parts += ['extension ForegroundHost {']
 for anchor in ['@objc private func handleAppDidBecomeActive()',
                'private func reconcileLocalPlaybackAfterForeground()',
                'private func resumePendingInterruptionIfNeeded()',
-               'private var actualPlaybackState:']:
+               'private var actualPlaybackState:',
+               'private func scheduleUnexpectedLocalPlaybackRecovery(']:
     method = block(vm, anchor)
     if '--refresh-first' in sys.argv:
         method = method.replace('reconcileLocalPlaybackAfterForeground()',
@@ -28,4 +29,7 @@ for anchor in ['@objc private func handleAppDidBecomeActive()',
 parts += [block(vm, 'private func clearInterruptionResumeState()'),
           block(vm, 'private func resumePlaybackAfterInterruption(').replace('func resumePlaybackAfterInterruption(', 'func runInterruptionResume(', 1)]
 parts += ['}', 'extension ProgressHost {', block(engine, 'func waitForPlaybackProgress()'), '}']
-Path(sys.argv[1]).write_text('\n'.join(parts))
+output = '\n'.join(parts)
+if '--discard-eof' in sys.argv:
+    output = output.replace('self.handleLocalPlaybackEnded()', '/* fault injection: discard deferred EOF */')
+Path(sys.argv[1]).write_text(output)

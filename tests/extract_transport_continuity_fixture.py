@@ -81,7 +81,8 @@ final class ShippingTransportHost {
     var transportToken: UInt64 = 0
     var pendingTransportPause: TimeInterval?
     var transportFadeInPending = false
-    var transportSeekPending = false
+    var pendingTransportSeekPosition: TimeInterval?
+    var transportSeekPending: Bool { pendingTransportSeekPosition != nil }
     var transportReachedEnd = false
     var onPlaybackEnded: (() -> Void)?
     var playbackOffset: TimeInterval = 0
@@ -89,6 +90,7 @@ final class ShippingTransportHost {
     var lastKnownPlaybackTime: TimeInterval = 0
     var playbackStartedAt: Date?
     var playbackGeneration: UInt64 = 0
+    var playbackEndedGeneration: UInt64?
     var configuredProcessingFormat: AVAudioFormat?
     static let preferredSampleRate = 96000.0
     var estimatedPipelineLatencyFrames = 0
@@ -99,6 +101,7 @@ final class ShippingTransportHost {
     func ensureEngineRunning() throws { engine.isRunning = true }
     func scheduleBuffer(from position: TimeInterval, autoplay: Bool) {
         transportReachedEnd = false
+        playbackGeneration &+= 1
         schedules += 1; playbackOffset = position; livePosition = position
         activePlayerNode.isPlaying = autoplay
     }
@@ -115,9 +118,12 @@ final class ShippingTransportHost {
 methods = ['    func play(fadeInDuration:', '    private func beginTransportFadeIn(',
            '    private func rampTransportVolume(', '    func pause()',
            '    private func finishTransportPause(', '    func stop(afterDrain:',
-           '    private func requestTransportStop(', '    private func finishTransportStop(', '    private func handlePlaybackEnd(', '    func seek(to ', '    var isPlaying: Bool']
+           '    private func requestTransportStop(', '    private func finishTransportStop(', '    private func handlePlaybackEnd(', '    func seek(to ', '    var isPlaying: Bool', '    var playbackScheduleID:', '    var hasReachedPlaybackEnd:']
 for method in methods:
     text = block(method).replace('private func ', 'func ').replace('AVAudioSession.', 'TestSession.')
+    if method == '    func play(fadeInDuration:':
+        text = text.replace('            pendingTransportSeekPosition = nil',
+            '            if !CommandLine.arguments.contains("--stranded-seek-fixture") { pendingTransportSeekPosition = nil }')
     if method == '    private func requestTransportStop(':
         text = text.replace('        guard engine.isRunning else {',
             '        if CommandLine.arguments.contains("--early-teardown-fixture") { finishTransportStop(token: token); return }\n        guard engine.isRunning else {')

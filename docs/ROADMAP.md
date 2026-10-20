@@ -1,5 +1,39 @@
 # #Ongaku Roadmap
 
+## Mac effect-rack layout coordination — 2026-10-20
+
+- 🟢 [Done] Mac now displays the EQ's existing 14 parameters in six localized sections (Filter / LF / LMF / HMF / HF / Output), with Synth-inspired black/silver knobs and appearance-matched active ticks/numeric values. The shared parameter definitions and DSP are unchanged; this is a desktop presentation update with no iPhone runtime changes. Mac's 12 focused tests, Xcode Debug build and three-language localization checks pass; light/dark and four pastel rack renders are recorded in Ongaku-desktop's `docs/EFFECT_RACK_INPUT_VALIDATION.md`. Physical input/display qualification remains Pending.
+- 🟢 [Done] Mac reproduced click-time layout movement: the Japanese mode Picker changed from 81 pt to 33 pt high, shifting the knobs below it, and lazy parameter rows changed the document height. Separate the desktop mode title from the Picker, use a stable natural toolbar height and eager parameter-row measurement. Preserve shared effect parameters and audio behavior; no iPhone runtime changes. Mac passes 11 input tests, including 108 knob clicks / 72 switch actions across EN/JA/zh-Hans, Basic/Pro and two widths, plus its Xcode Debug build. Detailed evidence is in Ongaku-desktop's `docs/EFFECT_RACK_INPUT_VALIDATION.md`.
+- ⭕️ [Pending] Confirm the mode-toolbar growth and click-time movement are resolved on the affected physical Mac/trackpad. Injected-event and rendered-layout tests do not establish physical-device resolution.
+
+## Mac / iPhone track-end ownership parity — 2026-10-20
+
+- 🟢 [Done] Reproduce and repair four Mac local-playback defects: incoming EOF discarded before preroll promotion, a duplicate callback advancing another same-node repeat, delayed configuration recovery applying the old song's position to a new song, and an empty paused schedule selecting the next song. Give every segment a distinct ID, retain early incoming EOF, scope/cancel recovery per segment and honor newer pause/stop/selection intent.
+- 🟢 [Done] Align both apps on one completion per schedule and rejection of stale work. Verify rejected Mac preroll preserves audible EOF; retain Mac AVAudioEngine SRC / file-preroll and iPhone CPU Precision Sinc ownership. No iPhone runtime changes are needed in this follow-up.
+- 🟢 [Done] Pass all 370 Mac Swift tests, including the expanded 11-test serialized real-controller suite, and the same 11 tests under the existing true-peak candidate flag. Confirm real 10 ms tails reach next/repeat-one/queue-wrap/album-wrap/final stop. Pass ordinary Debug and App Store Release builds; rerun iPhone's 3 prepared-EOF groups, 10 queue/intent cases and 13 recovery groups with their negative controls. See [results, pre-fix evidence and limits](TRACK_END_PARITY_VALIDATION.md).
+- ⭕️ [Pending] Confirm the user's physical-iPhone Music-managed non-DRM failure is resolved. On Mac, qualify real output/rate changes, sleep/wake at EOF, competing apps, MusicKit/account playback, speaker/headphone/DAC listening and heavy UI/CPU load. Development-Mac tests used muted generated local files and injected notification/callback ordering; they do not establish those physical/OS scenarios or authorize ordinary true-peak activation.
+
+## Track-end follow-up: retained EOF and prepared handoff — 2026-10-20
+
+- 🟢 [Done] Repair two additional control-flow defects after the report that the old song and Pause button remain visible: keep an audible prepared source's EOF valid when a later replacement is rejected, and retain accepted EOF by schedule generation until interruption/unexpected-stop recovery releases ownership. A tail shorter than the progress threshold now confirms completion instead of being retried as failed recovery.
+- 🟢 [Done] Use schedule identity for local next/repeat deduplication, retain an EOF fallback independent of stale UI playing state, and preserve newer pause/stop/seek intent. CPU conversion and audio processing remain unchanged.
+- 🟢 [Done] Pass 3 prepared-schedule groups with a global-token negative control, 10 queue/intent cases, 13 recovery groups with 2 negative controls, existing 12 transport groups / 6 PCM cases and their controls, 9 production-engine Simulator groups and the ordinary iPhone build. The pre-fix recovery test reproduces a discarded EOF. See [verification and scope](TRACK_END_FOLLOWUP_VALIDATION.md).
+- ⭕️ [Pending] Confirm the user's intermittent physical-iPhone failure is resolved, using Music-managed non-DRM songs on the built-in speaker: ordinary playback and other-app takeover followed by explicit Play, foreground/background, quality replacement, next song, repeat-one/album wrap and near-EOF recovery. The previous 2026-10-19 repair was incomplete; deterministic regressions and Simulator results do not establish device resolution.
+
+## Track-end continuity after other-app audio — 2026-10-19
+
+- 🟢 [Done] Reproduce and repair a stranded protected-seek state after node loss and explicit Play: retain the requested seek position, retire the obsolete drain state before rescheduling, and allow the new schedule's natural EOF. Preserve newer pause/stop intent and stale-generation rejection.
+- 🟢 [Done] Pass 8 shipping queue/intent cases plus a stranded-state negative control, 12 transport groups, 6 PCM fade cases with negative controls, existing foreground recovery checks and the ordinary iPhone build. Confirm exactly one real EOF callback after recovery for file-backed and prepared PCM playback among 7 Simulator groups. See [results and limits](RECOVERED_TRACK_END_VALIDATION.md).
+- ⭕️ [Pending] Physical iPhone reproduction with the user's Music-managed non-DRM songs: other-app takeover while inactive, explicit Play in app/lock screen, next-song transition, single-track/album repeat, near-EOF recovery and repeated interruptions. The confirmed control-flow repair is not a claim that the original hardware scenario has been reproduced.
+
+## Mobile settings tabs — 2026-10-19
+
+- 🟢 [Done] Add Ongaku Desktop (App Store) and MATSUSHIBA (homepage) links with icons to Announcements on 2026-10-20. Keep brand names consistent across EN/JA/zh-Hans. Ordinary iPhone Simulator build passes.
+
+- 🟢 [Done] Split Settings into Info, Mac Sync, Library, Network, Audio and Announcements, in that order, with localized icon tabs. Group NAS/network folders and Google Drive under Network; preserve existing actions, playback guards, connection state and confirmation dialogs. Keep the tab strip inside 16 pt horizontal margins with 44 pt minimum targets, selected accessibility traits and reduced-motion support.
+- 🟢 [Done] Pass the iPhone Simulator build and EN/JA/zh-Hans strings validation. Inspect 30 rendered states across iPhone SE (3rd generation), iPhone 16 Pro Max, three languages and Japanese accessibility1 text sizing. See [validation scope](measurements/settings-tabs-2026-10-19/validation.txt), [SE tabs](measurements/settings-tabs-2026-10-19/se-ja.jpg), [Pro Max tabs](measurements/settings-tabs-2026-10-19/promax-ja.jpg), [English](measurements/settings-tabs-2026-10-19/se-en.jpg), [简体中文](measurements/settings-tabs-2026-10-19/se-zh.jpg) and [large text](measurements/settings-tabs-2026-10-19/se-ja-large.jpg). Both requested preview devices remain configured.
+- ⭕️ [Pending] Physical-device VoiceOver/touch navigation and live Mac sync, NAS and Google Drive operations across tab changes. The rendering harness does not establish those results.
+
 ## Effect tails and latency-change protection — 2026-10-19
 
 - 🟢 [Done] Mark the stateless tail scheduler `nonisolated` in both apps so default-argument evaluation is valid under iPhone default MainActor isolation; callbacks still execute on the main queue. Rebuild iPhone Simulator and Mac Debug successfully with no `scheduleOnMain` actor-isolation diagnostic (2026-10-19). Device listening checks below remain Pending.

@@ -164,6 +164,7 @@
 "empty.albums" = "No albums found";
 "empty.songs" = "No songs found";
 "album.track_list" = "Tracks";
+"settings.section.network" = "Network";
 "settings.section.info" = "Info";
 "settings.access_status" = "Access";
 "settings.current_track" = "Current Track";
@@ -183,7 +184,7 @@
 "settings.audio_cache.footer" = "Stores completed Precision Sinc audio so subsequent playback does not repeat the conversion. iOS may also remove cache files when storage is needed.";
 "settings.audio_cache.clear_confirmation.title" = "Clear high-quality cache?";
 "settings.audio_cache.clear_confirmation.message" = "Current playback will continue. Future high-quality playback may need to run Precision Sinc conversion again.";
-"settings.section.about" = "About";
+"settings.section.about" = "Announcements";
 "settings.title" = "Settings";
 "settings.section.sync" = "Mac Sync";
 "settings.sync.title" = "Sync with Ongaku Desktop";

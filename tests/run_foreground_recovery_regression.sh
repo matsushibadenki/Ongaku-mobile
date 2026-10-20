@@ -15,3 +15,12 @@ if "$fixture_dir/negative" > "$fixture_dir/negative.log" 2>&1; then
 fi
 rg -q 'foreground erased playback intent' "$fixture_dir/negative.log"
 echo 'PASS: negative control rejects refresh before intent capture'
+
+python3 tests/extract_foreground_recovery_fixture.py "$fixture_dir/fixture.swift" --discard-eof
+swiftc -module-cache-path "$fixture_dir/cache" audio/PlaybackTransportPolicy.swift \
+ "$fixture_dir/fixture.swift" tests/ForegroundRecoveryRegression.swift -o "$fixture_dir/discard-eof"
+if "$fixture_dir/discard-eof" > "$fixture_dir/discard-eof.log" 2>&1; then
+ echo 'FAIL: discarded recovery EOF was accepted'; exit 1
+fi
+rg -q 'EOF during recovery was discarded' "$fixture_dir/discard-eof.log"
+echo 'PASS: negative control rejects discarded EOF during recovery'

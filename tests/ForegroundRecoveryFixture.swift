@@ -22,12 +22,17 @@ final class PlaybackAudioSession {
 struct L10n { static func tr(_ key: String, _ argument: String) -> String { argument } }
 final class MockEngine {
     var hasTrack = true
+    let duration = 10.0
+    var currentAudioURL: URL? = URL(string: "file:///fixture.caf")
     var isPlaying = true
     var isEngineRunning = true
     var isRunning: Bool { isEngineRunning }
     var stalled = false
     var position = 2.0
     var progressFails = false
+    var endsDuringProgress = false
+    var hasReachedPlaybackEnd = false
+    var onEnded: (() -> Void)?
     var confirmationCount = 0
     func currentTime() -> Double { position }
     func seek(to value: Double) throws { position = value }
@@ -35,6 +40,11 @@ final class MockEngine {
     func pause() { isPlaying = false; isEngineRunning = false }
     func waitForPlaybackProgress() async throws {
         confirmationCount += 1
+        if endsDuringProgress {
+            hasReachedPlaybackEnd = true; isPlaying = false; position = 10
+            onEnded?()
+            return
+        }
         if progressFails { throw HiResEngineError.upconvertFailed }
         position += 0.03; stalled = false
     }
@@ -44,6 +54,7 @@ final class MockEngine {
 final class MockSystemPlayer { var playbackState = MPNowPlayingPlaybackState.paused; func play() { playbackState = .playing } }
 final class ForegroundHost {
     var playbackSource = PlaybackSource.local
+    var selectedSystemSongID: UInt64? = 1
     var isApplicationActive = false
     var hasInitializedHiResPlaybackEngine = true
     var isSystemPlayerConfigured = false
@@ -67,6 +78,12 @@ final class ForegroundHost {
     let systemPlayer = MockSystemPlayer()
     var audioRenderHealth = AudioRenderHealthSnapshot()
     var resumeRequests = 0
+    var localEndDeliveries = 0
+    func handleLocalPlaybackEnded() {
+        guard !isInterrupted, !isInForcedPausedWindow, interruptionResumeTask == nil,
+              unexpectedPlaybackRecoveryTask == nil else { return }
+        localEndDeliveries += 1
+    }
     var timerRunning = false
     func resumePlaybackAfterInterruption(source: PlaybackSource, generation: UInt64) { resumeRequests += 1 }
     func ensureSystemPlayerConfigured() {}
@@ -76,6 +93,7 @@ final class ForegroundHost {
     func flushDeferredLibrarySnapshotIfPlaybackIsIdle(allowWhilePlaying: Bool) {}
     func recoverEmptyLibraryAfterForeground() {}
     func refreshNowPlayingAlbum() {}
+    func persistLibraryState() {}
     func startTimer() { timerRunning = true }
     func stopTimer(animateMeter: Bool = true) { timerRunning = false }
     func updateNowPlayingInfo(force: Bool) {}
@@ -86,6 +104,7 @@ final class ForegroundHost {
 }
 enum HiResEngineError: Error { case upconvertFailed }
 final class ProgressHost {
+    var hasReachedPlaybackEnd = false
     var transportToken: UInt64 = 1
     var transportStopPending = false
     var pendingTransportPause: Double?

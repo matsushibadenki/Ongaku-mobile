@@ -480,6 +480,7 @@ final class HiResPlaybackEngine {
     }
     private var pendingHandoff: PendingHandoff?
     private var handoffScheduleToken: UInt64 = 0
+    private var preparedPlaybackScheduleTokens: [ObjectIdentifier: UInt64] = [:]
 
     private var activePlayerNode: AVAudioPlayerNode {
         isUpgradePlayerNodeActive ? upgradePlayerNode : playerNode
@@ -488,6 +489,12 @@ final class HiResPlaybackEngine {
     private var lastKnownPlaybackTime: TimeInterval = 0
     private var playbackStartedAt: Date?
     private var playbackGeneration: UInt64 = 0
+    private var playbackEndedGeneration: UInt64?
+    var playbackScheduleID: UInt64 { playbackGeneration }
+    var hasReachedPlaybackEnd: Bool {
+        !transportStopPending && pendingTransportPause == nil && !transportSeekPending
+            && playbackEndedGeneration == playbackGeneration
+    }
     private var preparationGeneration: UInt64 = 0
     
     // 96 kHz is the highest stable format for the AVAudioEngine effect graph.
@@ -539,7 +546,8 @@ final class HiResPlaybackEngine {
     private var transportToken: UInt64 = 0
     private var pendingTransportPause: TimeInterval?
     private var transportFadeInPending = false
-    private var transportSeekPending = false
+    private var pendingTransportSeekPosition: TimeInterval?
+    private var transportSeekPending: Bool { pendingTransportSeekPosition != nil }
     private var transportReachedEnd = false
     private var declickToken: UInt64 = 0
     private var effectsBypassed = false
@@ -894,6 +902,16 @@ final class HiResPlaybackEngine {
         // Existing callers may issue seek(); play(). Keep the pending seek's
         // destination/startup instead of rescheduling the old offset at EOF.
         if pendingTransportPause == nil, transportFadeInPending, activePlayerNode.isPlaying { return }
+        // A route/session loss can stop the node while a protected seek is
+        // draining. This play request supersedes that drain, so retain its
+        // destination and retire its pending state before scheduling again.
+        // Otherwise EOF remains suppressed as "seeking" for the whole track.
+        if let position = pendingTransportSeekPosition {
+            playbackOffset = position
+            lastKnownPlaybackTime = position
+            pendingTransportSeekPosition = nil
+            PlaybackDebugLogger.event("audio.transport.resume retired_seek=true")
+        }
         transportToken &+= 1
         let token = transportToken
         if let position = pendingTransportPause, !activePlayerNode.isPlaying || transportReachedEnd {
@@ -996,8 +1014,11 @@ final class HiResPlaybackEngine {
         while ContinuousClock.now < deadline {
             try Task.checkCancellation()
             guard transportToken == token, !transportStopPending,
-                  pendingTransportPause == nil, engine.isRunning,
-                  activePlayerNode.isPlaying else { throw CancellationError() }
+                  pendingTransportPause == nil else { throw CancellationError() }
+            // A short remaining tail can finish before the 20 ms progress
+            // threshold. Its accepted EOF is successful recovery, not a stall.
+            if hasReachedPlaybackEnd { return }
+            guard engine.isRunning, activePlayerNode.isPlaying else { throw CancellationError() }
             if !transportFadeInPending, !transportSeekPending {
                 let position = currentTime()
                 if let baseline, position - baseline >= 0.02 { return }
@@ -1015,7 +1036,7 @@ final class HiResPlaybackEngine {
         // descent. Settle the latest rack request only once output is silent.
         declickToken &+= 1
         let position = currentTime()
-        transportSeekPending = false
+        pendingTransportSeekPosition = nil
         transportToken &+= 1
         let token = transportToken
         pendingTransportPause = position
@@ -1083,7 +1104,7 @@ final class HiResPlaybackEngine {
         transportStopCompletion = afterDrain
         guard !transportStopPending else { return }
         transportStopPending = true
-        transportSeekPending = false
+        pendingTransportSeekPosition = nil
         transportReachedEnd = false
         transportToken &+= 1
         let token = transportToken
@@ -1618,14 +1639,14 @@ final class HiResPlaybackEngine {
         pendingTransportPause = nil
         transportFadeInPending = false
         if shouldResume {
-            transportSeekPending = true
+            pendingTransportSeekPosition = clamped
             transportFadeInPending = true
             rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
                 guard let self else { return }
                 let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
                 DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
                     guard let self, self.transportToken == token else { return }
-                    self.transportSeekPending = false
+                    self.pendingTransportSeekPosition = nil
                     self.playbackOffset = clamped
                     self.lastKnownPlaybackTime = clamped
                     self.scheduleBuffer(from: clamped, autoplay: true)
@@ -1634,7 +1655,7 @@ final class HiResPlaybackEngine {
                 }
             }
         } else {
-            transportSeekPending = false
+            pendingTransportSeekPosition = nil
             engine.mainMixerNode.outputVolume = 0
             playbackOffset = clamped
             lastKnownPlaybackTime = clamped
@@ -3369,6 +3390,7 @@ final class HiResPlaybackEngine {
         playbackGeneration &+= 1
         let generation = playbackGeneration
         let node = activePlayerNode
+        preparedPlaybackScheduleTokens.removeValue(forKey: ObjectIdentifier(node))
         node.stop()
         node.reset()
         node.volume = 1.0
@@ -3380,7 +3402,7 @@ final class HiResPlaybackEngine {
 
         guard remainingFrames > 0 else {
             playbackOffset = duration
-            onPlaybackEnded?()
+            handlePlaybackEnd(generation: generation)
             return
         }
 
@@ -3420,6 +3442,7 @@ final class HiResPlaybackEngine {
         playbackGeneration &+= 1
         let generation = playbackGeneration
         let node = activePlayerNode
+        preparedPlaybackScheduleTokens.removeValue(forKey: ObjectIdentifier(node))
         node.stop()
         node.reset()
         node.volume = 1.0
@@ -3429,7 +3452,7 @@ final class HiResPlaybackEngine {
         let startFrame = AVAudioFramePosition(clampedTime * audioFile.processingFormat.sampleRate)
         guard startFrame < audioFile.length else {
             playbackOffset = duration
-            onPlaybackEnded?()
+            handlePlaybackEnd(generation: generation)
             return
         }
 
@@ -4172,7 +4195,7 @@ final class HiResPlaybackEngine {
         guard mach_absolute_time() + minimumLead < startHost else {
             // A later ordinary schedule can reuse nextGeneration. Invalidate
             // this attempt separately so its stop callback cannot end that song.
-            handoffScheduleToken &+= 1
+            preparedPlaybackScheduleTokens.removeValue(forKey: ObjectIdentifier(newNode))
             newNode.stop()
             newNode.reset()
             PlaybackDebugLogger.event("audio.handoff.deferred reason=scheduling_deadline")
@@ -4273,8 +4296,14 @@ final class HiResPlaybackEngine {
             transportReachedEnd = true
             return
         }
+        guard playbackEndedGeneration != generation else { return }
+        playbackEndedGeneration = generation
         playbackStartedAt = nil
         playbackOffset = duration
+        lastKnownPlaybackTime = duration
+        transportFadeInPending = false
+        renderHealthMonitor.endMonitoring()
+        PlaybackDebugLogger.event("audio.local.eof generation=\(generation)")
         onPlaybackEnded?()
     }
 
@@ -4292,9 +4321,12 @@ final class HiResPlaybackEngine {
             frameCount: AVAudioFrameCount(remainingFrames)
         ) else { throw HiResEngineError.upconvertBufferFailed }
 
+        let nodeID = ObjectIdentifier(node)
+        let scheduleToken = handoffScheduleToken
+        // Retiring a candidate must not invalidate the other, audible node.
+        preparedPlaybackScheduleTokens[nodeID] = scheduleToken
         node.stop()
         node.reset()
-        let scheduleToken = handoffScheduleToken
         node.scheduleBuffer(
             buffer,
             at: nil,
@@ -4302,7 +4334,7 @@ final class HiResPlaybackEngine {
             completionCallbackType: .dataPlayedBack
         ) { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, self.handoffScheduleToken == scheduleToken else { return }
+                guard let self, self.preparedPlaybackScheduleTokens[nodeID] == scheduleToken else { return }
                 self.handlePlaybackEnd(generation: generation)
             }
         }

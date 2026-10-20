@@ -56,6 +56,48 @@ import AVFoundation
             log("PASS: a newer pause cancels pending recovery confirmation and remains paused")
             try engine.play()
             try await engine.waitForPlaybackProgress()
+            for preparedPCM in [false, true] {
+                if preparedPCM {
+                    try await engine.load(url: source, effectSettings: [],
+                        upsamplingMode: .avAudioConverter, skipDSPAnalysis: true)
+                    try engine.play()
+                    try await engine.waitForPlaybackProgress()
+                }
+                var completions = 0
+                engine.onPlaybackEnded = { completions += 1 }
+                try engine.seek(to: engine.duration - 0.4)
+                // Deterministically invalidate the source during the protected
+                // seek. This models node loss, not another app's real session.
+                let activeIsUpgrade = Mirror(reflecting: engine).children.first {
+                    $0.label == "isUpgradePlayerNodeActive"
+                }!.value as! Bool
+                let nodeName = activeIsUpgrade ? "upgradePlayerNode" : "playerNode"
+                let node = Mirror(reflecting: engine).children.first { $0.label == nodeName }!.value as! AVAudioPlayerNode
+                node.stop()
+                try engine.play()
+                try await engine.waitForPlaybackProgress()
+                precondition(engine.currentTime() > engine.duration - 0.5)
+                let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+                while completions == 0 && ContinuousClock.now < deadline {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                precondition(completions == 1, "reclaimed source lost or duplicated EOF")
+                try await Task.sleep(for: .milliseconds(100))
+                precondition(completions == 1)
+                log("PASS: explicit resume after lost seek node delivers one EOF, preparedPCM=\(preparedPCM)")
+                engine.pause()
+                try await Task.sleep(for: .milliseconds(100))
+                completions = 0
+                try engine.seek(to: engine.duration - 0.01)
+                try engine.play()
+                try await engine.waitForPlaybackProgress()
+                precondition(engine.hasReachedPlaybackEnd && completions == 1,
+                             "short tail failed recovery confirmation")
+                try await engine.waitForPlaybackProgress()
+                precondition(completions == 1)
+                log("PASS: 10 ms tail confirms recovery through one retained EOF, preparedPCM=\(preparedPCM)")
+                engine.onPlaybackEnded = nil
+            }
             let stopped = engine.stop()
             try await engine.waitForStop(generation: stopped)
             precondition(!engine.hasTrack && !graph.isRunning)

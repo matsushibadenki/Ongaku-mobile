@@ -1,7 +1,11 @@
 import Foundation
 
 @main struct ForegroundRecoveryRegression {
-    @MainActor static func main() async throws {
+    @MainActor static func main() async {
+        do { try await run() }
+        catch { fputs("FAIL: \(error)\n", stderr); exit(1) }
+    }
+    @MainActor static func run() async throws {
         func require(_ value: Bool, _ message: String) throws {
             if !value { throw NSError(domain: message, code: 1) }
         }
@@ -89,6 +93,29 @@ import Foundation
             "recovery did not confirm fresh progress before clearing intent")
         print("PASS: production recovery confirms progress, clears pending intent and restores playing UI")
 
+        let ended = ForegroundHost()
+        ended.wasPlayingBeforeSessionInterruption = true
+        ended.interruptedPlaybackSource = .local
+        ended.hiResPlaybackEngine.endsDuringProgress = true
+        ended.hiResPlaybackEngine.onEnded = { [weak ended] in ended?.handleLocalPlaybackEnded() }
+        ended.runInterruptionResume(source: .local, generation: 0)
+        await ended.interruptionResumeTask?.value
+        try require(ended.localEndDeliveries == 1 && ended.hiResPlaybackEngine.confirmationCount == 1
+            && !ended.wasPlayingBeforeSessionInterruption && ended.interruptionResumeTask == nil,
+            "EOF during recovery was discarded instead of delivered after clearing recovery")
+        print("PASS: natural EOF during recovery confirmation is delivered once after recovery releases ownership")
+
+        let unexpectedEnd = ForegroundHost()
+        unexpectedEnd.hiResPlaybackEngine.endsDuringProgress = true
+        unexpectedEnd.hiResPlaybackEngine.onEnded = { [weak unexpectedEnd] in unexpectedEnd?.handleLocalPlaybackEnded() }
+        unexpectedEnd.scheduleUnexpectedLocalPlaybackRecovery(reason: "test_node_loss")
+        await unexpectedEnd.unexpectedPlaybackRecoveryTask?.value
+        try require(unexpectedEnd.localEndDeliveries == 1
+            && unexpectedEnd.hiResPlaybackEngine.confirmationCount == 1
+            && unexpectedEnd.unexpectedPlaybackRecoveryTask == nil,
+            "unexpected-stop recovery lost or duplicated EOF")
+        print("PASS: unexpected-stop recovery releases ownership before delivering short-tail EOF")
+
         let failed = ForegroundHost()
         failed.wasPlayingBeforeSessionInterruption = true
         failed.interruptedPlaybackSource = .local
@@ -109,6 +136,15 @@ import Foundation
         let live = ProgressHost(); live.advancing = true
         try await live.waitForPlaybackProgress()
         print("PASS: recovery rejects old render position and confirms fresh advancing source frames")
+
+        let shortTail = ProgressHost()
+        shortTail.hasReachedPlaybackEnd = true
+        shortTail.activePlayerNode.isPlaying = false
+        try await shortTail.waitForPlaybackProgress()
+        shortTail.pendingTransportPause = 10
+        do { try await shortTail.waitForPlaybackProgress(); throw NSError(domain: "EOF overrode user pause", code: 1) }
+        catch is CancellationError {}
+        print("PASS: accepted short-tail EOF confirms recovery, but a newer pause still cancels it")
 
         let cancelled = ProgressHost()
         let cancelledTask = Task { try await cancelled.waitForPlaybackProgress() }

@@ -164,6 +164,7 @@
 "empty.albums" = "アルバムが見つかりません";
 "empty.songs" = "曲が見つかりません";
 "album.track_list" = "曲目";
+"settings.section.network" = "ネットワーク";
 "settings.section.info" = "情報";
 "settings.access_status" = "アクセス権限";
 "settings.current_track" = "現在の曲";

@@ -1678,10 +1678,40 @@ struct SectionHeader: View {
     }
 }
 
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case info, sync, library, network, audio, notices
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .info: "settings.section.info"
+        case .sync: "settings.section.sync"
+        case .library: "library.title"
+        case .network: "settings.section.network"
+        case .audio: "settings.section.audio"
+        case .notices: "settings.section.about"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .info: "info.circle"
+        case .sync: "desktopcomputer"
+        case .library: "music.note.list"
+        case .network: "network"
+        case .audio: "waveform"
+        case .notices: "bell"
+        }
+    }
+}
+
 struct SettingsView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var desktopSync: DesktopSyncController
     @ObservedObject var player: AudioPlayerViewModel
     @Binding var isShowing: Bool
+    @State private var selectedSettingsTab = SettingsTab.info
     @State private var isShowingCacheDeletionConfirmation = false
     @State private var isShowingDesktopSync = false
     @StateObject private var remoteSources = RemoteMusicSourcesViewModel()
@@ -1690,210 +1720,26 @@ struct SettingsView: View {
     
     var body: some View {
         NavigationStack {
-            List {
-                Section(L10n.tr("settings.section.info")) {
-                    LabeledContent(L10n.tr("settings.access_status"), value: player.mediaLibraryAccess.description)
-                    LabeledContent(L10n.tr("settings.current_track"), value: player.trackTitle)
-                }
-                .listRowBackground(Theme.secondaryBackground)
-
-                Section(L10n.tr("settings.section.sync")) {
-                    Button {
-                        isShowingDesktopSync = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "desktopcomputer.and.arrow.down")
-                                .foregroundStyle(player.accentColor)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(L10n.tr("settings.sync.title"))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text(L10n.tr("settings.sync.detail"))
-                                    .font(.appCaption())
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
+            VStack(spacing: 0) {
+                settingsTabs
+                List {
+                    switch selectedSettingsTab {
+                    case .info: infoSections
+                    case .sync: syncSections
+                    case .library: librarySections
+                    case .network: networkSections
+                    case .audio: audioSections
+                    case .notices: noticesSections
                     }
                 }
-                .listRowBackground(Theme.secondaryBackground)
-                
-                Section(L10n.tr("library.title")) {
-                    Button {
-                        player.reloadSystemLibrary()
-                    } label: {
-                        LibraryActionLabel(
-                            title: L10n.tr("settings.reload_library"),
-                            detail: L10n.tr("settings.library_feedback.system_detail"),
-                            workingTitle: L10n.tr("settings.system_library_loading"),
-                            feedback: player.systemLibraryFeedback,
-                            accentColor: player.accentColor
-                        )
-                    }
-                    .disabled(player.systemLibraryFeedback == .working)
-
-                    Button {
-                        player.scanLocalLibraryFromSettings()
-                    } label: {
-                        LibraryActionLabel(
-                            title: L10n.tr("settings.scan_local_library"),
-                            detail: L10n.tr("settings.library_feedback.local_detail"),
-                            workingTitle: L10n.tr("settings.local_library_scanning"),
-                            feedback: player.localLibraryFeedback,
-                            accentColor: player.accentColor
-                        )
-                    }
-                    .disabled(player.localLibraryFeedback == .working)
-
-                    Button {
-                        isChoosingRemoteDirectory = true
-                    } label: {
-                        Label(
-                            L10n.tr("settings.remote_sources.add"),
-                            systemImage: "externaldrive.connected.to.line.below"
-                        )
-                    }
-                    .disabled(player.isPlaying || player.isPlaybackStarting)
-
-                    ForEach(remoteSources.directories) { directory in
-                        HStack(spacing: 12) {
-                            Image(systemName: "network")
-                                .foregroundStyle(player.accentColor)
-                            Text(directory.displayName)
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                            Spacer()
-                            Button(role: .destructive) {
-                                if remoteSources.removeDirectory(id: directory.id) {
-                                    player.scanLocalLibrary()
-                                }
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel(L10n.tr("settings.remote_sources.remove"))
-                        }
-                    }
-
-                    Text(L10n.tr("settings.remote_sources.footer"))
-                        .font(.appCaption())
-                        .foregroundStyle(Theme.textSecondary)
-
-                    if let loadingMessage = player.libraryLoadingMessage {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(player.accentColor)
-                            Text(loadingMessage)
-                                .font(.appCaption())
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .listRowBackground(Theme.secondaryBackground)
-
-                Section(L10n.tr("settings.google_drive.section")) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "externaldrive.badge.icloud")
-                            .foregroundStyle(player.accentColor)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(googleDrive.isConnected
-                                 ? L10n.tr("settings.google_drive.connected")
-                                 : L10n.tr("settings.google_drive.disconnected"))
-                                .foregroundStyle(Theme.textPrimary)
-                            if googleDrive.isConnected {
-                                Text(L10n.tr("settings.google_drive.track_count", googleDrive.trackCount))
-                                    .font(.appCaption())
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                        }
-                        Spacer()
-                        if googleDrive.isWorking { ProgressView().controlSize(.small) }
-                    }
-
-                    if googleDrive.isConnected {
-                        Button(L10n.tr("settings.google_drive.refresh")) {
-                            Task {
-                                if await googleDrive.refreshLibrary() { player.scanLocalLibrary() }
-                            }
-                        }
-                        Button(L10n.tr("settings.google_drive.disconnect"), role: .destructive) {
-                            Task {
-                                if await googleDrive.disconnect() { player.scanLocalLibrary() }
-                            }
-                        }
-                    } else {
-                        Button(L10n.tr("settings.google_drive.connect")) {
-                            Task {
-                                if await googleDrive.connectAndSync() { player.scanLocalLibrary() }
-                            }
-                        }
-                    }
-
-                    Text(L10n.tr("settings.google_drive.footer"))
-                        .font(.appCaption())
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .disabled(googleDrive.isWorking || player.isPlaying || player.isPlaybackStarting)
-                .listRowBackground(Theme.secondaryBackground)
-
-                Section(L10n.tr("settings.section.audio")) {
-                    AudioOutputSettingsRows(
-                        output: Binding(get: { player.audioOutputOverride }, set: { player.setAudioOutputOverride($0) }),
-                        compensationEnabled: Binding(get: { player.loudnessCompensationEnabled }, set: { player.setLoudnessCompensationEnabled($0) })
-                    )
-                    LabeledContent(
-                        L10n.tr("settings.upsampling_mode"),
-                        value: L10n.upsamplingModeTitle(player.upsamplingMode)
-                    )
-                    .foregroundStyle(Theme.textPrimary)
-                    Text(L10n.tr("settings.upsampling_footer"))
-                        .font(.appCaption())
-                        .foregroundStyle(Theme.textSecondary)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.tr("settings.audio_cache.title"))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text(player.preparedAudioCacheSummary)
-                            .font(.appCaption())
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Button(role: .destructive) {
-                        isShowingCacheDeletionConfirmation = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text(L10n.tr("settings.audio_cache.clear"))
-                            Spacer()
-                            if player.isClearingPreparedAudioCache {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                    .disabled(
-                        player.isClearingPreparedAudioCache
-                            || player.preparedAudioCacheStatistics.byteCount == 0
-                    )
-
-                    Text(L10n.tr("settings.audio_cache.footer"))
-                        .font(.appCaption())
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .listRowBackground(Theme.secondaryBackground)
-                
-                Section(L10n.tr("settings.section.about")) {
-                    Link("Cue", destination: URL(string: "https://cue.college/")!)
-                }
-                .listRowBackground(Theme.secondaryBackground)
+                .id(selectedSettingsTab)
             }
             .preferredColorScheme(Theme.appearance.colorScheme)
             .scrollContentBackground(.hidden)
             .background(AppBackground().ignoresSafeArea())
             .listStyle(.insetGrouped)
             .navigationTitle(L10n.tr("settings.title"))
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("common.close")) { isShowing = false } } }
             .onAppear {
                 player.refreshAudioOutputPreferences()
@@ -1949,6 +1795,264 @@ struct SettingsView: View {
                 Text(L10n.tr("settings.audio_cache.clear_confirmation.message"))
             }
         }
+    }
+
+    private var settingsTabs: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(SettingsTab.allCases) { tab in
+                        Button {
+                            selectedSettingsTab = tab
+                        } label: {
+                            Label(L10n.tr(tab.titleKey), systemImage: tab.icon)
+                                .font(.subheadline.weight(.semibold))
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
+                                .foregroundStyle(selectedSettingsTab == tab ? Theme.onAccent : Theme.textPrimary)
+                                .background(selectedSettingsTab == tab ? player.accentColor : Theme.secondaryBackground, in: Capsule())
+                                .overlay(Capsule().strokeBorder(Theme.border, lineWidth: selectedSettingsTab == tab ? 0 : 1))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.tab.\(tab.rawValue)")
+                        .accessibilityAddTraits(selectedSettingsTab == tab ? .isSelected : [])
+                        .id(tab)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.hidden)
+            .fixedSize(horizontal: false, vertical: true)
+            .onChange(of: selectedSettingsTab) { _, tab in
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(tab, anchor: .center)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    private var infoSections: some View {
+        Section(L10n.tr("settings.section.info")) {
+            LabeledContent(L10n.tr("settings.access_status"), value: player.mediaLibraryAccess.description)
+            LabeledContent(L10n.tr("settings.current_track"), value: player.trackTitle)
+        }
+        .listRowBackground(Theme.secondaryBackground)
+    }
+
+    private var syncSections: some View {
+        Section(L10n.tr("settings.section.sync")) {
+            Button {
+                isShowingDesktopSync = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "desktopcomputer.and.arrow.down")
+                        .foregroundStyle(player.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L10n.tr("settings.sync.title"))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(L10n.tr("settings.sync.detail"))
+                            .font(.appCaption())
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .listRowBackground(Theme.secondaryBackground)
+    }
+
+    private var librarySections: some View {
+        Section(L10n.tr("library.title")) {
+            Button {
+                player.reloadSystemLibrary()
+            } label: {
+                LibraryActionLabel(
+                    title: L10n.tr("settings.reload_library"),
+                    detail: L10n.tr("settings.library_feedback.system_detail"),
+                    workingTitle: L10n.tr("settings.system_library_loading"),
+                    feedback: player.systemLibraryFeedback,
+                    accentColor: player.accentColor
+                )
+            }
+            .disabled(player.systemLibraryFeedback == .working)
+
+            Button {
+                player.scanLocalLibraryFromSettings()
+            } label: {
+                LibraryActionLabel(
+                    title: L10n.tr("settings.scan_local_library"),
+                    detail: L10n.tr("settings.library_feedback.local_detail"),
+                    workingTitle: L10n.tr("settings.local_library_scanning"),
+                    feedback: player.localLibraryFeedback,
+                    accentColor: player.accentColor
+                )
+            }
+            .disabled(player.localLibraryFeedback == .working)
+
+            if let loadingMessage = player.libraryLoadingMessage {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(player.accentColor)
+                    Text(loadingMessage)
+                        .font(.appCaption())
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .listRowBackground(Theme.secondaryBackground)
+    }
+
+    private var networkSections: some View {
+        Group {
+            Section(L10n.tr("settings.section.network")) {
+                Button {
+                    isChoosingRemoteDirectory = true
+                } label: {
+                    Label(
+                        L10n.tr("settings.remote_sources.add"),
+                        systemImage: "externaldrive.connected.to.line.below"
+                    )
+                }
+                .disabled(player.isPlaying || player.isPlaybackStarting)
+
+                ForEach(remoteSources.directories) { directory in
+                    HStack(spacing: 12) {
+                        Image(systemName: "network")
+                            .foregroundStyle(player.accentColor)
+                        Text(directory.displayName)
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        Spacer()
+                        Button(role: .destructive) {
+                            if remoteSources.removeDirectory(id: directory.id) {
+                                player.scanLocalLibrary()
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(L10n.tr("settings.remote_sources.remove"))
+                    }
+                }
+
+                Text(L10n.tr("settings.remote_sources.footer"))
+                    .font(.appCaption())
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .listRowBackground(Theme.secondaryBackground)
+
+            Section(L10n.tr("settings.google_drive.section")) {
+                HStack(spacing: 12) {
+                    Image(systemName: "externaldrive.badge.icloud")
+                        .foregroundStyle(player.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(googleDrive.isConnected
+                             ? L10n.tr("settings.google_drive.connected")
+                             : L10n.tr("settings.google_drive.disconnected"))
+                            .foregroundStyle(Theme.textPrimary)
+                        if googleDrive.isConnected {
+                            Text(L10n.tr("settings.google_drive.track_count", googleDrive.trackCount))
+                                .font(.appCaption())
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                    Spacer()
+                    if googleDrive.isWorking { ProgressView().controlSize(.small) }
+                }
+
+                if googleDrive.isConnected {
+                    Button(L10n.tr("settings.google_drive.refresh")) {
+                        Task {
+                            if await googleDrive.refreshLibrary() { player.scanLocalLibrary() }
+                        }
+                    }
+                    Button(L10n.tr("settings.google_drive.disconnect"), role: .destructive) {
+                        Task {
+                            if await googleDrive.disconnect() { player.scanLocalLibrary() }
+                        }
+                    }
+                } else {
+                    Button(L10n.tr("settings.google_drive.connect")) {
+                        Task {
+                            if await googleDrive.connectAndSync() { player.scanLocalLibrary() }
+                        }
+                    }
+                }
+
+                Text(L10n.tr("settings.google_drive.footer"))
+                    .font(.appCaption())
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(googleDrive.isWorking || player.isPlaying || player.isPlaybackStarting)
+            .listRowBackground(Theme.secondaryBackground)
+        }
+    }
+
+    private var audioSections: some View {
+        Section(L10n.tr("settings.section.audio")) {
+            AudioOutputSettingsRows(
+                output: Binding(get: { player.audioOutputOverride }, set: { player.setAudioOutputOverride($0) }),
+                compensationEnabled: Binding(get: { player.loudnessCompensationEnabled }, set: { player.setLoudnessCompensationEnabled($0) })
+            )
+            LabeledContent(
+                L10n.tr("settings.upsampling_mode"),
+                value: L10n.upsamplingModeTitle(player.upsamplingMode)
+            )
+            .foregroundStyle(Theme.textPrimary)
+            Text(L10n.tr("settings.upsampling_footer"))
+                .font(.appCaption())
+                .foregroundStyle(Theme.textSecondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.tr("settings.audio_cache.title"))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(player.preparedAudioCacheSummary)
+                    .font(.appCaption())
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(role: .destructive) {
+                isShowingCacheDeletionConfirmation = true
+            } label: {
+                HStack(spacing: 10) {
+                    Text(L10n.tr("settings.audio_cache.clear"))
+                    Spacer()
+                    if player.isClearingPreparedAudioCache {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .disabled(
+                player.isClearingPreparedAudioCache
+                    || player.preparedAudioCacheStatistics.byteCount == 0
+            )
+
+            Text(L10n.tr("settings.audio_cache.footer"))
+                .font(.appCaption())
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .listRowBackground(Theme.secondaryBackground)
+    }
+
+    private var noticesSections: some View {
+        Section(L10n.tr("settings.section.about")) {
+            Link(destination: URL(string: "https://apps.apple.com/jp/app/ongaku-desktop/id6807717764?mt=12")!) {
+                Label("Ongaku Desktop", systemImage: "desktopcomputer")
+            }
+            Link(destination: URL(string: "https://xs927991.xsrv.jp/")!) {
+                Label("MATSUSHIBA", systemImage: "globe")
+            }
+            Link("Cue", destination: URL(string: "https://cue.college/")!)
+        }
+        .listRowBackground(Theme.secondaryBackground)
     }
 }
 

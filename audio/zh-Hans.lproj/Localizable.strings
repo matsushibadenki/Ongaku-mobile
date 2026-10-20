@@ -164,6 +164,7 @@
 "empty.albums" = "未找到专辑";
 "empty.songs" = "未找到歌曲";
 "album.track_list" = "曲目";
+"settings.section.network" = "网络";
 "settings.section.info" = "信息";
 "settings.access_status" = "访问权限";
 "settings.current_track" = "当前歌曲";
@@ -183,7 +184,7 @@
 "settings.audio_cache.footer" = "保存已完成的 Precision Sinc 音频，避免下次播放时重复转换。当设备需要存储空间时，iOS也可能删除缓存文件。";
 "settings.audio_cache.clear_confirmation.title" = "要清除高音质缓存吗？";
 "settings.audio_cache.clear_confirmation.message" = "当前播放不会停止。之后进行高音质播放时，可能需要重新执行 Precision Sinc 转换。";
-"settings.section.about" = "关于";
+"settings.section.about" = "公告";
 "settings.title" = "设置";
 "settings.section.sync" = "与 Mac 同步";
 "settings.sync.title" = "与 Ongaku Desktop 同步";

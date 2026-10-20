@@ -187,6 +187,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var lastAutoPeakAdjustTime: TimeInterval = 0
     private var lastManualParameterReductionTime: TimeInterval = 0
     private var lastTrackEndHandledAt: TimeInterval = 0
+    private var lastLocalTrackEndGeneration: UInt64?
     private var lastObservedSystemPlaybackSongID: UInt64?
     private var lastObservedSystemPlaybackProgress = 0.0
     private var lastOverlayCompletionKey: String?
@@ -3190,6 +3191,13 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
             let isEnginePlaying = hiResPlaybackEngine.isPlaying
             let reachedEnd = hasTrack && duration > 0 && current >= max(0, duration - 0.03)
 
+            // Accepted EOF survives a temporary UI state refresh or a recovery
+            // owner deferring the callback. Explicit pause/stop invalidates it.
+            if hiResPlaybackEngine.hasReachedPlaybackEnd {
+                handleLocalPlaybackEnded()
+                return
+            }
+
             if isPlaying && (!isEnginePlaying || renderHealth.isStalled) {
                 if isInForcedPausedWindow {
                     return
@@ -3590,8 +3598,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         try self.hiResPlaybackEngine.play()
                         try await self.hiResPlaybackEngine.waitForPlaybackProgress()
                         self.audioRenderHealth = self.hiResPlaybackEngine.pollRenderHealth()
-                        didResume = self.hiResPlaybackEngine.isPlaying
-                            && !self.audioRenderHealth.isStalled
+                        didResume = self.hiResPlaybackEngine.hasReachedPlaybackEnd
+                            || (self.hiResPlaybackEngine.isPlaying && !self.audioRenderHealth.isStalled)
                     case .system:
                         self.ensureSystemPlayerConfigured()
                         self.systemPlayer.play()
@@ -3630,6 +3638,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         self.errorMessage = nil
                         self.startTimer()
                         if source == .local {
+                            if self.hiResPlaybackEngine.hasReachedPlaybackEnd {
+                                self.handleLocalPlaybackEnded()
+                                return
+                            }
                             self.refreshPlaybackState()
                             self.resumeAutomaticQualityUpgradeIfNeeded()
                         } else {
@@ -3757,13 +3769,18 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         interrupted: self.isInterrupted, cancelled: Task.isCancelled
                     ) else { return }
                     self.audioRenderHealth = self.hiResPlaybackEngine.pollRenderHealth()
-                    if self.hiResPlaybackEngine.isPlaying && !self.audioRenderHealth.isStalled {
+                    if self.hiResPlaybackEngine.hasReachedPlaybackEnd
+                        || (self.hiResPlaybackEngine.isPlaying && !self.audioRenderHealth.isStalled) {
                         self.clearForcedPausedWindow()
                         self.isPlaying = true
                         self.isProcessing = false
                         self.isPlaybackStarting = false
                         self.unexpectedPlaybackRecoveryTask = nil
                         self.startTimer()
+                        if self.hiResPlaybackEngine.hasReachedPlaybackEnd {
+                            self.handleLocalPlaybackEnded()
+                            return
+                        }
                         self.refreshPlaybackState()
                         self.updateNowPlayingInfo(force: true)
                         PlaybackDebugLogger.event(
@@ -3827,8 +3844,13 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     private func handleLocalPlaybackEnded() {
         guard playbackSource == .local else { return }
-        guard !isInterrupted, !isInForcedPausedWindow, interruptionResumeTask == nil else { return }
-        guard !shouldIgnoreDuplicateTrackEndEvent() else { return }
+        guard !isInterrupted, !isInForcedPausedWindow,
+              interruptionResumeTask == nil, unexpectedPlaybackRecoveryTask == nil else { return }
+        // Wall-clock debounce can swallow a second short track/repeat. Each
+        // schedule owns exactly one queue transition, even after deferred EOF.
+        let generation = hiResPlaybackEngine.playbackScheduleID
+        guard lastLocalTrackEndGeneration != generation else { return }
+        lastLocalTrackEndGeneration = generation
 
         PlaybackDebugLogger.event(
             "audio.local.ended current=\(String(format: "%.3f", hiResPlaybackEngine.currentTime())) duration=\(String(format: "%.3f", hiResPlaybackEngine.duration)) queueIndex=\(systemQueueIndex.map(String.init) ?? "none")"

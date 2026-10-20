@@ -1,0 +1,15 @@
+Settings tabs — 2026-10-19
+Production build: xcodebuild -project Ongaku.xcodeproj -scheme audio -configuration Debug -destination 'generic/platform=iOS Simulator' ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
+Result: BUILD SUCCEEDED on Xcode 27.1. Only unrelated AppIntents metadata warning.
+Localization: plutil -lint passes for en, ja, zh-Hans Localizable.strings.
+
+Simulator rendering (iOS 26.2):
+- iPhone SE (3rd generation), Japanese: all 6 tabs
+- iPhone 16 Pro Max, Japanese: all 6 tabs
+- iPhone SE (3rd generation), English and Simplified Chinese: all 6 tabs per language
+- iPhone SE (3rd generation), Japanese accessibility1 Dynamic Type: all 6 tabs
+30 screenshots inspected through the attached contact sheets. Selected tab labels remain visible; the horizontal strip scrolls to selection, and longer content uses a vertical List. Adjacent off-screen tabs intentionally clip at the horizontal viewport edge. Large audio settings continue below the visible viewport.
+
+Method: isolated temporary copy with a separate bundle identifier, production SettingsView and localization, and a binding substituted for the private selected-tab State to drive each selection. No production launch hooks or test-only behavior were added. Contact sheets are resized screenshot composites, not design mockups.
+Scope: rendering/selection-driven navigation, build, and localization syntax. Live Mac transfer, NAS and Google Drive operations, touch gestures and VoiceOver were not exercised by this rendering harness. Existing action handlers, playback guards, file picker, confirmation dialog and connection StateObjects are retained in SettingsView.
+Physical-device accessibility and live connections after tab changes: Pending.
