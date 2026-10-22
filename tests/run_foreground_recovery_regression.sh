@@ -24,3 +24,12 @@ if "$fixture_dir/discard-eof" > "$fixture_dir/discard-eof.log" 2>&1; then
 fi
 rg -q 'EOF during recovery was discarded' "$fixture_dir/discard-eof.log"
 echo 'PASS: negative control rejects discarded EOF during recovery'
+
+python3 tests/extract_foreground_recovery_fixture.py "$fixture_dir/fixture.swift" --seek-over-eof
+swiftc -module-cache-path "$fixture_dir/cache" audio/PlaybackTransportPolicy.swift \
+ "$fixture_dir/fixture.swift" tests/ForegroundRecoveryRegression.swift -o "$fixture_dir/seek-over-eof"
+if "$fixture_dir/seek-over-eof" > "$fixture_dir/seek-over-eof.log" 2>&1; then
+ echo 'FAIL: seek over accepted EOF was accepted'; exit 1
+fi
+rg -q 'confirmed EOF was invalidated by a recovery seek' "$fixture_dir/seek-over-eof.log"
+echo 'PASS: negative control rejects recovery seeking over an accepted EOF'

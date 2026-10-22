@@ -16,6 +16,14 @@ struct NativeFirstPlaybackAuditApp: App {
             Mirror(reflecting: engine).children.first { $0.label == name }!.value as! T
         }
         let graph = field("engine", as: AVAudioEngine.self)
+        func outputGain() -> Float {
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            field("transportAudioGain", as: AudioThreadGainStage.self).gain
+#else
+            graph.mainMixerNode.outputVolume
+#endif
+        }
+
         let gainEQ = field("inputGainEQ", as: AVAudioUnitEQ.self)
         let automaticEQ = field("automaticDSPEQ", as: AVAudioUnitEQ.self)
         do {
@@ -97,24 +105,24 @@ struct NativeFirstPlaybackAuditApp: App {
             precondition(engine.currentTime() == frozenPause)
             try engine.play()
             try await Task.sleep(for: .milliseconds(150))
-            precondition(engine.isPlaying && graph.mainMixerNode.outputVolume == 1)
+            precondition(engine.isPlaying && outputGain() == 1)
             precondition(engine.currentTime() > beforePause)
             log("PASS: rapid pause/resume preserves the live schedule and rejects the stale physical pause")
             engine.pause()
             try await Task.sleep(for: .milliseconds(150))
-            precondition(!engine.isPlaying && !graph.isRunning && graph.mainMixerNode.outputVolume == 0)
+            precondition(!engine.isPlaying && !graph.isRunning && outputGain() == 0)
             try engine.seek(to: 1)
             precondition(!engine.isPlaying && abs(engine.currentTime() - 1) < 0.01)
             try engine.play()
-            precondition(graph.mainMixerNode.outputVolume == 0)
+            precondition(outputGain() == 0)
             try await engine.waitForSystemHandoffRender()
-            precondition(graph.mainMixerNode.outputVolume == 1)
+            precondition(outputGain() == 1)
             log("PASS: pause drains at zero; paused seek and default resume restore output only after render startup")
             try engine.seek(to: 4)
             try await Task.sleep(for: .milliseconds(5))
             engine.pause()
             try await Task.sleep(for: .milliseconds(150))
-            precondition(!engine.isPlaying && !graph.isRunning && graph.mainMixerNode.outputVolume == 0)
+            precondition(!engine.isPlaying && !graph.isRunning && outputGain() == 0)
             try engine.play()
             try await engine.waitForSystemHandoffRender()
             log("PASS: pause cancels an in-flight seek without restarting or leaving output muted on resume")
@@ -192,11 +200,11 @@ struct NativeFirstPlaybackAuditApp: App {
                 try await Task.sleep(for: .milliseconds(200))
                 precondition(engine.isPlaying == rapidResume)
                 if !rapidResume {
-                    precondition(!graph.isRunning && graph.mainMixerNode.outputVolume == 0)
+                    precondition(!graph.isRunning && outputGain() == 0)
                     try engine.play()
                     try await engine.waitForSystemHandoffRender()
                 }
-                precondition(graph.mainMixerNode.outputVolume == 1 && abs(gainEQ.globalGain - inputBeforeUpgrade) < 0.0001)
+                precondition(outputGain() == 1 && abs(gainEQ.globalGain - inputBeforeUpgrade) < 0.0001)
             }
             log("PASS: pause before incoming start and rapid resume during a live quality overlap preserve transport and gain")
             for _ in 0..<100 {

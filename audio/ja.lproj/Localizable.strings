@@ -448,3 +448,25 @@
 "appearance.purple" = "パープル";
 "appearance.green" = "グリーン";
 "appearance.beige" = "ベージュ";
+
+"playback.format.system" = "システム再生";
+
+// Original source metadata; unknown values are never inferred from DSP.
+"sourceinfo.title" = "音源ファイル";
+"sourceinfo.container" = "ファイル拡張子";
+"sourceinfo.codec" = "コーデック";
+"sourceinfo.rate" = "サンプルレート";
+"sourceinfo.depth" = "元音源のビット深度";
+"sourceinfo.channels" = "チャンネル数";
+"sourceinfo.bitrate" = "推定ビットレート";
+"sourceinfo.size" = "ファイル容量";
+"sourceinfo.error" = "読込エラー";
+"sourceinfo.unknown" = "不明";
+"sourceinfo.url" = "音源URLあり";
+"sourceinfo.protected" = "保護付き音源";
+"sourceinfo.read" = "情報の取得";
+"sourceinfo.yes" = "はい";
+"sourceinfo.no" = "いいえ";
+"sourceinfo.success" = "取得済み";
+"sourceinfo.unavailable" = "取得不可";
+"sourceinfo.processing" = "処理中の形式";

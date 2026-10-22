@@ -1,7 +1,7 @@
 """Extract the shipping preflight and allocation checks; virtualize only memory availability."""
 from pathlib import Path
 import sys
-source = Path('audio/HiResPlaybackEngine.swift').read_text()
+source = Path('audio/HiResPlaybackEngine.swift').read_text().replace('effectProtectionGain', 'declickMixer.outputVolume').replace('transportOutputGain', 'engine.mainMixerNode.outputVolume')
 vm = Path('audio/AudioPlayerViewModel.swift').read_text()
 def block(anchor):
     assert source.count(anchor) == 1, anchor

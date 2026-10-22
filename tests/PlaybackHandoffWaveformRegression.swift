@@ -7,6 +7,9 @@ import Foundation
 #if !EXTENDED_HANDOFF_MEASUREMENT
 @main
 #endif
+#if AUDIO_GAIN_TAIL_AUDIT
+@MainActor
+#endif
 struct PlaybackHandoffWaveformRegression {
     static let graphRate = 96_000.0
     static func require(_ condition: Bool, _ message: String) throws {
@@ -21,14 +24,23 @@ struct PlaybackHandoffWaveformRegression {
         for node in [old, new, mixer] as [AVAudioNode] { engine.attach(node) }
         engine.connect(old, to: mixer, format: graph)
         engine.connect(new, to: mixer, format: graph)
+#if AUDIO_GAIN_TAIL_AUDIT
+        let effectGain = AudioThreadGainStage(gain: 1), transportGain = AudioThreadGainStage(gain: 1)
+        engine.attach(effectGain.node); engine.attach(transportGain.node)
+        engine.connect(effectGain.node, to: transportGain.node, format: graph)
+        engine.connect(transportGain.node, to: engine.mainMixerNode, format: graph)
+        let outputInput: AVAudioNode = effectGain.node
+#else
+        let outputInput: AVAudioNode = engine.mainMixerNode
+#endif
         if let effect {
             effect.attach(to: engine)
             effect.connectInternalNodes(engine: engine, format: graph)
             engine.connect(mixer, to: effect.inputNode, format: graph)
-            engine.connect(effect.outputNode, to: engine.mainMixerNode, format: graph)
+            engine.connect(effect.outputNode, to: outputInput, format: graph)
             effect.apply(setting: RealtimeAudioEffectSetting(kind: effect.kind, isEnabled: true))
         } else {
-            engine.connect(mixer, to: engine.mainMixerNode, format: graph)
+            engine.connect(mixer, to: outputInput, format: graph)
         }
         try engine.enableManualRenderingMode(.offline, format: output, maximumFrameCount: 1024)
         let sourceFrame = Int64(seek * file.processingFormat.sampleRate)
@@ -44,7 +56,11 @@ struct PlaybackHandoffWaveformRegression {
         new.scheduleBuffer(slice, at: AVAudioTime(sampleTime: Int64((plan.delayFromRenderTime * graphRate).rounded()), atRate: graphRate))
         old.volume = 1
         new.volume = path == 1 ? 1 : 0
-        try engine.start(); old.play()
+        try engine.start()
+#if AUDIO_GAIN_TAIL_AUDIT
+        effectGain.synchronizeAfterStart(); transportGain.synchronizeAfterStart()
+#endif
+        old.play()
         new.play()
         defer { old.stop(); new.stop(); engine.stop() }
         let buffer = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: 1024)!

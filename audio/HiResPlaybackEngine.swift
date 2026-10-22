@@ -437,6 +437,43 @@ final class HiResPlaybackEngine {
     // real-time iPhone validation is complete. Offline AU tests are insufficient.
     private let sourceMixer = AVAudioMixerNode()
     private let declickMixer = AVAudioMixerNode()
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+    private let effectAudioGain = AudioThreadGainStage(gain: 1)
+    private let transportAudioGain = AudioThreadGainStage(gain: 0)
+#endif
+    private var effectProtectionGain: Float {
+        get {
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            effectAudioGain.gain
+#else
+            declickMixer.outputVolume
+#endif
+        }
+        set {
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            effectAudioGain.setImmediate(newValue)
+#else
+            declickMixer.outputVolume = newValue
+#endif
+        }
+    }
+    private var transportOutputGain: Float {
+        get {
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            transportAudioGain.gain
+#else
+            engine.mainMixerNode.outputVolume
+#endif
+        }
+        set {
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            transportAudioGain.setImmediate(newValue)
+#else
+            engine.mainMixerNode.outputVolume = newValue
+#endif
+        }
+    }
+
     private let headphoneSpatialProcessingQueue = DispatchQueue(label: "audio.hires.headphoneSpatial", qos: .userInitiated)
     private let inputGainEQ = AVAudioUnitEQ(numberOfBands: 1)
     private let loudnessCompensationEQ = AVAudioUnitEQ(numberOfBands: 4)
@@ -470,6 +507,8 @@ final class HiResPlaybackEngine {
     private var convertedFormat: AVAudioFormat?
     private var isFastFilePlayback = false
     private var configuredProcessingFormat: AVAudioFormat?
+    private var configuredGraph: AudioGraphConfiguration?
+    private var graphConfigurationGeneration: UInt64 = 0
     private var isUpgradePlayerNodeActive = false
 
     private struct PendingHandoff {
@@ -928,7 +967,7 @@ final class HiResPlaybackEngine {
             }
             return
         }
-        engine.mainMixerNode.outputVolume = 0
+        transportOutputGain = 0
         transportFadeInPending = true
         scheduleBuffer(from: playbackOffset, autoplay: true)
         beginTransportFadeIn(duration: max(0.024, fadeInDuration), token: token, attempts: 250)
@@ -967,18 +1006,37 @@ final class HiResPlaybackEngine {
         }
     }
 
+    private var transportDrainDuration: TimeInterval {
+        let base = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+        // Candidate attenuation is before SRC/true-peak, unlike the legacy
+        // main-mixer envelope. Drain their delayed zero before releasing nodes.
+        return base + max(0, declickMixer.auAudioUnit.latency)
+            + max(0, finalPeakProtector?.auAudioUnit.latency ?? 0)
+#else
+        return base
+#endif
+    }
+
     private func rampTransportVolume(to target: Float, duration: TimeInterval, token: UInt64,
                                      completion: @escaping () -> Void) {
-        let start = engine.mainMixerNode.outputVolume
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+        transportAudioGain.ramp(to: target, duration: duration,
+            isRunning: { [weak self] in self?.engine.isRunning == true },
+            isCurrent: { [weak self] in self?.transportToken == token },
+            stalled: { [weak self] in self?.engine.pause() }, completion: completion)
+#else
+        let start = transportOutputGain
         let steps = EffectTransitionPolicy.transportSteps
         for step in 1...steps {
             let gain = EffectTransitionPolicy.transportGain(from: start, to: target, step: step)
             DispatchQueue.main.asyncAfter(deadline: .now() + duration * Double(step) / Double(steps)) { [weak self] in
                 guard let self, self.transportToken == token else { return }
-                self.engine.mainMixerNode.outputVolume = gain
+                self.transportOutputGain = gain
                 if step == steps { completion() }
             }
         }
+#endif
     }
 
     /// A play request alone is not evidence of render output. Keep the old
@@ -1049,7 +1107,7 @@ final class HiResPlaybackEngine {
         // descends. Cutting either schedule first can expose a nonzero sample.
         rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
             guard let self else { return }
-            let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+            let drain = self.transportDrainDuration
             DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
                 self?.finishTransportPause(position: position, token: token)
             }
@@ -1058,7 +1116,7 @@ final class HiResPlaybackEngine {
 
     private func finishTransportPause(position: TimeInterval, token: UInt64) {
         guard transportToken == token else { return }
-        engine.mainMixerNode.outputVolume = 0
+        transportOutputGain = 0
         playbackOffset = position
         lastKnownPlaybackTime = position
         playbackStartedAt = nil
@@ -1069,7 +1127,7 @@ final class HiResPlaybackEngine {
         engine.pause()
         declickToken &+= 1 // Also cancel work queued by handoff retirement.
         effectDeclickRestoreVolume = nil
-        declickMixer.outputVolume = 1
+        effectProtectionGain = 1
         applyPendingEffectSettings()
         effectPipeline.forEach { $0.resetTailState() }
         pendingTransportPause = nil
@@ -1116,7 +1174,7 @@ final class HiResPlaybackEngine {
         }
         rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
             guard let self else { return }
-            let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+            let drain = self.transportDrainDuration
             DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
                 self?.finishTransportStop(token: token)
             }
@@ -1125,7 +1183,7 @@ final class HiResPlaybackEngine {
 
     private func finishTransportStop(token: UInt64) {
         guard transportStopPending, transportToken == token else { return }
-        engine.mainMixerNode.outputVolume = 0
+        transportOutputGain = 0
         engine.pause()
         // Only now may schedules, active PCM, EQ and gain staging be reset.
         clearStoppedPlaybackResources()
@@ -1157,6 +1215,9 @@ final class HiResPlaybackEngine {
         pendingHandoff = nil
         playerNode.stop()
         upgradePlayerNode.stop()
+        if currentAudioFile != nil || convertedBuffer != nil || baseConvertedBuffer != nil {
+            if !AudioGraphLifecycle.resetWhilePaused(engine) { configuredGraph = nil }
+        }
         effectPipeline.forEach { $0.resetTailState() }
         cancelEffectTransitionForStop()
         spectrumAnalyzer.reset()
@@ -1643,7 +1704,7 @@ final class HiResPlaybackEngine {
             transportFadeInPending = true
             rampTransportVolume(to: 0, duration: 0.024, token: token) { [weak self] in
                 guard let self else { return }
-                let drain = max(0.012, AVAudioSession.sharedInstance().ioBufferDuration * 2)
+                let drain = self.transportDrainDuration
                 DispatchQueue.main.asyncAfter(deadline: .now() + drain) { [weak self] in
                     guard let self, self.transportToken == token else { return }
                     self.pendingTransportSeekPosition = nil
@@ -1656,7 +1717,7 @@ final class HiResPlaybackEngine {
             }
         } else {
             pendingTransportSeekPosition = nil
-            engine.mainMixerNode.outputVolume = 0
+            transportOutputGain = 0
             playbackOffset = clamped
             lastKnownPlaybackTime = clamped
             scheduleBuffer(from: clamped, autoplay: false)
@@ -1869,7 +1930,7 @@ final class HiResPlaybackEngine {
             scheduleEffectParameterStep(remaining: EffectTransitionPolicy.parameterSteps, token: token)
             return
         }
-        let originalOutput = effectDeclickRestoreVolume ?? declickMixer.outputVolume
+        let originalOutput = effectDeclickRestoreVolume ?? effectProtectionGain
         let previousLatency = effectPipeline.reduce(0.0) { $0 + $1.transitionLatency }
         effectDeclickRestoreVolume = originalOutput
         rampOutputVolume(to: 0.0, duration: EffectTransitionPolicy.protectionFadeOut, token: token) { [weak self] in
@@ -1936,11 +1997,18 @@ final class HiResPlaybackEngine {
         pendingLoudnessCompensationVolume = nil
         effectDeclickRestoreVolume = nil
         // A cancelled mute must not silence the next song.
-        declickMixer.outputVolume = 1
+        effectProtectionGain = 1
     }
 
     private func rampOutputVolume(to target: Float, duration: TimeInterval, token: UInt64, completion: (() -> Void)?) {
-        let startDeclick = declickMixer.outputVolume
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+        effectAudioGain.ramp(to: target, duration: duration,
+            isRunning: { [weak self] in self?.engine.isRunning == true },
+            isCurrent: { [weak self] in self?.declickToken == token },
+            stalled: { [weak self] in self?.engine.pause() },
+            cancelled: { completion?() }, completion: { completion?() })
+#else
+        let startDeclick = effectProtectionGain
         
         let steps = EffectTransitionPolicy.envelopeSteps(duration: duration)
         let stepDuration = duration / TimeInterval(steps)
@@ -1955,10 +2023,11 @@ final class HiResPlaybackEngine {
                     if step == steps { completion?() }
                     return
                 }
-                self.declickMixer.outputVolume = valDeclick
+                self.effectProtectionGain = valDeclick
                 if step == steps { completion?() }
             }
         }
+#endif
     }
 
     // MARK: - Private: Audio Session
@@ -2005,6 +2074,10 @@ final class HiResPlaybackEngine {
         engine.attach(upgradePlayerNode)
         engine.attach(sourceMixer)
         engine.attach(declickMixer)
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+        engine.attach(effectAudioGain.node)
+        engine.attach(transportAudioGain.node)
+#endif
         engine.attach(inputGainEQ)
         engine.attach(loudnessCompensationEQ)
         engine.attach(automaticDSPEQ)
@@ -2018,7 +2091,7 @@ final class HiResPlaybackEngine {
         if let outputLimiter {
             engine.attach(outputLimiter)
         }
-        declickMixer.outputVolume = 1.0
+        effectProtectionGain = 1.0
         inputGainEQ.globalGain = 0
         inputGainEQ.bands[0].bypass = true
         configureLoudnessCompensation()
@@ -2032,10 +2105,13 @@ final class HiResPlaybackEngine {
         outputSafetyEQ.bands[0].bypass = true
         configureOutputLimiter()
 
-        connectPipeline(format: nil)
+        // Connect once, after session activation supplies the actual source/output formats.
     }
 
     private func connectPipeline(format: AVAudioFormat?) {
+#if ONGAKU_STARTUP_AUDIT
+        let audit = StartupCostAudit.begin(); defer { StartupCostAudit.end("graph.connect", audit) }
+#endif
         // Sample-rate-dependent sub-stages must be reapplied after reconnecting.
         needsEffectReapplication = true
         engine.disconnectNodeOutput(playerNode)
@@ -2055,6 +2131,10 @@ final class HiResPlaybackEngine {
             engine.disconnectNodeOutput(outputLimiter)
         }
         engine.disconnectNodeOutput(declickMixer)
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+        engine.disconnectNodeOutput(effectAudioGain.node)
+        engine.disconnectNodeOutput(transportAudioGain.node)
+#endif
         if let finalPeakProtector { engine.disconnectNodeOutput(finalPeakProtector) }
         
         for effect in effectPipeline {
@@ -2081,7 +2161,15 @@ final class HiResPlaybackEngine {
         } else {
             engine.connect(outputSafetyEQ, to: outputCeilingEQ, format: format)
         }
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+        engine.connect(outputCeilingEQ, to: effectAudioGain.node, format: format)
+        engine.connect(effectAudioGain.node, to: transportAudioGain.node, format: format)
+        engine.connect(transportAudioGain.node, to: declickMixer, format: format)
+        declickMixer.outputVolume = 1
+        engine.mainMixerNode.outputVolume = 1
+#else
         engine.connect(outputCeilingEQ, to: declickMixer, format: format)
+#endif
         if let finalPeakProtector,
            let finalFormat = finalOutputProtectionFormat() {
             // The mixer performs the final SRC before protection. The main mixer
@@ -2102,7 +2190,7 @@ final class HiResPlaybackEngine {
     }
 
     private func finalOutputProtectionFormat() -> AVAudioFormat? {
-        let device = engine.outputNode.inputFormat(forBus: 0)
+        let device = engine.outputNode.outputFormat(forBus: 0)
         guard device.sampleRate.isFinite, (8000...384000).contains(device.sampleRate),
               (1...8).contains(device.channelCount) else { return nil }
         return AVAudioFormat(standardFormatWithSampleRate: device.sampleRate, channels: device.channelCount)
@@ -2317,29 +2405,38 @@ final class HiResPlaybackEngine {
     }
 
     private func ensureEngineRunning() throws {
+#if ONGAKU_STARTUP_AUDIT
+        let audit = StartupCostAudit.begin(); defer { StartupCostAudit.end("engine.ensureRunning", audit) }
+#endif
         if !engine.isRunning {
             try engine.start()
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            effectAudioGain.synchronizeAfterStart()
+            transportAudioGain.setImmediate(0)
+#endif
         }
     }
 
     private func configureProcessingFormat(_ format: AVAudioFormat) {
-        if let configuredProcessingFormat,
-           abs(configuredProcessingFormat.sampleRate - format.sampleRate) < 0.1,
-           configuredProcessingFormat.channelCount == format.channelCount,
-           configuredProcessingFormat.commonFormat == format.commonFormat,
-           configuredProcessingFormat.isInterleaved == format.isInterleaved {
-            // stop() removes all taps while retaining the configured format.
-            // Reinstall them when the next track uses the same format;
-            // otherwise both level meters and spectrum remain at rest.
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        let route = outputs.isEmpty ? nil : outputs.map { $0.portType.rawValue + ":" + $0.uid }.sorted().joined(separator: "|")
+        let configuration = AudioGraphConfiguration(processing: format,
+            output: engine.outputNode.outputFormat(forBus: 0), routeIdentifier: route)
+        if let configuration, configuredGraph == configuration {
+            // Stop removes taps but retains this graph. Restore visualization
+            // without reusing source schedules, gain references or wet history.
             ensureEffectLevelMetersInstalled()
             return
         }
-        if engine.isRunning {
-            engine.stop()
-        }
+        configuredGraph = nil
+        // A paused engine still owns prepared resources. Release them before
+        // a real topology/format change; the matching fast path above retains them.
+        engine.stop()
         connectPipeline(format: format)
         installEffectLevelMeters()
         configuredProcessingFormat = format
+        configuredGraph = configuration
+        graphConfigurationGeneration &+= 1
     }
 
     private func applyGainStaging(effectSettings: [RealtimeAudioEffectSetting]) {

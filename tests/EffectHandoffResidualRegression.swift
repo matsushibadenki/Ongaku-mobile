@@ -2,6 +2,9 @@ import AVFoundation
 import Foundation
 
 @main
+#if AUDIO_GAIN_TAIL_AUDIT
+@MainActor
+#endif
 struct EffectHandoffResidualRegression {
     static func main() {
         do { try run() } catch { fputs("FAIL: \(error)\n", stderr); exit(1) }

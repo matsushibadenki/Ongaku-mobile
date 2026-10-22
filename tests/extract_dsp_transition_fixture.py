@@ -5,7 +5,7 @@ Actual effect nodes, EQ writes and output-volume writes remain shipping code.
 from pathlib import Path
 import sys
 root = Path(__file__).resolve().parent.parent
-source = (root / 'audio/HiResPlaybackEngine.swift').read_text()
+source = (root / 'audio/HiResPlaybackEngine.swift').read_text().replace('effectProtectionGain', 'declickMixer.outputVolume').replace('transportOutputGain', 'engine.mainMixerNode.outputVolume')
 models = (root / 'audio/AppLibraryModels.swift').read_text()
 def block(text, anchor):
     if text.count(anchor) != 1: raise RuntimeError(anchor)

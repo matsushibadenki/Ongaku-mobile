@@ -3,7 +3,7 @@ A separate host uses the same ramp method with a real AVAudioEngine for PCM test
 """
 from pathlib import Path
 import sys
-source = Path('audio/HiResPlaybackEngine.swift').read_text()
+source = Path('audio/HiResPlaybackEngine.swift').read_text().replace('effectProtectionGain', 'declickMixer.outputVolume').replace('transportOutputGain', 'engine.mainMixerNode.outputVolume')
 
 def block(anchor):
     assert source.count(anchor) == 1, anchor
@@ -116,7 +116,7 @@ final class ShippingTransportHost {
     func cancelPendingHandoff() { handoffCancellations += 1 }
 ''']
 methods = ['    func play(fadeInDuration:', '    private func beginTransportFadeIn(',
-           '    private func rampTransportVolume(', '    func pause()',
+           '    private func rampTransportVolume(', '    private var transportDrainDuration:', '    func pause()',
            '    private func finishTransportPause(', '    func stop(afterDrain:',
            '    private func requestTransportStop(', '    private func finishTransportStop(', '    private func handlePlaybackEnd(', '    func seek(to ', '    var isPlaying: Bool', '    var playbackScheduleID:', '    var hasReachedPlaybackEnd:']
 for method in methods:

@@ -18,6 +18,7 @@ final class TailTestClock: @unchecked Sendable {
 }
 
 @main
+@MainActor
 struct TailLatencyRegression {
     static func require(_ value: Bool, _ message: String) throws {
         if !value { throw NSError(domain: message, code: 1) }
@@ -37,7 +38,16 @@ struct TailLatencyRegression {
         let output = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
         engine.attach(player); fx.attach(to: engine); fx.connectInternalNodes(engine: engine, format: format)
         engine.connect(player, to: fx.inputNode, format: format)
+#if AUDIO_GAIN_TAIL_AUDIT
+        let effectGain = AudioThreadGainStage(gain: 1), transportGain = AudioThreadGainStage(gain: 1)
+        engine.attach(effectGain.node); engine.attach(transportGain.node)
+        engine.connect(fx.outputNode, to: effectGain.node, format: format)
+        engine.connect(effectGain.node, to: transportGain.node, format: format)
+        // Main mixer retains SRC; the gain units stay at the rack's stereo rate.
+        engine.connect(transportGain.node, to: engine.mainMixerNode, format: format)
+#else
         engine.connect(fx.outputNode, to: engine.mainMixerNode, format: format)
+#endif
         let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 96_000)!
         source.frameLength = source.frameCapacity
         for ch in 0..<2 { for i in 0..<96_000 {
@@ -50,7 +60,11 @@ struct TailLatencyRegression {
         if name == "warm" { setting.parameters["flutter"] = 0 }
         fx.apply(setting: setting)
         try engine.enableManualRenderingMode(.offline, format: output, maximumFrameCount: 256)
-        try engine.start(); player.scheduleBuffer(source); player.play()
+        try engine.start()
+#if AUDIO_GAIN_TAIL_AUDIT
+        effectGain.synchronizeAfterStart(); transportGain.synchronizeAfterStart()
+#endif
+        player.scheduleBuffer(source); player.play()
         defer { engine.stop(); fx.resetTailState() }
         let buffer = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: 256)!
         var result = [[Float](), [Float]()], changed = false, restarted = false

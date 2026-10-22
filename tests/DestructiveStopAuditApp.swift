@@ -13,6 +13,14 @@ import AVFoundation
             Mirror(reflecting: engine).children.first { $0.label == name }!.value as! T
         }
         let graph = field("engine", as: AVAudioEngine.self)
+        func outputGain() -> Float {
+#if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
+            field("transportAudioGain", as: AudioThreadGainStage.self).gain
+#else
+            graph.mainMixerNode.outputVolume
+#endif
+        }
+
         do {
             let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
             let source = root.appendingPathComponent("stop-source.caf")
@@ -46,7 +54,7 @@ import AVFoundation
             do { try await engine.waitForStop(generation: firstStop); preconditionFailure("obsolete wait accepted") }
             catch is CancellationError { }
             try await engine.waitForStop(generation: latestStop)
-            precondition(retiredSession == 10 && graph.mainMixerNode.outputVolume == 0)
+            precondition(retiredSession == 10 && outputGain() == 0)
             log("PASS: stop hides track immediately, retains file through drain, and invokes only the latest session release after teardown")
 
             try await engine.load(url: source, effectSettings: effects, strategy: .immediateStreaming)
@@ -63,7 +71,7 @@ import AVFoundation
             catch is CancellationError { }
             try engine.play(); try await engine.waitForSystemHandoffRender()
             try await Task.sleep(for: .milliseconds(100))
-            precondition(engine.currentAudioURL == logicalSource && engine.isPlaying && graph.mainMixerNode.outputVolume == 1)
+            precondition(engine.currentAudioURL == logicalSource && engine.isPlaying && outputGain() == 1)
             log("PASS: overlapping load/loadOpenedFile requests wait for one drain; newest source survives old stop and load callbacks")
 
             let cancelledBeforeEntry = Task { @MainActor in
@@ -72,7 +80,7 @@ import AVFoundation
             cancelledBeforeEntry.cancel()
             do { try await cancelledBeforeEntry.value; preconditionFailure("pre-cancelled load entered teardown") }
             catch is CancellationError { }
-            precondition(engine.isPlaying && engine.currentAudioURL == logicalSource && graph.mainMixerNode.outputVolume == 1)
+            precondition(engine.isPlaying && engine.currentAudioURL == logicalSource && outputGain() == 1)
             log("PASS: a load cancelled before entry cannot stop the currently audible source")
 
             var cancelledStarted = false
@@ -116,7 +124,7 @@ import AVFoundation
             try await engine.waitForStop(generation: overlapStop)
             precondition(!graph.isRunning && !field("playerNode", as: AVAudioPlayerNode.self).isPlaying
                 && !field("upgradePlayerNode", as: AVAudioPlayerNode.self).isPlaying)
-            precondition(engine.currentAudioURL == nil && graph.mainMixerNode.outputVolume == 0)
+            precondition(engine.currentAudioURL == nil && outputGain() == 0)
             log("PASS: destructive stop retains both quality-handoff schedules until silence and then clears both nodes")
             log("COMPLETE")
         } catch { engine.stop(); log("FAIL: \(error)") }

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import MediaPlayer
 
 struct LoadingStateView: View {
     let title: String
@@ -261,6 +262,7 @@ struct TrackCapabilityDetailView: View {
     var onTagsChange: (([String]) -> Void)? = nil
     var onAddToPlaylist: ((UUID) -> Void)? = nil
     @State private var tagsText = ""
+    @State private var sourceFileInfo: AudioSourceFileInfo?
 
     private var availableCapabilities: [LibraryTrackCapability] {
         LibraryTrackCapability.allCases.filter(song.supports)
@@ -308,6 +310,22 @@ struct TrackCapabilityDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Section(L10n.tr("sourceinfo.title")) {
+                    if let info = sourceFileInfo {
+                        ForEach(info.rows) { row in
+                            LabeledContent(L10n.tr(row.id)) {
+                                Text(row.value ?? L10n.tr("sourceinfo.unknown"))
+                                    .font(.caption.monospaced())
+                                    .multilineTextAlignment(.trailing)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        LabeledContent(L10n.tr("sourceinfo.url"), value: L10n.tr(info.hasURL ? "sourceinfo.yes" : "sourceinfo.no"))
+                        LabeledContent(L10n.tr("sourceinfo.protected"), value: L10n.tr(info.protectedAsset.map { $0 ? "sourceinfo.yes" : "sourceinfo.no" } ?? "sourceinfo.unknown"))
+                        LabeledContent(L10n.tr("sourceinfo.read"), value: L10n.tr(info.readSucceeded ? "sourceinfo.success" : "sourceinfo.unavailable"))
+                    } else { ProgressView() }
                 }
 
                 if song.supports(.metadataOverlay), let overlay {
@@ -425,6 +443,15 @@ struct TrackCapabilityDetailView: View {
         }
         .preferredColorScheme(Theme.appearance.colorScheme)
         .tint(accentColor)
+        .task(id: song.overlayKey + (song.url?.absoluteString ?? "")) {
+            sourceFileInfo = nil
+            let item = song.source == .systemMusic && MPMediaLibrary.authorizationStatus() == .authorized
+                ? SystemMediaLibrary().mediaItem(for: song.id) : nil
+            let info = await AudioSourceFileInfo.read(url: song.url ?? item?.assetURL,
+                                                    protectedAsset: item?.hasProtectedAsset)
+            guard !Task.isCancelled else { return }
+            sourceFileInfo = info
+        }
         .onAppear {
             tagsText = overlay?.displayTags.joined(separator: ", ") ?? ""
         }
@@ -940,5 +967,15 @@ struct HeadphoneSpatialCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled || !isInteractive)
+    }
+}
+
+struct TrackCapabilityDetailView_Previews: PreviewProvider {
+    static var previews: some View {
+        ForEach(["iPhone SE (3rd generation)", "iPhone 16 Pro Max"], id: \.self) { device in
+            TrackCapabilityDetailView(song: SystemSong(id: 1, title: "Source information", artist: "Artist", album: "Album",
+                artistID: nil, albumID: nil, discNumber: nil, trackNumber: nil, duration: 60, url: nil))
+                .previewDevice(PreviewDevice(rawValue: device))
+        }
     }
 }

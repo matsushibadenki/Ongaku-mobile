@@ -122,3 +122,36 @@ nonisolated struct SystemAssetRecoveryGate {
 
     mutating func reset() { attempt = nil }
 }
+
+/// Detect a frozen source clock even while the output graph renders silence.
+/// No RMS/silence or wall-clock estimate is used to declare a track complete.
+nonisolated struct PlaybackProgressWatchdog {
+    private var generation: UInt64?
+    private var position = 0.0
+    private var progressedAt = 0.0
+    private var observedAt = 0.0
+    private var reported = false
+
+    mutating func reset() { self = Self() }
+
+    mutating func observe(generation: UInt64, position: TimeInterval,
+                          expectedToProgress: Bool, now: TimeInterval) -> Bool {
+        guard expectedToProgress, position.isFinite, now.isFinite else {
+            reset()
+            return false
+        }
+        // A suspended app or busy main queue has not observed a continuous
+        // source stall. Start a fresh window when polling itself was delayed.
+        if self.generation != generation || now < observedAt || now - observedAt > 1
+            || abs(position - self.position) >= 0.005 {
+            self.generation = generation
+            self.position = position
+            progressedAt = now
+            reported = false
+        }
+        observedAt = now
+        guard !reported, now - progressedAt >= 2 else { return false }
+        reported = true
+        return true
+    }
+}

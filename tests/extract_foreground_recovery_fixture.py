@@ -4,7 +4,7 @@ Only OS/player collaborators are virtualized; assertions exercise shipping contr
 from pathlib import Path
 import sys
 vm = Path('audio/AudioPlayerViewModel.swift').read_text()
-engine = Path('audio/HiResPlaybackEngine.swift').read_text()
+engine = Path('audio/HiResPlaybackEngine.swift').read_text().replace('effectProtectionGain', 'declickMixer.outputVolume').replace('transportOutputGain', 'engine.mainMixerNode.outputVolume')
 def block(source, anchor):
     assert source.count(anchor) == 1, anchor
     start = source.index(anchor)
@@ -25,6 +25,9 @@ for anchor in ['@objc private func handleAppDidBecomeActive()',
     if '--refresh-first' in sys.argv:
         method = method.replace('reconcileLocalPlaybackAfterForeground()',
             'refreshPlaybackState(); reconcileLocalPlaybackAfterForeground()', 1) if anchor.startswith('@objc') else method
+    if '--seek-over-eof' in sys.argv and anchor == 'private func scheduleUnexpectedLocalPlaybackRecovery(':
+        method = method.replace('if self.hiResPlaybackEngine.hasReachedPlaybackEnd {',
+                                'if false {', 2)
     parts.append(method)
 parts += [block(vm, 'private func clearInterruptionResumeState()'),
           block(vm, 'private func resumePlaybackAfterInterruption(').replace('func resumePlaybackAfterInterruption(', 'func runInterruptionResume(', 1)]

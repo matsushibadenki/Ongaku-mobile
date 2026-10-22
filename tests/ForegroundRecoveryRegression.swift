@@ -116,6 +116,25 @@ import Foundation
             "unexpected-stop recovery lost or duplicated EOF")
         print("PASS: unexpected-stop recovery releases ownership before delivering short-tail EOF")
 
+        for duringActivation in [false, true] {
+            let pendingEnd = ForegroundHost()
+            let beforeActivations = PlaybackAudioSession.shared.activations
+            pendingEnd.scheduleUnexpectedLocalPlaybackRecovery(reason: "eof_while_waiting")
+            if duringActivation {
+                PlaybackAudioSession.shared.onActivate = { pendingEnd.hiResPlaybackEngine.hasReachedPlaybackEnd = true }
+            } else {
+                pendingEnd.hiResPlaybackEngine.hasReachedPlaybackEnd = true
+            }
+            await pendingEnd.unexpectedPlaybackRecoveryTask?.value
+            PlaybackAudioSession.shared.onActivate = nil
+            try require(pendingEnd.localEndDeliveries == 1
+                && pendingEnd.hiResPlaybackEngine.seekCount == 0
+                && pendingEnd.hiResPlaybackEngine.confirmationCount == 0
+                && PlaybackAudioSession.shared.activations == beforeActivations + (duringActivation ? 1 : 0),
+                "confirmed EOF was invalidated by a recovery seek")
+        }
+        print("PASS: EOF during recovery delay/session activation advances without seeking or replaying the tail")
+
         let failed = ForegroundHost()
         failed.wasPlayingBeforeSessionInterruption = true
         failed.interruptedPlaybackSource = .local

@@ -188,6 +188,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var lastManualParameterReductionTime: TimeInterval = 0
     private var lastTrackEndHandledAt: TimeInterval = 0
     private var lastLocalTrackEndGeneration: UInt64?
+    private var localProgressWatchdog = PlaybackProgressWatchdog()
     private var lastObservedSystemPlaybackSongID: UInt64?
     private var lastObservedSystemPlaybackProgress = 0.0
     private var lastOverlayCompletionKey: String?
@@ -2923,19 +2924,21 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private func startTimer() {
         cancelLibraryWorkForPlayback()
         stopTimer(animateMeter: false)
-        updateTimer = Timer.scheduledTimer(
+        updateTimer = Timer(
             timeInterval: 0.25,
             target: self,
             selector: #selector(handleTimerTick),
             userInfo: nil,
             repeats: true
         )
+        if let updateTimer { RunLoop.main.add(updateTimer, forMode: .common) }
         startVisualizationTimer()
     }
 
     private func stopTimer(animateMeter: Bool = true) {
         updateTimer?.invalidate()
         updateTimer = nil
+        localProgressWatchdog.reset()
         stopVisualizationTimer()
         vuTransitionTask?.cancel()
         vuTransitionTask = nil
@@ -3194,7 +3197,17 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 return
             }
 
-            if isPlaying && (!isEnginePlaying || renderHealth.isStalled) {
+            // Output render callbacks can continue with silence after the
+            // source timeline freezes. Observe source progress separately.
+            let sourceStalled = localProgressWatchdog.observe(
+                generation: hiResPlaybackEngine.playbackScheduleID,
+                position: current,
+                expectedToProgress: isPlaying && isEnginePlaying && !isPlaybackStarting
+                    && !isInForcedPausedWindow && interruptionResumeTask == nil
+                    && unexpectedPlaybackRecoveryTask == nil,
+                now: ProcessInfo.processInfo.systemUptime
+            )
+            if isPlaying && (!isEnginePlaying || renderHealth.isStalled || sourceStalled) {
                 if isInForcedPausedWindow {
                     return
                 }
@@ -3203,8 +3216,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 } else {
                     // Route changes and transient media-service failures can
                     // stop the node while its track remains valid.
-                    scheduleUnexpectedLocalPlaybackRecovery(reason: renderHealth.isStalled
-                        ? "render_stalled" : "render_node_stopped")
+                    scheduleUnexpectedLocalPlaybackRecovery(reason: sourceStalled ? "source_progress_stalled"
+                        : (renderHealth.isStalled ? "render_stalled" : "render_node_stopped"))
                 }
                 return
             }
@@ -3738,6 +3751,16 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     return
                 }
 
+                // EOF may arrive while this recovery waits. Consume that
+                // schedule before seeking, which would invalidate its evidence.
+                if self.hiResPlaybackEngine.hasReachedPlaybackEnd {
+                    self.unexpectedPlaybackRecoveryTask = nil
+                    self.isPlaybackStarting = false
+                    self.isProcessing = false
+                    PlaybackDebugLogger.event("audio.local.recovery_completed_by_eof reason=\(reason)")
+                    self.handleLocalPlaybackEnded()
+                    return
+                }
                 guard !AVAudioSession.sharedInstance().isOtherAudioPlaying else { continue }
                 do {
                     try await PlaybackAudioSession.shared.activate()
@@ -3750,6 +3773,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                        self.playbackSource == .local,
                        self.selectedSystemSongID == expectedSongID,
                        self.hiResPlaybackEngine.currentAudioURL == expectedURL else { return }
+
+                    if self.hiResPlaybackEngine.hasReachedPlaybackEnd {
+                        self.unexpectedPlaybackRecoveryTask = nil
+                        self.isPlaybackStarting = false
+                        self.isProcessing = false
+                        PlaybackDebugLogger.event("audio.local.recovery_completed_by_eof reason=\(reason)")
+                        self.handleLocalPlaybackEnded()
+                        return
+                    }
 
                     let safeResumeTime = min(
                         max(0, resumeTime),
@@ -4612,7 +4644,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         isPlaybackStarting = true
         isSystemPlayerStarting = true
         errorMessage = nil
-        localPlaybackFormatDescription = L10n.playbackFormatProtected()
+        localPlaybackFormatDescription = item.hasProtectedAsset
+            ? L10n.playbackFormatProtected() : L10n.tr("playback.format.system")
 
         systemTransportStartTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -4851,18 +4884,37 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 self.upsamplingMode = requestedUpsampling
                 let shouldUseTwoStageLoad = requestedUpsampling.isPrecisionSinc
 
-                try await self.hiResPlaybackEngine.load(
-                    url: preparedAssetURL,
-                    effectSettings: self.playbackEffectSettings,
-                    headphoneSpatialSettings: self.playbackSpatialSettings,
-                    upsamplingMode: requestedUpsampling,
-                    strategy: .immediateStreaming
-                )
+                let snapshot = try await MusicAssetPreparation.loadForPlayback(
+                    url: preparedAssetURL, protectedAsset: mediaItem?.hasProtectedAsset == true,
+                    onReadFailure: { error in
+                        PlaybackDebugLogger.warning("audio.asset.local_open_failed songID=\(song.id) \(AudioPreparationFailure.diagnostic(error, fallbackStage: .streamingOpen))")
+                    }
+                ) { candidateURL in
+                    try Task.checkCancellation()
+                    guard self.playbackPreparationToken == preparationToken,
+                          self.selectedSystemSongID == song.id,
+                          self.playbackSource == .local else { throw CancellationError() }
+                    if candidateURL != preparedAssetURL {
+                        PlaybackDebugLogger.event("audio.asset.local_snapshot_retry songID=\(song.id)")
+                    }
+                    try await self.hiResPlaybackEngine.load(
+                        url: candidateURL,
+                        effectSettings: self.playbackEffectSettings,
+                        headphoneSpatialSettings: self.playbackSpatialSettings,
+                        upsamplingMode: requestedUpsampling,
+                        strategy: .immediateStreaming
+                    )
+                }
                 try Task.checkCancellation()
                 guard self.playbackPreparationToken == preparationToken,
                       self.selectedSystemSongID == song.id,
                       self.playbackSource == .local else {
                     throw CancellationError()
+                }
+                self.musicPlaybackSnapshot = snapshot
+                let playbackAssetURL = snapshot?.url ?? preparedAssetURL
+                if snapshot != nil {
+                    PlaybackDebugLogger.event("audio.asset.local_snapshot_ready songID=\(song.id)")
                 }
                 self.localPlaybackFormatDescription = self.hiResPlaybackEngine.currentFormat?.description ?? L10n.playbackFormatUnavailable()
                 // Native scheduling is ready. Background quality must not own
@@ -4884,7 +4936,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 if shouldUseTwoStageLoad && self.isBackgroundQualityUpgradeEnabled {
                     self.startPrecisionSincUpgrade(
                         songID: song.id,
-                        assetURL: preparedAssetURL,
+                        assetURL: playbackAssetURL,
                         targetUpsampling: requestedUpsampling
                     )
                 }
@@ -4955,7 +5007,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         trackSubtitle = queueAwareSubtitle(artist: song.artist, album: song.album, queueTitle: queueTitle)
         nowPlayingArtwork = mediaItem.artwork?.image(at: CGSize(width: 600, height: 600))
         nowPlayingAlbum = resolveAlbum(from: mediaItem)
-        localPlaybackFormatDescription = L10n.playbackFormatProtected()
+        localPlaybackFormatDescription = mediaItem.hasProtectedAsset
+            ? L10n.playbackFormatProtected() : L10n.tr("playback.format.system")
 
         startProtectedSystemPlayback(with: [mediaItem], autoplay: autoplay)
         if !autoplay {

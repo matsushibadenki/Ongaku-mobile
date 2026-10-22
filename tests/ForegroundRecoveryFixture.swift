@@ -17,7 +17,8 @@ struct PlaybackRecoveryBackgroundLease { var expired = false; func end() {} }
 final class PlaybackAudioSession {
     static let shared = PlaybackAudioSession()
     var activations = 0
-    func activate() async throws { activations += 1 }
+    var onActivate: (() -> Void)?
+    func activate() async throws { activations += 1; onActivate?() }
 }
 struct L10n { static func tr(_ key: String, _ argument: String) -> String { argument } }
 final class MockEngine {
@@ -35,7 +36,8 @@ final class MockEngine {
     var onEnded: (() -> Void)?
     var confirmationCount = 0
     func currentTime() -> Double { position }
-    func seek(to value: Double) throws { position = value }
+    var seekCount = 0
+    func seek(to value: Double) throws { seekCount += 1; position = value; hasReachedPlaybackEnd = false }
     func play() throws { isPlaying = true; isEngineRunning = true }
     func pause() { isPlaying = false; isEngineRunning = false }
     func waitForPlaybackProgress() async throws {

@@ -3,7 +3,7 @@ Virtualize player callbacks/queue timing so failed replacements are deterministi
 """
 from pathlib import Path
 import sys
-source = Path('audio/HiResPlaybackEngine.swift').read_text()
+source = Path('audio/HiResPlaybackEngine.swift').read_text().replace('effectProtectionGain', 'declickMixer.outputVolume').replace('transportOutputGain', 'engine.mainMixerNode.outputVolume')
 def block(anchor):
     assert source.count(anchor) == 1, anchor
     start = source.index(anchor)

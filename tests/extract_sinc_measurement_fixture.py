@@ -9,7 +9,7 @@ import re
 import sys
 
 root = Path(__file__).resolve().parent.parent
-engine = (root / 'audio/HiResPlaybackEngine.swift').read_text()
+engine = (root / 'audio/HiResPlaybackEngine.swift').read_text().replace('effectProtectionGain', 'declickMixer.outputVolume').replace('transportOutputGain', 'engine.mainMixerNode.outputVolume')
 models = (root / 'audio/AppLibraryModels.swift').read_text()
 
 def block(source, anchor):

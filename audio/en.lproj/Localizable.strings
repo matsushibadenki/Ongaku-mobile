@@ -448,3 +448,25 @@
 "appearance.purple" = "Purple";
 "appearance.green" = "Green";
 "appearance.beige" = "Beige";
+
+"playback.format.system" = "System playback";
+
+// Original source metadata; unknown values are never inferred from DSP.
+"sourceinfo.title" = "Source file";
+"sourceinfo.container" = "File extension";
+"sourceinfo.codec" = "Codec";
+"sourceinfo.rate" = "Sample rate";
+"sourceinfo.depth" = "Source bit depth";
+"sourceinfo.channels" = "Channels";
+"sourceinfo.bitrate" = "Estimated bitrate";
+"sourceinfo.size" = "File size";
+"sourceinfo.error" = "Read error";
+"sourceinfo.unknown" = "Unknown";
+"sourceinfo.url" = "Source URL available";
+"sourceinfo.protected" = "Protected content";
+"sourceinfo.read" = "Metadata access";
+"sourceinfo.yes" = "Yes";
+"sourceinfo.no" = "No";
+"sourceinfo.success" = "Read successfully";
+"sourceinfo.unavailable" = "Unavailable";
+"sourceinfo.processing" = "Processing format";

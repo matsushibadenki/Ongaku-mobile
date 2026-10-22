@@ -3,7 +3,7 @@ import Foundation
 
 @main
 struct MusicAssetPreparationRegression {
-    static func main() async throws {
+    @MainActor static func main() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -85,6 +85,113 @@ struct MusicAssetPreparationRegression {
         precondition(recoveredFile.length == Int64(buffer.frameLength))
         precondition(!FileManager.default.fileExists(atPath: invalidDirectory.path))
         print("PASS: an unreadable exported container is discarded and decoded instead")
+
+        // Exercise the same initial-playback retry used by the ViewModel.
+        // Direct source opening can fail for a Music asset even though AVAsset
+        // can export/decode it. Both RMS and spectrum require the local engine.
+        let openFailure = AudioPreparationFailure(stage: .streamingOpen,
+            reason: .preparationFailed, underlying: MusicAssetPreparation.Failure.unsupported)
+        var attempts: [URL] = []
+        var initialSnapshot: MusicAssetPreparation.Snapshot? = try await MusicAssetPreparation.loadForPlayback(
+            url: url, protectedAsset: false
+        ) { candidate in
+            attempts.append(candidate)
+            if candidate == url { throw openFailure }
+            let file = try AVAudioFile(forReading: candidate)
+            precondition(file.length == Int64(buffer.frameLength))
+            let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: buffer.frameLength)!
+            try file.read(into: pcm)
+            for ch in 0..<2 { for f in 0..<Int(buffer.frameLength) {
+                precondition(pcm.floatChannelData![ch][f] == buffer.floatChannelData![ch][f])
+            } }
+        }
+        precondition(attempts.count == 2 && initialSnapshot != nil)
+        let initialCopy = initialSnapshot!.url
+        precondition(FileManager.default.fileExists(atPath: initialCopy.path))
+        initialSnapshot = nil
+        precondition(!FileManager.default.fileExists(atPath: initialCopy.path))
+        print("PASS: initial open failure retries readable local PCM, preserving samples and scoped lifetime")
+
+        var exports = 0
+        for blocked in [true, false] {
+            var calls = 0
+            do {
+                _ = try await MusicAssetPreparation.loadForPlayback(url: url, protectedAsset: blocked,
+                    makeSnapshot: { source in
+                        exports += 1
+                        return try await MusicAssetPreparation.playableSnapshot(url: source)
+                    }, load: { _ in
+                        calls += 1
+                        if blocked { throw openFailure }
+                        throw AudioPreparationFailure(stage: .streamingSession, reason: .preparationFailed,
+                            underlying: MusicAssetPreparation.Failure.unsupported)
+                    })
+                fatalError("Non-source error or protected source retried")
+            } catch is AudioPreparationFailure { }
+            precondition(calls == 1 && exports == 0)
+        }
+        let direct = try await MusicAssetPreparation.loadForPlayback(url: url, protectedAsset: false,
+            makeSnapshot: { _ in fatalError("Readable source should not export") }, load: { source in
+                _ = try AVAudioFile(forReading: source)
+            })
+        precondition(direct == nil)
+        print("PASS: native readable sources stay immediate; DRM/session errors do not enter export recovery")
+
+        let cancelledRetry = Task { @MainActor in
+            var calls = 0
+            do {
+                _ = try await MusicAssetPreparation.loadForPlayback(url: url, protectedAsset: false,
+                    makeSnapshot: { source in
+                        let copy = try await MusicAssetPreparation.playableSnapshot(url: source)
+                        withUnsafeCurrentTask { $0?.cancel() }
+                        return copy
+                    }, load: { _ in calls += 1; throw openFailure })
+                fatalError("Cancelled retry reached the graph")
+            } catch is CancellationError { precondition(calls == 1) }
+        }
+        try await cancelledRetry.value
+        print("PASS: cancellation between export and reload prevents stale graph mutation")
+
+        for ext in ["wav", "aiff", "m4a"] {
+            for channels: AVAudioChannelCount in [1, 2] {
+                let source = directory.appendingPathComponent("cd-\(channels).\(ext)")
+                let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: channels)!
+                let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100)!
+                pcm.frameLength = pcm.frameCapacity
+                for ch in 0..<Int(channels) { for f in 0..<Int(pcm.frameLength) {
+                    pcm.floatChannelData![ch][f] = Float(sin(Double(f) * 0.08)) * (ch == 0 ? 0.4 : 0.2)
+                } }
+                var settings: [String: Any] = [AVSampleRateKey: 44_100, AVNumberOfChannelsKey: channels]
+                if ext == "m4a" {
+                    settings[AVFormatIDKey] = kAudioFormatAppleLossless
+                    settings[AVEncoderBitDepthHintKey] = 16
+                } else {
+                    settings[AVFormatIDKey] = kAudioFormatLinearPCM
+                    settings[AVLinearPCMBitDepthKey] = 16
+                    settings[AVLinearPCMIsFloatKey] = false
+                    settings[AVLinearPCMIsBigEndianKey] = ext == "aiff"
+                }
+                do { let file = try AVAudioFile(forWriting: source, settings: settings); try file.write(from: pcm) }
+                let expectedFile = try AVAudioFile(forReading: source)
+                let expected = AVAudioPCMBuffer(pcmFormat: expectedFile.processingFormat, frameCapacity: 44_100)!
+                try expectedFile.read(into: expected)
+                var attempts = 0
+                let copy = try await MusicAssetPreparation.loadForPlayback(url: source, protectedAsset: false) { candidate in
+                    attempts += 1
+                    if candidate == source { throw openFailure }
+                    let file = try AVAudioFile(forReading: candidate)
+                    precondition(file.processingFormat.sampleRate == 44_100 && file.processingFormat.channelCount == channels)
+                    let actual = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 44_100)!
+                    try file.read(into: actual)
+                    precondition(actual.frameLength == expected.frameLength)
+                    for ch in 0..<Int(channels) { for f in 0..<Int(actual.frameLength) {
+                        precondition(actual.floatChannelData![ch][f] == expected.floatChannelData![ch][f])
+                    } }
+                }
+                precondition(copy != nil && attempts == 2)
+                print("PASS: CD 44.1 kHz / 16-bit \(channels)-channel \(ext) read recovery preserves decoded PCM")
+            }
+        }
 
         if CommandLine.arguments.count > 1 {
             for path in CommandLine.arguments.dropFirst() {

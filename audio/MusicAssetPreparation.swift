@@ -29,6 +29,34 @@ nonisolated enum MusicAssetPreparation {
     }
 
 
+    /// Retry only a source-open failure before giving playback to Music. Retain
+    /// the returned snapshot for the full playback/quality-upgrade lifetime.
+    /// The caller validates its current selection before each graph mutation.
+    @MainActor static func loadForPlayback(
+        url: URL, protectedAsset: Bool,
+        onReadFailure: @MainActor (any Error) -> Void = { _ in },
+        makeSnapshot: @MainActor (URL) async throws -> Snapshot = { try await playableSnapshot(url: $0) },
+        load: @MainActor (URL) async throws -> Void
+    ) async throws -> Snapshot? {
+        try Task.checkCancellation()
+        do {
+            try await load(url)
+            return nil
+        } catch {
+            try Task.checkCancellation()
+            guard !protectedAsset, let failure = error as? AudioPreparationFailure,
+                  failure.stage == .streamingOpen, failure.reason == .preparationFailed else { throw error }
+            onReadFailure(error)
+        }
+        let snapshot: Snapshot
+        do { snapshot = try await makeSnapshot(url) }
+        catch { throw AudioPreparationFailure.tagging(error, stage: .assetSnapshot) }
+        try Task.checkCancellation()
+        try await load(snapshot.url)
+        try Task.checkCancellation()
+        return snapshot
+    }
+
     /// Passthrough containers are not necessarily readable by AVAudioFile
     /// (for example an audio track carried in MOV). Decode through AVFoundation
     /// if export or the resulting file cannot be used by the playback engine.

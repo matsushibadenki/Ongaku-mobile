@@ -448,3 +448,25 @@
 "appearance.purple" = "紫色";
 "appearance.green" = "绿色";
 "appearance.beige" = "米色";
+
+"playback.format.system" = "系统播放";
+
+// Original source metadata; unknown values are never inferred from DSP.
+"sourceinfo.title" = "音源文件";
+"sourceinfo.container" = "文件扩展名";
+"sourceinfo.codec" = "编解码格式";
+"sourceinfo.rate" = "采样率";
+"sourceinfo.depth" = "原始位深度";
+"sourceinfo.channels" = "声道数";
+"sourceinfo.bitrate" = "估计比特率";
+"sourceinfo.size" = "文件大小";
+"sourceinfo.error" = "读取错误";
+"sourceinfo.unknown" = "未知";
+"sourceinfo.url" = "音源URL可用";
+"sourceinfo.protected" = "受保护内容";
+"sourceinfo.read" = "信息读取";
+"sourceinfo.yes" = "是";
+"sourceinfo.no" = "否";
+"sourceinfo.success" = "已读取";
+"sourceinfo.unavailable" = "无法读取";
+"sourceinfo.processing" = "处理格式";
