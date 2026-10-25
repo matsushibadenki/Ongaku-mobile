@@ -1,11 +1,19 @@
 # #Ongaku Roadmap
 
+## Chunk transfer actor ownership — 2026-10-24
+
+- 🟢 [Done] Mac／iOS companion共通の専用actorへ、チャンク転送状態・ファイルI/O・チェックポイントを移行。制御actorと直列I/O actorを分け、接続世代と転送世代で遅れた結果の反映を防止。保存確定後のキャンセルは保存済みデータを巻き戻さず、切断後は旧接続へ完了通知を送らない。[実装・検証記録](quality/CHUNK_TRANSFER_ACTOR_2026-10-24.md)。独立したiPhone本体アプリの従来の一括リソース転送経路は変更なし。
+- 🟢 [Done] 関連52テスト、Thread Sanitizer付きactor専用20テストが成功。一時停止・再開・キャンセル・切断復旧、保存失敗後の再試行、古い結果／パケットの排除、空ファイルと通常ファイルの両保存先へのJSON往復を検証。Mac Debug・App Store Release・iOS Simulator companionの署名なしビルド成功。
+- 🟠 [Next] 大きな転送で不足チャンク走査・進捗集計・チェックポイント永続化を計測。従来のリソース転送経路やA4全体の所有権整理は継続。
+- ⭕️ [Pending] 実機Mac／iPhoneのペアリング、通信断・再接続、バックグラウンド、一時停止・再開・キャンセル、実ファイルとアクセス権、低速ストレージ、転送速度・消費電力。実機確認完了とは扱わない。
+
+
 ## Validated chunk transfer snapshots — 2026-10-24
 
 - 🟢 [Done] A4 preparation: admit one immutable validated descriptor per Desktop/iOS companion chunk session and reuse it for payload reads/checkpoint accepts. Preserve per-chunk SHA-256, size/index checks, final whole-file verification and unchanged wire DTOs. Add session/checkpoint-shape rejection and keep legacy receive error classification. The separate main iPhone app uses another whole-resource path and has no runtime changes. See [scope, integrity tests and measurements](quality/VALIDATED_CHUNK_SNAPSHOTS_2026-10-24.md).
 - 🟢 [Done] Debug and Release each pass 32 transfer/protocol tests, including mutable-copy isolation, malformed/corrupt inputs, source changes, persisted resume/new session ID, empty files and final-file corruption. Normal Mac Debug, Universal Mac App Store Release and same-project iOS Simulator companion builds pass with signing disabled; whitespace checks pass.
 - 🟢 [Done] Matched Release sender-preparation comparison at default 256 KiB / 4096 chunks / 64 requests: median wall 244.900 → 13.255 ms (94.6% shorter), CPU 240.775 → 13.219 ms (94.5% lower), three alternating paired samples. This excludes network/encoding/receiver persistence and is not an end-to-end transfer speedup or device-energy result.
-- 🟠 [Next] Complete A4 actor ownership of file I/O/checkpoints/session state and cancel/disconnect generations. Missing-index/progress scans and checkpoint persistence still need profiling. First full audio-rack startup and A3 memory/UI targets remain separate unfinished work.
+- 🟢 [Done] Chunk file I/O/checkpoint/session actor ownership and cancel/disconnect generations completed in the follow-up above. Missing-index/progress scans and persistence profiling remain [Next]; first full audio-rack startup and A3 targets remain separate unfinished work.
 - ⭕️ [Pending] Installed Mac/physical iPhone companion transfer of actual large music files, pairing/network loss/pause/cancel/resume, storage permissions, end-to-end throughput and sustained energy. Main-iPhone cross-device behavior and existing audio/DAC qualification are not established by the shared-model tests. No remote CI result is claimed for unpublished changes.
 
 
@@ -23,7 +31,7 @@
 - 🟢 [Done] Advance Desktop ROADMAP A3 by retiring obsolete fallback search text and Track snapshots after verified SQLite recovery. Identity/revision/cancellation guards prevent stale retirement of newer/different libraries. The separate iPhone app does not use this worker; mobile playback, library data and sync contracts are unchanged. See [implementation and Desktop evidence](quality/FALLBACK_CACHE_RETIREMENT_2026-10-22.md).
 - 🟢 [Done] Desktop passes 26 presentation/search-routing/SQLite tests and three 100,000-track Debug retirement/reconstruction cycles, including EN/JA/zh-Hans. Retire 7,366,666 UTF-8 bytes and 100,000 worker-owned Track references; this is logical cache storage, not process RSS or the 512 MiB product gate.
 - 🟢 [Done] Desktop normal Debug and Universal Mac App Store Release builds pass; the separate mobile runtime is unchanged and is not claimed as retested by those builds.
-- 🟠 [Next] Continue the shared first full audio-rack startup work above. Desktop's remaining A3 memory/UI profiling and A4 transfer ownership are tracked in its roadmap; this Desktop-only cache correction is not a mobile-runtime optimization.
+- 🟠 [Next] Continue the shared first full audio-rack startup work above. Desktop's remaining A3 memory/UI profiling and remaining A4 transfer ownership are tracked in its roadmap; this Desktop-only cache correction is not a mobile-runtime optimization.
 - ⭕️ [Pending] Installed-app large-library memory/UI qualification, actual user libraries and the existing physical iPhone/Mac/DAC audio checks. Unpushed local changes have no remote CI result.
 
 
