@@ -470,3 +470,6 @@
 "sourceinfo.success" = "Read successfully";
 "sourceinfo.unavailable" = "Unavailable";
 "sourceinfo.processing" = "Processing format";
+
+"effect.spectral_transient.name" = "Transient · Prototype";
+"effect.spectral_transient.description" = "Gentle stereo-linked attack shaping by frequency band. No lookahead; changes are smoothed. Start with a low amount.";

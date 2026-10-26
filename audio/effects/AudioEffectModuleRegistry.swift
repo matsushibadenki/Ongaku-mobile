@@ -60,6 +60,9 @@ enum AudioEffectModuleRegistry {
         .init(kind: .exciter, isIncluded: true, clippingReductionParameterKeys: ["intensity", "frequency"]) {
             ExciterAudioEffect()
         },
+        .init(kind: .spectralTransient, clippingReductionParameterKeys: ["intensity"]) {
+            SpectralTransientAudioEffect()
+        },
         .init(kind: .optoFET, isIncluded: true, clippingReductionParameterKeys: ["intensity", "peak"]) {
             OptoFETAudioEffect()
         },

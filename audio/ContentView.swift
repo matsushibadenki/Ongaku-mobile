@@ -70,10 +70,6 @@ struct ContentView: View {
     @State private var searchPath: [LibraryRoute] = []
     @State private var pendingAlbumNavigation: SystemAlbum?
     @State private var isAlbumEnteringFromLeading = false
-    @State private var hasPreparedEffectsScreen = false
-    @State private var shouldRenderEffectsControls = false
-    @State private var effectsControlsRenderID = UUID()
-    @State private var pendingEffectsActivationWorkItem: DispatchWorkItem?
     
     init(player: AudioPlayerViewModel) {
         self.player = player
@@ -124,9 +120,7 @@ struct ContentView: View {
                     case .effects:
                         NavigationStack {
                             EffectsTabContent(player: player,
-                                              isPresented: selectedTab == .effects,
-                                              shouldRenderControls: shouldRenderEffectsControls,
-                                              controlsRenderID: effectsControlsRenderID)
+                                              isPresented: selectedTab == .effects)
                                 .toolbarBackground(.hidden, for: .navigationBar)
                                 .toolbar { settingsToolbar(for: .effects) }
                         }
@@ -269,44 +263,10 @@ struct ContentView: View {
         }
     }
 
-    private func activateEffectsScreen() {
-        guard selectedTab == .effects, scenePhase == .active else { return }
-
-        player.setEffectScreenActive(true)
-
-        if hasPreparedEffectsScreen {
-            if !shouldRenderEffectsControls {
-                shouldRenderEffectsControls = true
-            }
-            return
-        }
-
-        if shouldRenderEffectsControls {
-            shouldRenderEffectsControls = false
-        }
-        let workItem = DispatchWorkItem {
-            hasPreparedEffectsScreen = true
-            shouldRenderEffectsControls = true
-        }
-        pendingEffectsActivationWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: workItem)
-    }
-
     private func scheduleEffectsPresentationUpdate() {
-        pendingEffectsActivationWorkItem?.cancel()
-        pendingEffectsActivationWorkItem = nil
-
-        let shouldActivate = selectedTab == .effects && scenePhase == .active
-        if shouldActivate {
-            DispatchQueue.main.async {
-                activateEffectsScreen()
-            }
-        } else {
-            if shouldRenderEffectsControls && !hasPreparedEffectsScreen {
-                shouldRenderEffectsControls = false
-            }
-            player.setEffectScreenActive(false)
-        }
+        // Controls are ordinary view state: presenting them requires no DSP
+        // preparation or delayed task. Meter auditing retains its own cadence.
+        player.setEffectScreenActive(selectedTab == .effects && scenePhase == .active)
     }
 
     private func settingsToolbar(for tab: RootTab) -> some ToolbarContent {
@@ -947,8 +907,6 @@ private struct SearchTabContent: View {
 private struct EffectsTabContent: View {
     @ObservedObject var player: AudioPlayerViewModel
     let isPresented: Bool
-    let shouldRenderControls: Bool
-    let controlsRenderID: UUID
     @State private var isShowingModeHelp = false
 
     var body: some View {
@@ -1007,23 +965,7 @@ private struct EffectsTabContent: View {
                             .padding(.horizontal, 20)
                         }
 
-                        if shouldRenderControls {
-                            effectsControlsContent
-                                .id(controlsRenderID)
-                        } else {
-                            VStack(spacing: 14) {
-                                ProgressView()
-                                    .tint(player.accentColor)
-                                    .scaleEffect(0.8)
-                                Text(L10n.tr("effects.preparing"))
-                                    .font(.system(size: 13, weight: .light))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            .frame(maxWidth: Theme.maxContentWidth)
-                            .padding(.vertical, 36)
-                            .background(Theme.secondaryBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-                        }
+                        effectsControlsContent
 
                         if !player.isLoading {
                             Text(player.localPlaybackFormatDescription)
@@ -1123,10 +1065,10 @@ private struct EffectsTabContent: View {
                     .padding(.bottom, 16)
                     .frame(maxWidth: .infinity)
                 }
-                .task(id: isPresented && shouldRenderControls) {
-                    guard isPresented, shouldRenderControls else { return }
-                    // Run after the retained tab (or initial deferred controls)
-                    // mounts. Never recreate controls or reset on meter updates.
+                .task(id: isPresented) {
+                    guard isPresented else { return }
+                    // Run after the presented controls mount. Never recreate
+                    // controls or reset on meter updates.
                     await Task.yield()
                     guard !Task.isCancelled else { return }
                     var transaction = Transaction()
@@ -2268,7 +2210,7 @@ private struct EffectsTabContent_Previews: PreviewProvider {
 
     private static var preview: some View {
         NavigationStack {
-            EffectsTabContent(player: AudioPlayerViewModel(), isPresented: true, shouldRenderControls: true, controlsRenderID: UUID())
+            EffectsTabContent(player: AudioPlayerViewModel(), isPresented: true)
         }
         .preferredColorScheme(Theme.appearance.colorScheme)
     }

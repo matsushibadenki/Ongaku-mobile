@@ -5,7 +5,9 @@ dsp_transition_dir=$(mktemp -d /private/tmp/OngakuDSPTransition.XXXXXX)
 trap 'rm -rf "$dsp_transition_dir"' EXIT
 python3 tests/extract_dsp_transition_fixture.py "$dsp_transition_dir/ShippingDSPTransition.swift"
 python3 tests/extract_effect_mode_fixture.py "$dsp_transition_dir/ShippingEffectSelection.swift"
-swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$dsp_transition_dir/module-cache" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$dsp_transition_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -module-cache-path "$dsp_transition_dir/module-cache" \
     audio/IntegratedLoudnessMeter.swift audio/EffectMeterObservation.swift audio/EffectTransitionPolicy.swift audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     "$dsp_transition_dir/ShippingDSPTransition.swift" tests/DSPTransitionRegression.swift tests/GainTransitionRegression.swift tests/EffectModeRegression.swift \
     "$dsp_transition_dir/ShippingEffectSelection.swift" \

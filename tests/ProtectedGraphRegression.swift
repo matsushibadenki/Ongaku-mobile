@@ -83,8 +83,9 @@ import Foundation
         #else
         let sourceRates=[96_000.0]
         #endif
+        let kinds: [RealtimeAudioEffectKind?] = CommandLine.arguments.contains("--spectral-transient-only") ? [.spectralTransient] : [nil,.exciter,.warm,.spectralTransient]
         for sourceRate in sourceRates {
-        for rate in [44_100.0,48_000,96_000] { for kind in [nil, RealtimeAudioEffectKind.exciter, RealtimeAudioEffectKind.warm] { for level in [0.1,4.0] {
+        for rate in [44_100.0,48_000,96_000] { for kind in kinds { for level in [0.1,4.0] {
             let reference=try render(rate:rate,sourceRate:sourceRate,level:level,effectKind:kind,handoff:false)
             let transition=try render(rate:rate,sourceRate:sourceRate,level:level,effectKind:kind,handoff:true)
             let error=zip(reference.joined(),transition.joined()).map { abs($0-$1) }.max()!

@@ -6,7 +6,9 @@ trap 'rm -rf "$combined_dir"' EXIT
 python3 tests/extract_dsp_transition_fixture.py "$combined_dir/ShippingDSPTransition.swift"
 python3 tests/extract_sinc_measurement_fixture.py "$combined_dir/ShippingSinc.swift"
 python3 tests/extract_meter_handoff_fixture.py "$combined_dir/ShippingHRTF.swift"
-swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$combined_dir/module-cache" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$combined_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -module-cache-path "$combined_dir/module-cache" \
     audio/IntegratedLoudnessMeter.swift audio/EffectMeterObservation.swift audio/PlaybackHandoffClock.swift audio/ImpulseResponseCatalog.swift \
     audio/EffectTransitionPolicy.swift audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     "$combined_dir/ShippingDSPTransition.swift" "$combined_dir/ShippingSinc.swift" "$combined_dir/ShippingHRTF.swift" \

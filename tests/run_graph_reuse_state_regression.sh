@@ -14,8 +14,10 @@ fi
 for unit in GainEnvelope TruePeak; do
  xcrun clang++ -std=c++20 -O2 -fobjc-arc -fblocks -I "$header_root" -c "$unit_root/${unit}AudioUnit.mm" -o "$audit_dir/$unit.o"
 done
-swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$audit_dir/cache" \
- -import-objc-header "$header_root/TruePeakAudioUnit.h" "${effect_sources[@]}" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$audit_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -module-cache-path "$audit_dir/cache" \
+  "${effect_sources[@]}" \
  audio/AudioProcessingPolicy.swift audio/AudioThreadGainStage.swift tests/EffectAuditSupport.swift \
  tests/GraphReuseStateRegression.swift "$audit_dir/"*.o -Xlinker -lc++ -o "$audit_dir/reuse"
 "$audit_dir/reuse"

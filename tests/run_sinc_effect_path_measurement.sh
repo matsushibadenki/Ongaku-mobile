@@ -5,7 +5,9 @@ cd "$(dirname "$0")/.."
 sinc_test_dir=$(mktemp -d /private/tmp/OngakuSincMeasurement.XXXXXX)
 trap 'rm -rf "$sinc_test_dir"' EXIT
 python3 tests/extract_sinc_measurement_fixture.py "$sinc_test_dir/ShippingSincMeasurement.swift"
-swiftc -parse-as-library -O -suppress-warnings -D EXTENDED_SOURCE_MEASUREMENT \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$sinc_test_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -D EXTENDED_SOURCE_MEASUREMENT \
     -module-cache-path "$sinc_test_dir/module-cache" \
     audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     "$sinc_test_dir/ShippingSincMeasurement.swift" tests/SourcePathConversionRegression.swift \

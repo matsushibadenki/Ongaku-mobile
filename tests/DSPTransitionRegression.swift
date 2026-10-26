@@ -10,7 +10,7 @@ struct DSPTransitionRegression {
     static func settings(_ tab: AudioEffectPageTab?, amount: Float = 0.5) -> [RealtimeAudioEffectSetting] {
         AudioEffectModuleRegistry.activeKinds.map { kind in
             var value = RealtimeAudioEffectSetting(kind: kind,
-                isEnabled: tab.map { AudioEffectModuleRegistry.activeKinds(for: $0).contains(kind) } ?? false)
+                isEnabled: tab.map { AudioEffectModuleRegistry.activeKinds(for: $0).contains(kind) && (!CommandLine.arguments.contains("--spectral-transient-only") || kind == .spectralTransient) } ?? false)
             for key in value.parameters.keys { value.parameters[key] = Double(amount) }
             value.parameters["flutter"] = 0
             return value
@@ -27,7 +27,7 @@ struct DSPTransitionRegression {
         setbuf(stdout, nil)
         var cases = 0
         for outputRate in [44_100.0, 48_000.0, 96_000.0] {
-            for tab in [AudioEffectPageTab.basic, .pro] {
+            for tab in (CommandLine.arguments.contains("--spectral-transient-only") ? [AudioEffectPageTab.pro] : [.basic,.pro]) {
                 for scenario in ["parameters", "disable", "automaticDSP", "handoffDSP", "stopCancel", "stopDSP", "gesture", "offRestore"] {
                     DispatchQueue.main.reset()
                     let engine = AVAudioEngine(), player = AVAudioPlayerNode(), eq = AVAudioUnitEQ(numberOfBands: 4), output = AVAudioMixerNode()

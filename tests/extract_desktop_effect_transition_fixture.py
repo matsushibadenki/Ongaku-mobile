@@ -16,7 +16,8 @@ assert stop.index('secondaryPlayerNode.stop()') < stop.index('applyEffectSetting
 assert 'guard !effectParameterTransition.isProtectingOutput else { return }' in block('    private func prepareNextTrackIfNeeded(')
 assert 'applyEffectSettings(immediately: true, force: true)' in block('    private func configureEngine(')
 lazy = source[source.index('    private lazy var effectParameterTransition ='):source.index('    private lazy var transportEnvelope =')]
-lazy = lazy.replace('        commit:', '        schedule: { [unowned self] delay, action in self.clock.schedule(delay, action) },\n        commit:')
+schedule_anchor = '        audioRamp:' if '        audioRamp:' in lazy else '        commit:'
+lazy = lazy.replace(schedule_anchor, '        schedule: { [unowned self] delay, action in self.clock.schedule(delay, action) },\n' + schedule_anchor)
 text = '''import AVFoundation
 import Foundation
 @MainActor final class EffectTestClock {
@@ -65,6 +66,7 @@ import Foundation
         effectOutputProtection = protection; self.output = output; self.clock = clock
     }
 '''+lazy
+text += '\n' + block('    private var effectAudioRamp:')
 text += '\n' + block('    private func applyEffectSettings(').replace('private func','func',1).replace('immediately: immediately,','immediately: immediately || immediateDefect || (unsafeBypassDefect && effectsBypassed),')
 text += '\n' + block('    private func commitEffectSettings(').replace('        for setting in settings {','''        for setting in settings {
             if effectPipeline.first(where: { $0.kind == setting.kind })?.isEnabled != setting.isEnabled {

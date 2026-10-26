@@ -26,7 +26,7 @@
 "effect.opto_fet.name" = "OptoFET";
 "effect.warm.name" = "Warm Sat";
 "effect.space.name" = "Space";
-"effect.equalizer.name" = "均衡器";
+"effect.equalizer.name" = "Equalizer";
 "effect.simulation.description" = "它将高品质扬声器特有的声学特性和空间深度与原始声音融合在一起。";
 "effect.body.description" = "为原始声音增加低频厚度和冲击感。";
 "effect.exciter.description" = "轻微叠加高频亮度与泛音感。";
@@ -35,7 +35,7 @@
 "effect.warm.description" = "为原始声音叠加柔和的泛音和温暖感。";
 "effect.space.description" = "加入混响与宽度，自然拓展声场。";
 "effect.equalizer.description" = "提供极具音乐感且通透的音调整形。";
-"effect.high_quality_enhancement.name" = "高品质增强";
+"effect.high_quality_enhancement.name" = "High Quality Enhancement";
 "effect.high_quality_enhancement.description" = "通过适度增强，恢复压缩音频的存在感与谐波细节。";
 "headphone_spatial.title" = "Headphone Spatial";
 "headphone_spatial.description" = "缓解耳机中的头内定位，加入更强的前方感与自然串音。";
@@ -470,3 +470,6 @@
 "sourceinfo.success" = "已读取";
 "sourceinfo.unavailable" = "无法读取";
 "sourceinfo.processing" = "处理格式";
+
+"effect.spectral_transient.name" = "Transient · Prototype";
+"effect.spectral_transient.description" = "按频段联动左右声道，轻微调整起音。不使用前瞻，切换平滑。建议从较低强度开始。";

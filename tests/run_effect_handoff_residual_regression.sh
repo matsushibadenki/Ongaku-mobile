@@ -16,9 +16,11 @@ fi
 gain_flags=()
 if [[ "${GAIN_GRAPH:-0}" == 1 ]]; then
  xcrun clang++ -std=c++20 -O2 -fobjc-arc -fblocks -I "$gain_header" -c "$gain_root/GainEnvelopeAudioUnit.mm" -o "$audit_dir/gain.o"
- gain_flags=(-D AUDIO_GAIN_TAIL_AUDIT -import-objc-header "$gain_header/GainEnvelopeAudioUnit.h" audio/AudioThreadGainStage.swift "$audit_dir/gain.o" -Xlinker -lc++)
+ gain_flags=(-D AUDIO_GAIN_TAIL_AUDIT  audio/AudioThreadGainStage.swift "$audit_dir/gain.o" -Xlinker -lc++)
 fi
-swiftc -parse-as-library -O -suppress-warnings -D EXTENDED_HANDOFF_MEASUREMENT \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$audit_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -D EXTENDED_HANDOFF_MEASUREMENT \
  -module-cache-path "$audit_dir/cache" ${gain_flags[@]+"${gain_flags[@]}"} "${effect_sources[@]}" \
  tests/EffectAuditSupport.swift audio/PlaybackHandoffClock.swift "$audit_dir/Sinc.swift" \
  tests/PlaybackHandoffWaveformRegression.swift tests/EffectHandoffResidualRegression.swift -o "$audit_dir/handoff"

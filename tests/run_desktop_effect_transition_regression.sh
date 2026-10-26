@@ -13,8 +13,10 @@ xcrun clang++ -std=c++20 -O2 -fobjc-arc -fblocks -I "$desktop_root/Sources/Ongak
  -c "$desktop_root/Sources/OngakuAudioDSP/TruePeakAudioUnit.mm" -o "$audit_dir/TruePeak.o"
 cmp audio/EffectTransitionPolicy.swift "$desktop_root/Sources/OngakuDesktop/EffectTransitionPolicy.swift"
 python3 tests/extract_desktop_effect_transition_fixture.py "$audit_dir/ShippingDesktopEffectTransition.swift" "$desktop_root"
-swiftc -parse-as-library -O -D DESKTOP_FULL_PEAK_AUDIT \
- -import-objc-header "$desktop_root/Sources/OngakuAudioDSP/include/TruePeakAudioUnit.h" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$audit_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -D DESKTOP_FULL_PEAK_AUDIT \
+  \
  "$audit_dir/TruePeak.o" -lc++ -module-cache-path "$audit_dir/module-cache" \
  "$desktop_root/Sources/OngakuDesktop/AudioEffectPreset.swift" \
  "$desktop_root/Sources/OngakuDesktop/AudioEffectNode.swift" \

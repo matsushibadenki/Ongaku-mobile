@@ -7,7 +7,7 @@ import Foundation
     }
     static func settings(_ tab: AudioEffectPageTab, _ amount: Double) -> [RealtimeAudioEffectSetting] {
         AudioEffectModuleRegistry.activeKinds.map { kind in
-            var value = RealtimeAudioEffectSetting(kind: kind, isEnabled: AudioEffectModuleRegistry.activeKinds(for: tab).contains(kind))
+            var value = RealtimeAudioEffectSetting(kind: kind, isEnabled: AudioEffectModuleRegistry.activeKinds(for: tab).contains(kind) && (!CommandLine.arguments.contains("--spectral-transient-only") || kind == .spectralTransient))
             for key in value.parameters.keys { value.parameters[key] = amount }
             value.parameters["flutter"] = 0
             return value
@@ -18,7 +18,7 @@ import Foundation
         var rows = [[String: Any]]()
         for rate in [44_100.0, 48_000, 96_000] {
         for protected in [false, true] {
-        for tab in [AudioEffectPageTab.basic, .pro] {
+        for tab in (CommandLine.arguments.contains("--spectral-transient-only") ? [AudioEffectPageTab.pro] : [.basic,.pro]) {
         for scenario in ["coalesce", "gesture", "overlap", "offRestore", "bypassOverlap", "lateOverlap", "stopOut", "stopIn"] {
             let engine = AVAudioEngine(), a = AVAudioPlayerNode(), b = AVAudioPlayerNode(), sourceMixer = AVAudioMixerNode()
             let input = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!

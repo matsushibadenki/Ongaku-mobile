@@ -18,9 +18,11 @@ if [[ "${GAIN_GRAPH:-0}" == 1 ]]; then
   gain_header="$gain_root/include"
  fi
  xcrun clang++ -std=c++20 -O2 -fobjc-arc -fblocks -I "$gain_header" -c "$gain_root/GainEnvelopeAudioUnit.mm" -o "$tail_dir/gain.o"
- gain_flags=(-D AUDIO_GAIN_TAIL_AUDIT -import-objc-header "$gain_header/GainEnvelopeAudioUnit.h" audio/AudioThreadGainStage.swift "$tail_dir/gain.o" -Xlinker -lc++)
+ gain_flags=(-D AUDIO_GAIN_TAIL_AUDIT  audio/AudioThreadGainStage.swift "$tail_dir/gain.o" -Xlinker -lc++)
 fi
-swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$tail_dir/cache" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$tail_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -module-cache-path "$tail_dir/cache" \
  ${gain_flags[@]+"${gain_flags[@]}"} "${effect_sources[@]}" \
  tests/EffectAuditSupport.swift tests/TailLatencyRegression.swift -o "$tail_dir/tail"
 "$tail_dir/tail"

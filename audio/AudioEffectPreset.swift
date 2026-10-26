@@ -94,6 +94,7 @@ enum RealtimeAudioEffectKind: String, CaseIterable, Identifiable {
     case bbe
     case body
     case exciter
+    case spectralTransient
     case gloss
     case optoFET
     case warm
@@ -108,6 +109,7 @@ enum RealtimeAudioEffectKind: String, CaseIterable, Identifiable {
         case .simulation: return L10n.tr("effect.simulation.name")
         case .bbe: return L10n.tr("effect.bbe.name")
         case .body: return L10n.tr("effect.body.name")
+        case .spectralTransient: return L10n.tr("effect.spectral_transient.name")
         case .exciter: return L10n.tr("effect.exciter.name")
         case .gloss: return L10n.tr("effect.gloss.name")
         case .optoFET: return L10n.tr("effect.opto_fet.name")
@@ -123,6 +125,7 @@ enum RealtimeAudioEffectKind: String, CaseIterable, Identifiable {
         case .simulation: return L10n.tr("effect.simulation.description")
         case .bbe: return L10n.tr("effect.bbe.description")
         case .body: return L10n.tr("effect.body.description")
+        case .spectralTransient: return L10n.tr("effect.spectral_transient.description")
         case .exciter: return L10n.tr("effect.exciter.description")
         case .gloss: return L10n.tr("effect.gloss.description")
         case .optoFET: return L10n.tr("effect.opto_fet.description")
@@ -158,6 +161,8 @@ enum RealtimeAudioEffectKind: String, CaseIterable, Identifiable {
                 EffectParameterDefinition(key: "weight", name: L10n.tr("effect.parameter.weight"), defaultValue: 0.52),
                 EffectParameterDefinition(key: "punch", name: L10n.tr("effect.parameter.punch"), defaultValue: 0.48)
             ]
+        case .spectralTransient:
+            return [EffectParameterDefinition(key: "intensity", name: L10n.tr("effect.parameter.intensity"), defaultValue: 0.20)]
         case .exciter:
             return [
                 EffectParameterDefinition(key: "mode", name: L10n.tr("effect.parameter.mode"), defaultValue: 0.0),

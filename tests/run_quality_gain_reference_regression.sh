@@ -4,7 +4,9 @@ cd "$(dirname "$0")/.."
 quality_dir=$(mktemp -d /private/tmp/OngakuQualityGain.XXXXXX)
 trap 'rm -rf "$quality_dir"' EXIT
 python3 tests/extract_dsp_transition_fixture.py "$quality_dir/ShippingDSPTransition.swift"
-swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$quality_dir/cache" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$quality_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -module-cache-path "$quality_dir/cache" \
  audio/IntegratedLoudnessMeter.swift audio/EffectMeterObservation.swift audio/EffectTransitionPolicy.swift \
  audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
  "$quality_dir/ShippingDSPTransition.swift" tests/QualityGainReferenceRegression.swift -o "$quality_dir/quality"

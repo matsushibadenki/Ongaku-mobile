@@ -15,8 +15,10 @@ case "${1:-}" in
  --handoff) shift; audit_source=tests/ProtectedGraphRegression.swift ;;
  *) audit_source=tests/FinalOutputPeakRegression.swift ;;
 esac
-swiftc -parse-as-library -O -D DESKTOP_FULL_PEAK_AUDIT \
- -import-objc-header "$desktop_root/Sources/OngakuAudioDSP/include/TruePeakAudioUnit.h" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$audit_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -D DESKTOP_FULL_PEAK_AUDIT \
+  \
  "$audit_dir/TruePeak.o" -lc++ -module-cache-path "$audit_dir/module-cache" \
  "$desktop_root/Sources/OngakuDesktop/AudioEffectPreset.swift" \
  "$desktop_root/Sources/OngakuDesktop/AudioEffectNode.swift" \

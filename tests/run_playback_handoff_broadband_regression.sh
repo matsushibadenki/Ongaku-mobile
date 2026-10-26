@@ -4,7 +4,9 @@ cd "$(dirname "$0")/.."
 handoff_broadband_dir=$(mktemp -d /private/tmp/OngakuHandoffBroadband.XXXXXX)
 trap 'rm -rf "$handoff_broadband_dir"' EXIT
 python3 tests/extract_sinc_measurement_fixture.py "$handoff_broadband_dir/ShippingSincMeasurement.swift"
-swiftc -parse-as-library -O -suppress-warnings -D EXTENDED_HANDOFF_MEASUREMENT \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$handoff_broadband_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -D EXTENDED_HANDOFF_MEASUREMENT \
     -module-cache-path "$handoff_broadband_dir/module-cache" \
     audio/AudioEffectPreset.swift audio/effects/*.swift tests/EffectAuditSupport.swift \
     audio/PlaybackHandoffClock.swift "$handoff_broadband_dir/ShippingSincMeasurement.swift" \

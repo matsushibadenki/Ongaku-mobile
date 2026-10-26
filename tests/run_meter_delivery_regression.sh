@@ -4,7 +4,9 @@ cd "$(dirname "$0")/.."
 meter_test_dir=$(mktemp -d /private/tmp/OngakuMeterDelivery.XXXXXX)
 trap 'rm -rf "$meter_test_dir"' EXIT
 python3 tests/extract_dsp_transition_fixture.py "$meter_test_dir/ShippingDSPTransition.swift"
-swiftc -parse-as-library -O -suppress-warnings -module-cache-path "$meter_test_dir/module-cache" \
+source tests/spectral_transient_audit_support.sh
+prepare_spectral_transient_audit "$meter_test_dir"
+swiftc "${spectral_native_flags[@]}" -parse-as-library -O -suppress-warnings -module-cache-path "$meter_test_dir/module-cache" \
     audio/IntegratedLoudnessMeter.swift audio/EffectMeterObservation.swift audio/EffectTransitionPolicy.swift audio/AudioEffectPreset.swift audio/effects/*.swift \
     tests/EffectAuditSupport.swift "$meter_test_dir/ShippingDSPTransition.swift" \
     tests/MeterDeliveryRegression.swift -o "$meter_test_dir/meter-delivery"
