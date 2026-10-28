@@ -83,3 +83,6 @@ Temporary Items
 dontUpload/
 # 開発用Webサイト
 website/
+
+# Local link to the separate desktop repository
+/Ongaku-desktop
