@@ -185,6 +185,9 @@
 "settings.audio_cache.clear_confirmation.title" = "要清除高音质缓存吗？";
 "settings.audio_cache.clear_confirmation.message" = "当前播放不会停止。之后进行高音质播放时，可能需要重新执行 Precision Sinc 转换。";
 "settings.section.about" = "公告";
+"settings.notice.desktop.description" = "适用于 Mac 的音乐播放器。";
+"settings.notice.matsushiba.description" = "MATSUSHIBA 官方网站。";
+"settings.notice.cue.description" = "通过讲解和测验学习的网站。";
 "settings.title" = "设置";
 "settings.section.sync" = "与 Mac 同步";
 "settings.sync.title" = "与 Ongaku Desktop 同步";

@@ -1682,7 +1682,7 @@ struct SettingsView: View {
             .listStyle(.insetGrouped)
             .navigationTitle(L10n.tr("settings.title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("common.close")) { isShowing = false } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("common.close")) { isShowing = false }.tint(.primary) } }
             .onAppear {
                 player.refreshAudioOutputPreferences()
                 player.refreshPreparedAudioCacheStatistics()
@@ -1752,9 +1752,17 @@ struct SettingsView: View {
                                 .fixedSize(horizontal: true, vertical: false)
                                 .padding(.horizontal, 14)
                                 .frame(minHeight: 44)
-                                .foregroundStyle(selectedSettingsTab == tab ? Theme.onAccent : Theme.textPrimary)
-                                .background(selectedSettingsTab == tab ? player.accentColor : Theme.secondaryBackground, in: Capsule())
-                                .overlay(Capsule().strokeBorder(Theme.border, lineWidth: selectedSettingsTab == tab ? 0 : 1))
+                                .foregroundStyle(Theme.appearance.isLight ? Color.black : Color.white)
+                                .background(
+                                    selectedSettingsTab == tab
+                                        ? player.accentColor.opacity(Theme.appearance.isLight ? 1 : 0.28)
+                                        : Theme.secondaryBackground,
+                                    in: Capsule()
+                                )
+                                .overlay(Capsule().strokeBorder(
+                                    selectedSettingsTab == tab && !Theme.appearance.isLight ? player.accentColor : Theme.border,
+                                    lineWidth: selectedSettingsTab == tab && Theme.appearance.isLight ? 0 : 1
+                                ))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.tab.\(tab.rawValue)")
@@ -1790,8 +1798,7 @@ struct SettingsView: View {
                 isShowingDesktopSync = true
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "desktopcomputer.and.arrow.down")
-                        .foregroundStyle(player.accentColor)
+                    SettingsNeutralIcon(systemImage: "desktopcomputer.and.arrow.down")
                     VStack(alignment: .leading, spacing: 3) {
                         Text(L10n.tr("settings.sync.title"))
                             .foregroundStyle(Theme.textPrimary)
@@ -1815,8 +1822,7 @@ struct SettingsView: View {
                     title: L10n.tr("settings.reload_library"),
                     detail: L10n.tr("settings.library_feedback.system_detail"),
                     workingTitle: L10n.tr("settings.system_library_loading"),
-                    feedback: player.systemLibraryFeedback,
-                    accentColor: player.accentColor
+                    feedback: player.systemLibraryFeedback
                 )
             }
             .disabled(player.systemLibraryFeedback == .working)
@@ -1828,8 +1834,7 @@ struct SettingsView: View {
                     title: L10n.tr("settings.scan_local_library"),
                     detail: L10n.tr("settings.library_feedback.local_detail"),
                     workingTitle: L10n.tr("settings.local_library_scanning"),
-                    feedback: player.localLibraryFeedback,
-                    accentColor: player.accentColor
+                    feedback: player.localLibraryFeedback
                 )
             }
             .disabled(player.localLibraryFeedback == .working)
@@ -1838,7 +1843,7 @@ struct SettingsView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(player.accentColor)
+                        .tint(.primary)
                     Text(loadingMessage)
                         .font(.appCaption())
                         .foregroundStyle(Theme.textSecondary)
@@ -1855,17 +1860,17 @@ struct SettingsView: View {
                 Button {
                     isChoosingRemoteDirectory = true
                 } label: {
-                    Label(
-                        L10n.tr("settings.remote_sources.add"),
+                    SettingsNeutralLabel(
+                        title: L10n.tr("settings.remote_sources.add"),
                         systemImage: "externaldrive.connected.to.line.below"
                     )
                 }
+                .tint(.primary)
                 .disabled(player.isPlaying || player.isPlaybackStarting)
 
                 ForEach(remoteSources.directories) { directory in
                     HStack(spacing: 12) {
-                        Image(systemName: "network")
-                            .foregroundStyle(player.accentColor)
+                        SettingsNeutralIcon(systemImage: "network")
                         Text(directory.displayName)
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
@@ -1890,8 +1895,7 @@ struct SettingsView: View {
 
             Section(L10n.tr("settings.google_drive.section")) {
                 HStack(spacing: 12) {
-                    Image(systemName: "externaldrive.badge.icloud")
-                        .foregroundStyle(player.accentColor)
+                    SettingsNeutralIcon(systemImage: "externaldrive.badge.icloud")
                     VStack(alignment: .leading, spacing: 3) {
                         Text(googleDrive.isConnected
                              ? L10n.tr("settings.google_drive.connected")
@@ -1913,6 +1917,7 @@ struct SettingsView: View {
                             if await googleDrive.refreshLibrary() { player.scanLocalLibrary() }
                         }
                     }
+                    .tint(.primary)
                     Button(L10n.tr("settings.google_drive.disconnect"), role: .destructive) {
                         Task {
                             if await googleDrive.disconnect() { player.scanLocalLibrary() }
@@ -1924,6 +1929,7 @@ struct SettingsView: View {
                             if await googleDrive.connectAndSync() { player.scanLocalLibrary() }
                         }
                     }
+                    .tint(.primary)
                 }
 
                 Text(L10n.tr("settings.google_drive.footer"))
@@ -1986,37 +1992,72 @@ struct SettingsView: View {
 
     private var noticesSections: some View {
         Section(L10n.tr("settings.section.about")) {
-            Link(destination: URL(string: "https://apps.apple.com/jp/app/ongaku-desktop/id6807717764?mt=12")!) {
-                Label("Ongaku Desktop", systemImage: "desktopcomputer")
-            }
-            Link(destination: URL(string: "https://xs927991.xsrv.jp/")!) {
-                Label("MATSUSHIBA", systemImage: "globe")
-            }
-            Link("Cue", destination: URL(string: "https://cue.college/")!)
+            NoticeLinkRow(
+                title: "Ongaku Desktop", descriptionKey: "settings.notice.desktop.description",
+                systemImage: "desktopcomputer",
+                destination: URL(string: "https://apps.apple.com/jp/app/ongaku-desktop/id6807717764?mt=12")!
+            )
+            NoticeLinkRow(
+                title: "MATSUSHIBA", descriptionKey: "settings.notice.matsushiba.description",
+                systemImage: "globe", destination: URL(string: "https://xs927991.xsrv.jp/")!
+            )
+            NoticeLinkRow(
+                title: "Cue", descriptionKey: "settings.notice.cue.description",
+                systemImage: "graduationcap", destination: URL(string: "https://cue.college/")!
+            )
         }
         .listRowBackground(Theme.secondaryBackground)
     }
 }
 
+private struct NoticeLinkRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let title: String
+    let descriptionKey: String
+    let systemImage: String
+    let destination: URL
+
+    private var textColor: Color { colorScheme == .dark ? .white : .black }
+
+    var body: some View {
+        Link(destination: destination) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: systemImage)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                    Text(L10n.tr(descriptionKey))
+                        .font(.appCaption())
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foregroundStyle(textColor)
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
 private struct LibraryActionLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let detail: String
     let workingTitle: String
     let feedback: LibraryActionFeedback
-    let accentColor: Color
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Group {
                 switch feedback {
                 case .working:
-                    ProgressView().tint(accentColor)
+                    ProgressView().tint(colorScheme == .dark ? Color.white : Color.black)
                 case .completed:
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 case .notice:
                     Image(systemName: "info.circle.fill").foregroundStyle(.orange)
                 case .idle:
-                    Image(systemName: "arrow.clockwise.circle").foregroundStyle(accentColor)
+                    SettingsNeutralIcon(systemImage: "arrow.clockwise.circle")
                 }
             }
             .frame(width: 22, height: 22)
@@ -2071,6 +2112,34 @@ struct SettingsView_Previews: PreviewProvider {
                 isShowing: .constant(true)
             )
             .environmentObject(DesktopSyncController())
+            .previewDevice("iPhone 16 Pro Max")
+        }
+    }
+}
+
+private struct NoticeLinkRow_Previews: PreviewProvider {
+    static var previews: some View {
+        Group {
+            List {
+                NoticeLinkRow(title: "Ongaku Desktop", descriptionKey: "settings.notice.desktop.description",
+                              systemImage: "desktopcomputer", destination: URL(string: "https://apps.apple.com/")!)
+                NoticeLinkRow(title: "MATSUSHIBA", descriptionKey: "settings.notice.matsushiba.description",
+                              systemImage: "globe", destination: URL(string: "https://xs927991.xsrv.jp/")!)
+                NoticeLinkRow(title: "Cue", descriptionKey: "settings.notice.cue.description",
+                              systemImage: "graduationcap", destination: URL(string: "https://cue.college/")!)
+            }
+            .preferredColorScheme(.light)
+            .previewDevice("iPhone SE (3rd generation)")
+
+            List {
+                NoticeLinkRow(title: "Ongaku Desktop", descriptionKey: "settings.notice.desktop.description",
+                              systemImage: "desktopcomputer", destination: URL(string: "https://apps.apple.com/")!)
+                NoticeLinkRow(title: "MATSUSHIBA", descriptionKey: "settings.notice.matsushiba.description",
+                              systemImage: "globe", destination: URL(string: "https://xs927991.xsrv.jp/")!)
+                NoticeLinkRow(title: "Cue", descriptionKey: "settings.notice.cue.description",
+                              systemImage: "graduationcap", destination: URL(string: "https://cue.college/")!)
+            }
+            .preferredColorScheme(.dark)
             .previewDevice("iPhone 16 Pro Max")
         }
     }

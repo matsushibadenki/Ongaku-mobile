@@ -185,6 +185,9 @@
 "settings.audio_cache.clear_confirmation.title" = "高音質キャッシュを削除しますか？";
 "settings.audio_cache.clear_confirmation.message" = "現在の再生は継続します。今後の高音質再生では、Precision Sinc変換が再度必要になる場合があります。";
 "settings.section.about" = "お知らせ";
+"settings.notice.desktop.description" = "Mac用の音楽プレーヤー。";
+"settings.notice.matsushiba.description" = "MATSUSHIBAの公式サイト。";
+"settings.notice.cue.description" = "解説やクイズで学べるサイト。";
 "settings.title" = "設定";
 "settings.section.sync" = "Macとの同期";
 "settings.sync.title" = "Ongaku Desktopと同期";

@@ -29,7 +29,7 @@ struct DesktopSyncView: View {
             }
         }
         .preferredColorScheme(Theme.appearance.colorScheme)
-        .tint(Theme.accent)
+        .tint(.primary)
     }
 
     @ViewBuilder
@@ -101,7 +101,7 @@ struct DesktopSyncView: View {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
-                            Image(systemName: "arrow.clockwise")
+                            SettingsNeutralIcon(systemImage: "arrow.clockwise")
                         }
                         Text(sync.discoveryRetryFeedback == .restarting
                             ? L10n.tr("sync.retry.restarting")
@@ -115,7 +115,7 @@ struct DesktopSyncView: View {
                         Image(systemName: feedback == .restarting
                             ? "dot.radiowaves.left.and.right"
                             : "checkmark.circle.fill")
-                            .foregroundStyle(feedback == .restarting ? Theme.accent : .green)
+                            .foregroundStyle(feedback == .restarting ? Color.primary : Color.green)
                         Text(feedback == .restarting
                             ? L10n.tr("sync.retry.searching")
                             : L10n.tr("sync.retry.ready"))
@@ -150,7 +150,7 @@ struct DesktopSyncView: View {
                         Button {
                             sync.uploadToMac(item)
                         } label: {
-                            Image(systemName: "arrow.up.to.line")
+                            SettingsNeutralIcon(systemImage: "arrow.up.to.line")
                         }
                         .accessibilityLabel(L10n.tr("sync.send_to_mac"))
                         .disabled(!isConnected)
@@ -175,9 +175,11 @@ struct DesktopSyncView: View {
                         Button {
                             sync.downloadFromMac(item)
                         } label: {
-                            Image(systemName: sync.hasLocalCopy(of: item)
-                                ? "checkmark.circle.fill"
-                                : "arrow.down.to.line")
+                            if sync.hasLocalCopy(of: item) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            } else {
+                                SettingsNeutralIcon(systemImage: "arrow.down.to.line")
+                            }
                         }
                         .accessibilityLabel(L10n.tr("sync.download_from_mac"))
                         .disabled(sync.hasLocalCopy(of: item))
@@ -224,8 +226,7 @@ struct DesktopSyncView: View {
         @ViewBuilder accessory: () -> Accessory
     ) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "music.note")
-                .foregroundStyle(Theme.accent)
+            SettingsNeutralIcon(systemImage: "music.note")
                 .frame(width: 28, height: 28)
                 .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
 
@@ -274,7 +275,7 @@ struct DesktopSyncView: View {
 
     private var connectionColor: Color {
         if case .failed = sync.connectionState { return .red }
-        return isConnected ? .green : Theme.accent
+        return isConnected ? .green : .primary
     }
 
     private func trackDetail(_ item: DeviceSyncItem) -> String {

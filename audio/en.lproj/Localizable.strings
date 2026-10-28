@@ -185,6 +185,9 @@
 "settings.audio_cache.clear_confirmation.title" = "Clear high-quality cache?";
 "settings.audio_cache.clear_confirmation.message" = "Current playback will continue. Future high-quality playback may need to run Precision Sinc conversion again.";
 "settings.section.about" = "Announcements";
+"settings.notice.desktop.description" = "A music player for Mac.";
+"settings.notice.matsushiba.description" = "The official MATSUSHIBA website.";
+"settings.notice.cue.description" = "Learn with explanations and quizzes.";
 "settings.title" = "Settings";
 "settings.section.sync" = "Mac Sync";
 "settings.sync.title" = "Sync with Ongaku Desktop";
