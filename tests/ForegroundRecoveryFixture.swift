@@ -75,6 +75,8 @@ final class ForegroundHost {
     var interruptionGeneration: UInt64 = 0
     var interruptionAllowsImmediateResume = false
     var interruptionResumeTask: Task<Void, Never>?
+    var sessionActivationRetryTask: Task<Void, Never>?
+    var deferredSessionActivation: (pause: UInt64, preparation: UInt64)?
     var unexpectedPlaybackRecoveryTask: Task<Void, Never>?
     let hiResPlaybackEngine = MockEngine()
     let systemPlayer = MockSystemPlayer()
@@ -88,6 +90,7 @@ final class ForegroundHost {
     }
     var timerRunning = false
     func resumePlaybackAfterInterruption(source: PlaybackSource, generation: UInt64) { resumeRequests += 1 }
+    func handleRemotePlayCommand() -> Bool { resumeRequests += 1; return true }
     func ensureSystemPlayerConfigured() {}
     func syncSystemPlaybackState() { refreshPlaybackState() }
     func clearForcedPausedWindow() { isInForcedPausedWindow = false }
