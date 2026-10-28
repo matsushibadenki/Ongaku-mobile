@@ -29,6 +29,7 @@ swiftc "${spectral_native_flags[@]}" -parse-as-library -O -D DESKTOP_FULL_PEAK_A
  tests/EffectAuditSupport.swift tests/ReconstructedPeak.swift tests/DesktopEffectTransitionRegression.swift -o "$audit_dir/test"
 "$audit_dir/test" "$@"
 
+if [[ " ${*} " != *" --vocal-click-only "* ]]; then
 for defect in unprotected mute unsafe-bypass; do
  if "$audit_dir/test" "--$defect-fixture" > "$audit_dir/$defect.log" 2>&1; then
   echo "FAIL: $defect defect escaped continuity checks" >&2; exit 1
@@ -41,3 +42,14 @@ for defect in unprotected mute unsafe-bypass; do
  rg -q "$expected" "$audit_dir/$defect.log" || { cat "$audit_dir/$defect.log"; exit 1; }
  echo "PASS: rejected $defect continuity defect"
 done
+fi
+
+if [[ " ${*} " == *" --vocal-presence-only "* ]]; then
+ if "$audit_dir/test" --vocal-presence-only --vocal-click-only --click-fixture > "${audit_dir}/vocal-click-negative.log" 2>&1; then
+  echo 'FAIL: abrupt click escaped PCM check' >&2; exit 1
+ fi
+ click_log="${audit_dir}/vocal-click-negative.log"
+ rg -q 'Vocal ON/OFF produced excessive adjacent PCM step' "$click_log"
+ rm -f "$click_log"
+ echo 'PASS: rejected injected vocal ON/OFF click'
+fi

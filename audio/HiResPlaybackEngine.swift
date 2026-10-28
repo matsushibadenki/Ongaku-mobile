@@ -985,7 +985,7 @@ final class HiResPlaybackEngine {
         let readySeconds = max(0.008, Double(estimatedPipelineLatencyFrames) / rate)
         let renderedSeconds: Double
         if let stamp = activePlayerNode.lastRenderTime,
-           let time = activePlayerNode.playerTime(forNodeTime: stamp),
+           let time = OngakuSafePlayerTime(activePlayerNode, stamp),
            time.isSampleTimeValid, time.sampleRate > 0 {
             renderedSeconds = Double(time.sampleTime) / time.sampleRate
         } else {
@@ -1053,7 +1053,7 @@ final class HiResPlaybackEngine {
                 throw CancellationError()
             }
             if let stamp = activePlayerNode.lastRenderTime,
-               let time = activePlayerNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid,
+               let time = OngakuSafePlayerTime(activePlayerNode, stamp), time.isSampleTimeValid,
                time.sampleRate > 0, Double(time.sampleTime) / time.sampleRate >= minimumRenderedSeconds,
                !transportFadeInPending {
                 return
@@ -1754,7 +1754,7 @@ final class HiResPlaybackEngine {
     private func renderedPosition(on node: AVAudioPlayerNode, offset: TimeInterval) -> TimeInterval? {
         guard node.isPlaying,
               let lastRenderTime = node.lastRenderTime,
-              let playerTime = node.playerTime(forNodeTime: lastRenderTime),
+              let playerTime = OngakuSafePlayerTime(node, lastRenderTime),
               playerTime.isSampleTimeValid, playerTime.sampleTime >= 0,
               playerTime.sampleRate > 0 else { return nil }
         return offset + Double(playerTime.sampleTime) / playerTime.sampleRate
@@ -4254,7 +4254,7 @@ final class HiResPlaybackEngine {
 
         guard engine.isRunning, oldNode.isPlaying,
               let renderTime = oldNode.lastRenderTime, renderTime.isHostTimeValid, renderTime.isSampleTimeValid,
-              let playerTime = oldNode.playerTime(forNodeTime: renderTime),
+              let playerTime = OngakuSafePlayerTime(oldNode, renderTime),
               playerTime.isSampleTimeValid else {
             // Without a valid render anchor, retain the original stream.
             PlaybackDebugLogger.event("audio.handoff.deferred reason=no_render_clock")
@@ -4352,7 +4352,7 @@ final class HiResPlaybackEngine {
         }
         if handoffHasRendered(handoff),
            let stamp = newNode.lastRenderTime,
-           let time = newNode.playerTime(forNodeTime: stamp), time.isSampleTimeValid,
+           let time = OngakuSafePlayerTime(newNode, stamp), time.isSampleTimeValid,
            let progress = PlaybackHandoffClock.fadeProgress(renderedFrames: time.sampleTime, sampleRate: time.sampleRate) {
             handoff.oldNode.volume = 1 - progress
             newNode.volume = progress

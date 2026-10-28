@@ -10,7 +10,7 @@ struct DSPTransitionRegression {
     static func settings(_ tab: AudioEffectPageTab?, amount: Float = 0.5) -> [RealtimeAudioEffectSetting] {
         AudioEffectModuleRegistry.activeKinds.map { kind in
             var value = RealtimeAudioEffectSetting(kind: kind,
-                isEnabled: tab.map { AudioEffectModuleRegistry.activeKinds(for: $0).contains(kind) && (!CommandLine.arguments.contains("--spectral-transient-only") || kind == .spectralTransient) } ?? false)
+                isEnabled: tab.map { AudioEffectModuleRegistry.activeKinds(for: $0).contains(kind) && (!CommandLine.arguments.contains("--spectral-transient-only") || kind == .spectralTransient) && (!CommandLine.arguments.contains("--vocal-presence-only") || kind == .vocalPresence) } ?? false)
             for key in value.parameters.keys { value.parameters[key] = Double(amount) }
             value.parameters["flutter"] = 0
             return value
@@ -27,7 +27,7 @@ struct DSPTransitionRegression {
         setbuf(stdout, nil)
         var cases = 0
         for outputRate in [44_100.0, 48_000.0, 96_000.0] {
-            for tab in (CommandLine.arguments.contains("--spectral-transient-only") ? [AudioEffectPageTab.pro] : [.basic,.pro]) {
+            for tab in ((CommandLine.arguments.contains("--spectral-transient-only") || CommandLine.arguments.contains("--vocal-presence-only")) ? [AudioEffectPageTab.pro] : [.basic,.pro]) {
                 for scenario in ["parameters", "disable", "automaticDSP", "handoffDSP", "stopCancel", "stopDSP", "gesture", "offRestore"] {
                     DispatchQueue.main.reset()
                     let engine = AVAudioEngine(), player = AVAudioPlayerNode(), eq = AVAudioUnitEQ(numberOfBands: 4), output = AVAudioMixerNode()
@@ -60,7 +60,7 @@ struct DSPTransitionRegression {
                     for ch in 0..<2 { for i in 0..<Int(source.frameLength) {
                         let time = Double(i) / 96_000
                         source.floatChannelData![ch][i] = Float((ch == 0 ? 1.0 : -0.5) *
-                            ([137.0, 997, 3901, 8033].reduce(0.0) { $0 + 0.012 * sin(2 * .pi * $1 * time) }))
+                            ([137.0, 2800, 3901, 8033].reduce(0.0) { $0 + 0.012 * sin(2 * .pi * $1 * time) }))
                     } }
                     if scenario == "offRestore" {
                         host.automaticDSPProfile = Host.AutomaticDSPProfile(lowShelfGainDB: 4, lowMidGainDB: -2, presenceGainDB: 3, highShelfGainDB: -1)
@@ -179,7 +179,13 @@ struct DSPTransitionRegression {
                                 try require(energy > min(reference, rms) * 0.1, "Continuous control created a silent PCM window")
                             }
                         }
+                        if CommandLine.arguments.contains("--click-fixture") && scenario == "disable" {
+                            samples[ch][Int(outputRate * 0.25)] += 0.25
+                        }
                         let jump = zip(samples[ch].dropFirst(), samples[ch]).map { abs($0.0 - $0.1) }.max()!
+                        if CommandLine.arguments.contains("--vocal-presence-only") && ["disable", "offRestore"].contains(scenario) {
+                            try require(jump < 0.08, "Vocal ON/OFF produced excessive adjacent PCM step")
+                        }
                         try require(samples[ch].allSatisfy(\.isFinite) && peak > 0.001 && peak <= 0.895 && rms > 0.0001, "Nonfinite/silent/over-ceiling transition")
                         print(String(format: "DSP_TRANSITION output=%.0f tab=%@ scenario=%@ channel=%d peak=%.6f rms=%.6f maximumAdjacentStep=%.6f mutations=%d", outputRate, tab.rawValue, scenario, ch, peak, rms, jump, liveMutations.count))
                     }

@@ -7,6 +7,17 @@ nonisolated enum PlaybackTransportPolicy {
         !nativeReady && (preparing || initialLibraryLoading)
     }
 
+    enum SessionRecoveryDisposition: Equatable {
+        case ignore, deferUntilForeground, activationFailure, startFailure
+    }
+
+    static func sessionRecoveryDisposition(current: Bool, playing: Bool, foreground: Bool,
+                                           leaseExpired: Bool, activationFailed: Bool) -> SessionRecoveryDisposition {
+        if !current || playing { return .ignore }
+        if !foreground && leaseExpired { return .deferUntilForeground }
+        return activationFailed ? .activationFailure : .startFailure
+    }
+
     enum InterruptionEvent {
         case began
         case ended

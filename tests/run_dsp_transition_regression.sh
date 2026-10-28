@@ -42,3 +42,13 @@ if "$dsp_transition_dir/dsp-transition" "$@" --mute-fixture > "$dsp_transition_d
 fi
 rg -q 'Continuous controls changed output envelope' "$dsp_transition_dir/mute-control.log"
 echo "PASS: continuity guards reject output muting during parameter gestures"
+
+if [[ " ${*} " == *" --vocal-presence-only "* ]]; then
+ if "$dsp_transition_dir/dsp-transition" --vocal-presence-only --click-fixture > "${dsp_transition_dir}/vocal-click-negative.log" 2>&1; then
+  echo 'FAIL: abrupt click escaped PCM check' >&2; exit 1
+ fi
+ click_log="${dsp_transition_dir}/vocal-click-negative.log"
+ rg -q 'Vocal ON/OFF produced excessive adjacent PCM step' "$click_log"
+ rm -f "$click_log"
+ echo 'PASS: rejected injected vocal ON/OFF click'
+fi

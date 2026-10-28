@@ -3,6 +3,25 @@ import Foundation
 @main
 struct PlaybackTransportRegression {
     static func main() {
+        for foreground in [false, true] {
+            for expired in [false, true] {
+                for activationFailed in [false, true] {
+                    let result = PlaybackTransportPolicy.sessionRecoveryDisposition(current: true,
+                        playing: false, foreground: foreground, leaseExpired: expired, activationFailed: activationFailed)
+                    precondition(result == (!foreground && expired ? .deferUntilForeground
+                        : (activationFailed ? .activationFailure : .startFailure)))
+                    for current in [false, true] {
+                        precondition(PlaybackTransportPolicy.sessionRecoveryDisposition(current: current,
+                            playing: true, foreground: foreground, leaseExpired: expired,
+                            activationFailed: activationFailed) == .ignore)
+                    }
+                    precondition(PlaybackTransportPolicy.sessionRecoveryDisposition(current: false,
+                        playing: false, foreground: foreground, leaseExpired: expired,
+                        activationFailed: activationFailed) == .ignore)
+                }
+            }
+        }
+        print("PASS: recovery classifies activation vs progress failure; expired background defers; stale/success suppress alerts")
         var recovery = SystemAssetRecoveryGate()
         precondition(recovery.begin(songID: 42, generation: 1))
         for _ in 0..<500 { precondition(!recovery.begin(songID: 42, generation: 1)) }

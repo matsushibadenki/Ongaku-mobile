@@ -172,6 +172,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var interruptedPlaybackSource: PlaybackSource?
     private var interruptionResumeTask: Task<Void, Never>?
     private var sessionActivationRetryTask: Task<Void, Never>?
+    private var deferredSessionActivation: (pause: UInt64, preparation: UInt64)?
     private var sessionActivationRequestID: UUID?
     private var systemTransportStartTask: Task<Void, Never>?
     private var interruptionAllowsImmediateResume = false
@@ -1058,6 +1059,17 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         isApplicationActive = true
         reconcileLocalPlaybackAfterForeground()
         resumePendingInterruptionIfNeeded()
+        if let pending = deferredSessionActivation,
+           sessionActivationRetryTask == nil {
+            deferredSessionActivation = nil
+            if PlaybackTransportPolicy.requestIsCurrent(
+                pauseToken: pending.pause, currentPauseToken: userPauseIntentToken,
+                preparationToken: pending.preparation, currentPreparationToken: playbackPreparationToken,
+                interrupted: isInterrupted, cancelled: false
+            ), !AVAudioSession.sharedInstance().isOtherAudioPlaying {
+                _ = handleRemotePlayCommand()
+            }
+        }
         if playbackSource == .system {
             // Music may have resumed from the lock screen while this app was
             // suspended. Observe its current state, not our old pause window.
@@ -4077,7 +4089,10 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 ), self.interruptionGeneration == generation else { return }
                 self.sessionActivationRetryTask = nil
                 self.isPlaybackStarting = false
-                guard !lease.expired else { return }
+                if lease.expired && !self.isApplicationActive {
+                    self.deferredSessionActivation = (pauseToken, preparationToken)
+                    return
+                }
                 handedOff = true
                 _ = self.startRemotePlaybackAfterActivation()
             } catch is CancellationError {
@@ -4235,6 +4250,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 2_000_000_000
             ]
             var lastError: Error?
+            var activationFailed = false
 
             for (attempt, delay) in retryDelays.enumerated() {
                 do {
@@ -4250,15 +4266,26 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     return
                 }
 
+                if backgroundLease.expired && !self.isApplicationActive {
+                    self.deferredSessionActivation = (pauseToken, preparationToken)
+                    return
+                }
+                var activated = false
                 do {
                     try await PlaybackAudioSession.shared.activate()
+                    activated = true
+                    activationFailed = false
+                    lastError = nil
                     guard PlaybackTransportPolicy.requestIsCurrent(
                         pauseToken: pauseToken, currentPauseToken: self.userPauseIntentToken,
                         preparationToken: preparationToken, currentPreparationToken: self.playbackPreparationToken,
                         interrupted: self.isInterrupted, cancelled: Task.isCancelled
                     ), !self.isInForcedPausedWindow else { return }
 
-                    if backgroundLease.expired { break }
+                    if backgroundLease.expired && !self.isApplicationActive {
+                        self.deferredSessionActivation = (pauseToken, preparationToken)
+                        return
+                    }
                     let didStart: Bool
                     switch self.playbackSource {
                     case .local:
@@ -4267,10 +4294,14 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                             didStart = self.resumePlaybackFromAnyKnownContext()
                             break
                         }
+                        try self.hiResPlaybackEngine.seek(to: self.hiResPlaybackEngine.currentTime())
                         try self.hiResPlaybackEngine.play()
-                        try await Task.sleep(nanoseconds: 160_000_000)
-                        didStart = self.hiResPlaybackEngine.isPlaying
-                            && self.hiResPlaybackEngine.isEngineRunning
+                        try await self.hiResPlaybackEngine.waitForPlaybackProgress()
+                        self.audioRenderHealth = self.hiResPlaybackEngine.pollRenderHealth()
+                        didStart = self.hiResPlaybackEngine.hasReachedPlaybackEnd
+                            || (self.hiResPlaybackEngine.isPlaying
+                                && self.hiResPlaybackEngine.isEngineRunning
+                                && !self.audioRenderHealth.isStalled)
                     case .system:
                         self.ensureSystemPlayerConfigured()
                         self.systemPlayer.play()
@@ -4289,9 +4320,18 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                         self.isProcessing = false
                         self.isPlaybackStarting = false
                         self.errorMessage = nil
+                        self.deferredSessionActivation = nil
                         self.sessionActivationRetryTask = nil
+                        if self.playbackSource == .local && self.hiResPlaybackEngine.hasReachedPlaybackEnd {
+                            self.handleLocalPlaybackEnded()
+                            return
+                        }
                         self.startTimer()
                         self.refreshPlaybackState()
+                        if self.playbackSource == .local {
+                            self.resumeAutomaticQualityUpgradeIfNeeded()
+                            if let index = self.systemQueueIndex { self.scheduleNextTrackPreload(after: index) }
+                        }
                         self.updateNowPlayingInfo(force: true)
                         PlaybackDebugLogger.event(
                             "audio.session.activation_recovered attempt=\(attempt + 1)"
@@ -4300,23 +4340,51 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                     }
                 } catch {
                     lastError = error
+                    activationFailed = !activated
+                    let detail = error as NSError
                     PlaybackDebugLogger.warning(
-                        "audio.session.activation_retry attempt=\(attempt + 1) error=\(error.localizedDescription)"
+                        "audio.session.activation_retry attempt=\(attempt + 1) stage=\(activated ? "playback_progress" : "session_activation") domain=\(detail.domain) code=\(detail.code) foreground=\(self.isApplicationActive) error=\(error.localizedDescription)"
                     )
                 }
             }
 
-            let playbackRecovered = self.actualPlaybackState == .playing
+            let playbackRecovered: Bool
+            if self.playbackSource == .local, self.hasInitializedHiResPlaybackEngine {
+                self.audioRenderHealth = self.hiResPlaybackEngine.pollRenderHealth()
+                playbackRecovered = self.hiResPlaybackEngine.isPlaying
+                    && self.hiResPlaybackEngine.isEngineRunning && !self.audioRenderHealth.isStalled
+            } else {
+                playbackRecovered = self.actualPlaybackState == .playing
+            }
             guard !Task.isCancelled, self.sessionActivationRequestID == requestID,
                   !playbackRecovered,
                   self.userPauseIntentToken == pauseToken,
                   self.playbackPreparationToken == preparationToken else {
                 return
             }
-            self.errorMessage = L10n.tr(
-                "error.playback_session_failed",
-                lastError?.localizedDescription ?? "Session activation failed"
-            )
+            switch PlaybackTransportPolicy.sessionRecoveryDisposition(
+                current: true, playing: playbackRecovered,
+                foreground: self.isApplicationActive, leaseExpired: backgroundLease.expired,
+                activationFailed: activationFailed
+            ) {
+            case .ignore: return
+            case .deferUntilForeground:
+                self.deferredSessionActivation = (pauseToken, preparationToken)
+            case .activationFailure:
+                if self.playbackSource == .local { self.hiResPlaybackEngine.pause() }
+                self.isPlaying = false
+                self.stopTimer()
+                self.updateNowPlayingInfo(force: true)
+                self.errorMessage = L10n.tr("error.playback_session_failed",
+                    lastError?.localizedDescription ?? L10n.tr("error.playback_resume_unconfirmed"))
+            case .startFailure:
+                if self.playbackSource == .local { self.hiResPlaybackEngine.pause() }
+                self.isPlaying = false
+                self.stopTimer()
+                self.updateNowPlayingInfo(force: true)
+                self.errorMessage = L10n.tr("error.playback_start_failed",
+                    L10n.tr("error.playback_resume_unconfirmed"))
+            }
         }
     }
 

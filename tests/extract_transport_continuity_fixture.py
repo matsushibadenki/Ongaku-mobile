@@ -41,6 +41,7 @@ final class TimerQueue {
     func reset() { events.removeAll(); seconds = 0; serial = 0 }
 }
 struct RenderTime { var sampleTime: Int64 = 960; var sampleRate = 96000.0; var isSampleTimeValid = true }
+func OngakuSafePlayerTime(_ node: TestNode, _ stamp: RenderTime) -> RenderTime? { node.playerTime(forNodeTime: stamp) }
 final class TestNode {
     var isPlaying = false
     var lastRenderTime: RenderTime? = RenderTime()

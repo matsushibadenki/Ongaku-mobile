@@ -7,7 +7,7 @@ import Foundation
     }
     static func settings(_ tab: AudioEffectPageTab, _ amount: Double) -> [RealtimeAudioEffectSetting] {
         AudioEffectModuleRegistry.activeKinds.map { kind in
-            var value = RealtimeAudioEffectSetting(kind: kind, isEnabled: AudioEffectModuleRegistry.activeKinds(for: tab).contains(kind) && (!CommandLine.arguments.contains("--spectral-transient-only") || kind == .spectralTransient))
+            var value = RealtimeAudioEffectSetting(kind: kind, isEnabled: AudioEffectModuleRegistry.activeKinds(for: tab).contains(kind) && (!CommandLine.arguments.contains("--spectral-transient-only") || kind == .spectralTransient) && (!CommandLine.arguments.contains("--vocal-presence-only") || kind == .vocalPresence))
             for key in value.parameters.keys { value.parameters[key] = amount }
             value.parameters["flutter"] = 0
             return value
@@ -18,8 +18,10 @@ import Foundation
         var rows = [[String: Any]]()
         for rate in [44_100.0, 48_000, 96_000] {
         for protected in [false, true] {
-        for tab in (CommandLine.arguments.contains("--spectral-transient-only") ? [AudioEffectPageTab.pro] : [.basic,.pro]) {
-        for scenario in ["coalesce", "gesture", "overlap", "offRestore", "bypassOverlap", "lateOverlap", "stopOut", "stopIn"] {
+        for tab in ((CommandLine.arguments.contains("--spectral-transient-only") || CommandLine.arguments.contains("--vocal-presence-only")) ? [AudioEffectPageTab.pro] : [.basic,.pro]) {
+        for scenario in (CommandLine.arguments.contains("--vocal-click-only")
+            ? ["offRestore", "bypassOverlap", "lateOverlap"]
+            : ["coalesce", "gesture", "overlap", "offRestore", "bypassOverlap", "lateOverlap", "stopOut", "stopIn"]) {
             let engine = AVAudioEngine(), a = AVAudioPlayerNode(), b = AVAudioPlayerNode(), sourceMixer = AVAudioMixerNode()
             let input = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!
             let output = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
@@ -60,7 +62,7 @@ import Foundation
             source.frameLength = source.frameCapacity
             for c in 0..<2 { for f in 0..<Int(source.frameLength) {
                 let t = Double(f) / 96_000
-                source.floatChannelData![c][f] = Float([137.0,997,3901,8033].reduce(0.0) { $0 + 0.012 * sin(2 * .pi * $1 * t) }) * (c == 0 ? 1 : -0.5)
+                source.floatChannelData![c][f] = Float([137.0,2800,3901,8033].reduce(0.0) { $0 + 0.012 * sin(2 * .pi * $1 * t) }) * (c == 0 ? 1 : -0.5)
             } }
             a.volume = 1; b.volume = 0
             a.scheduleBuffer(source); b.scheduleBuffer(source)
@@ -156,6 +158,16 @@ import Foundation
                     if !bypassScenario || start >= 0.36 { try require(ratio > 0.1, "10 ms audio dropout") }
                 }
             }
+            if CommandLine.arguments.contains("--click-fixture") && scenario == "offRestore" {
+                pcm[0][Int(rate * 0.25)] += 0.25
+            }
+            let maxAdjacentStep = pcm.map { channel in
+                zip(channel.dropFirst(), channel).map { abs($0.0 - $0.1) }.max() ?? 0
+            }.max() ?? 0
+            if CommandLine.arguments.contains("--vocal-presence-only") && ["offRestore", "bypassOverlap", "lateOverlap"].contains(scenario) {
+                try require(maxAdjacentStep < 0.08, "Vocal ON/OFF produced excessive adjacent PCM step")
+            }
+            print("DESKTOP ADJACENT rate=\(rate) scenario=\(scenario) maxStep=\(maxAdjacentStep)")
             let reconstructed = protected ? ReconstructedPeak.measure(pcm, factor: 16) : peak
             if protected { try require(reconstructed <= pow(10,-1.0/20), "Protected transition exceeded ceiling") }
             rows.append(["outputRate":rate,"truePeakEnabled":protected,"tab":tab.rawValue,"scenario":scenario,
