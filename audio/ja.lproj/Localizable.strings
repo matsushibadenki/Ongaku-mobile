@@ -388,9 +388,9 @@
 
 // Additional Japanese lyric search sites
 "lyrics.search.title" = "歌詞を検索";
-"lyrics.web.title" = "日本語歌詞をWebで検索";
+"lyrics.web.title" = "Webで検索";
 "lyrics.web.open" = "%@をブラウザで検索";
-"lyrics.web.detail" = "各サイトをブラウザで開きます。歌ネットは曲名（空欄なら歌手名）、UtaTenは両方で検索します。サイト内での閲覧用で、Ongakuへの歌詞保存・同期表示には対応しません。";
+"lyrics.web.detail" = "選んだサイトをブラウザで開き、検索語を送信します。歌ネットは曲名（空欄なら歌手名）、その他は両方で検索します。これらのサイトからOngakuへの歌詞保存・同期表示はできません。";
 
 "effects.tab.off" = "OFF";
 "effects.preparing" = "エフェクトを準備中…";

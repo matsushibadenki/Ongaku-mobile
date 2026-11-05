@@ -1,5 +1,52 @@
 # #Ongaku Roadmap
 
+## Macメディア整理と曲編集の競合 — 2026-11-04
+
+- 🟢 [Done] Mac版で同じ台帳のメタデータ書込みと整理の同時実行を防止。同じrepositoryインスタンスで整理された曲の古いパスを含む配列は保存を拒否する。
+- 🟢 [Done] 整理先行・編集先行、古い曲配列の拒否と最新パスでの再編集を含む保存・オーバーレイ関連75テスト、Mac Debugビルド、3言語strings検証が成功。iPhone側の動作変更はない。
+- 🟠 [Next] 別repositoryインスタンス／別プロセス、切替を挟む古い配列、他の並行編集と保存拒否後のUI再読込を引き続き検証する。
+- ⭕️ [Pending] Macインストール版・Sandbox、実楽曲のタグ編集と整理、外付け／ネットワーク媒体の切断・再接続、強制終了・電源断を確認する。
+
+## Macメディア整理中の競合と復旧 — 2026-11-04
+
+- 🟢 [Done] Mac版で整理直前の台帳更新を保持し、曲一覧の変更は移動前に検出。復旧中の移動失敗や、台帳確定後の移動先一時不在ではジャーナルと置換先バックアップを保持して再試行する。
+- 🟢 [Done] Macの保存関連69テスト成功。整理中のプレイリスト編集・保存先切替、障害注入後の再復旧を含む。iPhone側の動作変更はない。
+- 🟠 [Next] 曲メタデータなど他の並行編集と整理の全順序、移動開始後の切替・中断、ジャーナル破損や電源断の耐久性を引き続き検証する。
+- ⭕️ [Pending] Macインストール版・Sandbox、外付け／ネットワーク媒体の実際の切断・再接続、強制終了・電源断、実データによる確認。
+
+## Mac整理プレビューの更新競合 — 2026-11-04
+
+- 🟢 [Done] Mac版で同一ライブラリの変更後に古い整理プレビューを実行できないよう世代を照合。元ファイルと更新済み台帳の保持、新しいプレビューでの整理を含む保存関連65テストが成功。iPhone側の動作変更はない。
+- 🟠 [Next] Macの整理開始後の並行編集・保存先切替・媒体障害における台帳とファイルの整合性を引き続き検証する。
+- ⭕️ [Pending] Macインストール版・Sandboxの実画面操作、外付け媒体の物理切断と再接続、実データでの確認。
+
+## Macメディア保存先の再選択 — 2026-11-04
+
+- 🟢 [Done] Mac版の設定と修復画面で別の保存先を選択しやすくした。複数の既存ライブラリは一覧から選択でき、台帳がないフォルダは確認後にその場所へライブラリを作成し、元ファイルを移動せず曲を登録する。以前のライブラリと、各保存先のアクセス情報を保持する。
+- 🟢 [Done] 一時データで複数候補、選択先での新規登録、バックアップ保護、保存先の往復と再起動を検証。Mac側4スイート99テスト成功。iPhone本体は変更なし。
+- ⭕️ [Pending] インストール版・Sandboxでの選択ダイアログ、外付け媒体・ネットワーク切断後の権限復元と実機操作。App Store版への配布は未実施。
+
+## Macライブラリの再選択 — 2026-11-04
+
+- 🟢 [Done] 保存先のボリュームにアクセスできない状態と、選択先に別ライブラリがある状態を区別。Mac版では別ライブラリの曲数と場所を確認して開けるようにし、旧ライブラリの登録を保持する。3言語の表示と回帰42テストを確認。iPhone本体は変更なし。
+- 🟢 [Done] ユーザーが選択したMusic内の14曲のライブラリを、確認のうえXcodeデバッグ版で開いた。再起動後も14曲表示、14ファイルの存在と旧SUB登録の保持を確認。
+- ⭕️ [Pending] App Store版・Sandbox環境での同じ復旧操作、旧SUBの再接続時の復旧と実再生。App Store版への配布は行っていない。
+
+## Macの整理処理と保存先切替 — 2026-11-04
+
+- 🟢 [Done] Macの重複整理とメディア整理で開始時の保存先を固定し、切替後の旧処理が新ライブラリを更新しないようにした。別ライブラリで作成したメディア整理プレビューの実行も拒否。遅延成功・失敗、ゴミ箱移動前の切替、プレビューの持ち越しを一時ファイルで検証し、Mac側3スイート91テスト成功。iPhone本体は変更なし。
+- 🟠 [Next] 同一ライブラリ内の並行編集と古いプレビュー、整理処理がファイル移動・ゴミ箱移動を開始した後の切替について、データ保全と表示の整合性を検証する。
+- ⭕️ [Pending] インストール版・Sandbox・実再生中、および外付け媒体を含む実際の保存先切替で確認する。
+
+## Mac同期情報と保存先の分離 — 2026-11-03
+
+- 🟢 [Done] Macの同期楽曲とタグの保存にジャーナルを追加。次回読込で台帳の更新前／更新後を照合して復旧し、判定不能・書込不能ならジャーナルを維持して台帳の更新を止める。各保存段階の中断モデル、タグ書込不能からの再試行、バックアップ台帳との判定不能を含むMac側6スイート109テストが成功。iPhone本体に変更なし。
+- ⭕️ [Pending] 実際の強制終了・電源断、外付け媒体の物理切断／再接続、Sandboxでの復旧を確認。ファイル同期を行うが、ディレクトリ更新やストレージの電源断耐久性は実証していない。
+- 🟢 [Done] Mac同期の保存中に保存先切替が失敗した場合、元のライブラリで処理結果を反映するよう修正。タグを一時ファイルへ準備し、台帳保存後のタグ配置失敗では他の楽曲編集がないことを確認して台帳を復元する。復元不能時はエラー表示し、読める場合は実際の台帳を再読込する。iPhone本体の実装は変更なし。
+- 🟠 [Next] 台帳とタグは別ファイルであり、処理中の強制終了・電源断や復元中のストレージ切断に対する原子的な復旧保証は未完成。ジャーナルの電源断耐久性と判定不能時の復旧手段を引き続き検証する。
+- 🟢 [Done] Macの楽曲同期情報の適用・取り消しで保存先とタグのスナップショットを固定し、保存先切替後の古い完了・失敗が新ライブラリへ反映されないようにした。同期画面の後続Undo・通知も世代を照合する。Mac側5スイート102テスト成功（適用・取り消しの遅延成功／失敗を含む）。iPhone本体の実装・転送方式は変更なし。
+- ⭕️ [Pending] インストール版・Sandbox・実機間同期中のライブラリ切替と、保存先の切断／再接続。
+
 ## Macエフェクトモードの終了・再起動検証 — 2026-10-28
 
 - 🟢 [Done] 専用識別子・一時ライブラリを使用したMac Release実アプリで通常終了と再起動を検証。Pro／OFF／BASICが各々復元され、Proで有効にしたエフェクトの設定はOFFを経由しても保持された。旧版のOFF設定と、モード・バイパスの不一致も確認。[条件と結果](quality/EFFECT_MODE_RELAUNCH_2026-10-28.md)。
@@ -526,6 +573,8 @@
 - ⭕️ [Pending] Confirm lyrics following with physical iPhone Music playback, Bluetooth timing, background/resume and actual file-provider permissions. The transport supplies playback time; no Bluetooth latency compensation is inferred from simulator results.
 - 🟢 [Done] Add lossless M4A (AAC/ALAC) and MP4-container `.alac` lyric embedding. Update only the iTunes `©lyr` item, preserve media offsets and all non-lyric metadata, and reuse coordinated atomic replacement. Keep audio/chapter chunk tables unchanged; reject fragmented, encrypted, ambiguous or corrupt layouts. Eight 44.1/96 kHz AAC/ALAC cases with front/tail movie metadata passed packet-hash, float64 PCM, cover-art, chapter, custom/freeform-tag and technical-metadata comparisons (`bash tests/run_m4a_lyrics_regression.sh`). AVFoundation reads the new LRC in all eight cases; repeat writes are byte-identical. iOS build passed.
 - 🟢 [Done] Add browser search links for Japanese lyrics on Uta-Net and UtaTen alongside LRCLIB, using editable song metadata and correctly encoded Unicode/punctuation. Clearly distinguish browser viewing from LRCLIB's save/sync functionality; no site lyric scraping/import is performed. Localize in English/Japanese/Simplified Chinese and verify the search layout on SE (3rd generation) / 16 Pro Max preview hosts. UtaTen's live query returned HTTP 200 and retained the title.
+- 🟢 [Done] Add Genius and Smule browser searches using the editable title and artist; match the Mac URL construction and encode Unicode, punctuation and literal plus signs. English, Japanese and Simplified Chinese explain that search terms are sent to the selected site and that its lyrics cannot be saved or synced in Ongaku. URL parity checks pass for both providers, empty fields and special characters; the iPhone M4A lyrics regression and Mac provider tests pass. Browser checks showed the supplied query on both search pages; Smule requested human verification.
+- ⭕️ [Pending] Verify the two links and search layout on a physical iPhone, including narrow screens and the sites' current browser, availability and verification behavior. The iPhone full simulator build did not complete in the previous validation environment.
 - ⭕️ [Pending] Verify Uta-Net search navigation in a normal iPhone browser: this environment receives HTTP 403 on direct requests. Verify real-device M4A/ALAC embedding during playback and downstream player compatibility. Unsupported MP4 layouts retain the original file and app-local lyrics.
 - 🟢 [Done] Add per-track lyric timing adjustment (−10 to +10 seconds in 100 ms steps), persistence, reset, adjusted highlighting and seeking, without rewriting original lyrics. Verify Japanese on SE (3rd generation) and Simplified Chinese on 16 Pro Max simulator hosts; parser/persistence regressions pass.
 - 🔴 [Later] Extend embedding to additional ID3/MP4 metadata layouts with equivalent preservation tests and add desktop lyric synchronization. Consider licensed Japanese lyric API integration if available.

@@ -388,9 +388,9 @@
 
 // Additional Japanese lyric search sites
 "lyrics.search.title" = "Find lyrics";
-"lyrics.web.title" = "Japanese lyrics on the web";
+"lyrics.web.title" = "Search the web";
 "lyrics.web.open" = "Search on %@ in your browser";
-"lyrics.web.detail" = "Opens each site in your browser. Uta-Net searches by title (or artist if the title is empty); UtaTen uses both fields. These sites provide viewing only, without saving or synchronized playback in Ongaku.";
+"lyrics.web.detail" = "Opens the selected site in your browser and sends the search terms to it. Uta-Net uses the title (or artist if empty); the other sites use both. Lyrics cannot be saved or synchronized in Ongaku from these sites.";
 
 "effects.tab.off" = "OFF";
 "effects.preparing" = "Preparing effects…";

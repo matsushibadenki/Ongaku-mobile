@@ -388,9 +388,9 @@
 
 // Additional Japanese lyric search sites
 "lyrics.search.title" = "搜索歌词";
-"lyrics.web.title" = "在网站搜索日语歌词";
+"lyrics.web.title" = "在网站搜索";
 "lyrics.web.open" = "在浏览器中使用 %@ 搜索";
-"lyrics.web.detail" = "在浏览器打开网站。歌网络按歌曲名搜索（为空时使用歌手名），UtaTen 使用两个字段。这些网站仅供浏览，不支持保存到 Ongaku 或同步显示。";
+"lyrics.web.detail" = "在浏览器打开所选网站并发送搜索词。歌网络使用歌曲名（为空时使用歌手名），其他网站使用两个字段。无法从这些网站将歌词保存到 Ongaku 或同步显示。";
 
 "effects.tab.off" = "OFF";
 "effects.preparing" = "正在准备效果…";

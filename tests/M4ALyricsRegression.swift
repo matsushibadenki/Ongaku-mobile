@@ -29,10 +29,11 @@ struct M4ALyricsRegression {
             let url = site.searchURL(title: "日本語 A+B & #?", artist: "歌手/名")!
             guard url.scheme == "https", url.fragment == nil, url.absoluteString.contains("%2B") else { fatalError("unsafe search URL") }
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!
-            guard items.contains(where: { $0.value == "日本語 A+B & #?" }) else { fatalError("search text changed") }
+            let expected = (site == .genius || site == .smule) ? "日本語 A+B & #? 歌手/名" : "日本語 A+B & #?"
+            guard items.contains(where: { $0.value == expected }) else { fatalError("search text changed") }
             guard site.searchURL(title: "  ", artist: "\n") == nil else { fatalError("empty search") }
             guard site.searchURL(title: "", artist: "歌手") != nil else { fatalError("artist-only search") }
         }
-        print("PASS: \(file.lastPathComponent), Unicode LRC, repeated write, Japanese search URL encoding")
+        print("PASS: \(file.lastPathComponent), Unicode LRC, repeated write, web search URL encoding")
     }
 }
