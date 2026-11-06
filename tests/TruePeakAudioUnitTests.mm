@@ -6,6 +6,11 @@ static void check(bool ok,const char *message) { if(!ok) {fprintf(stderr,"FAIL: 
 int main() { @autoreleasepool {
     for(double rate : {44100.,48000.,96000.,192000.}) {
         AVAudioUnitEffect *node=[OngakuTruePeakAudioUnit makeNode];
+        check(node!=nil,"custom AU creation");
+        AudioComponentDescription query=node.audioComponentDescription;query.componentFlags=0;query.componentFlagsMask=0;
+        AudioComponent component=AudioComponentFindNext(nullptr,&query);check(component!=nullptr,"component lookup");
+        AudioComponentDescription actual={};check(AudioComponentGetDescription(component,&actual)==noErr,"component description");
+        check((actual.componentFlags&kAudioComponentFlag_SandboxSafe)!=0,"sandbox safe registration");
         AUAudioUnit *unit=node.AUAudioUnit;
         AVAudioFormat *format=[[AVAudioFormat alloc] initStandardFormatWithSampleRate:rate channels:2];
         NSError *error=nil;

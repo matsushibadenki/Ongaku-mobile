@@ -435,8 +435,8 @@ final class HiResPlaybackEngine {
     private let upgradePlayerNode = AVAudioPlayerNode()
     // Keep the experimental custom AU out of the device playback path until
     // real-time iPhone validation is complete. Offline AU tests are insufficient.
-    private let sourceMixer = AVAudioMixerNode()
-    private let declickMixer = AVAudioMixerNode()
+    private let sourceMixer = AudioMixerCapacity.makeMixer()
+    private let declickMixer = AudioMixerCapacity.makeMixer()
 #if ONGAKU_ENABLE_AUDIO_THREAD_GAIN
     private let effectAudioGain = AudioThreadGainStage(gain: 1)
     private let transportAudioGain = AudioThreadGainStage(gain: 0)
@@ -2070,6 +2070,7 @@ final class HiResPlaybackEngine {
 
     private func configureAudioEngine() {
         PlaybackDebugLogger.event("audio.pipeline.source_mixer=system")
+        AudioMixerCapacity.reserve(engine.mainMixerNode)
         engine.attach(playerNode)
         engine.attach(upgradePlayerNode)
         engine.attach(sourceMixer)

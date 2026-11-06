@@ -239,6 +239,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var effectAuditRefreshTimer: Timer?
     private var isEffectAuditRefreshPrimed = false
     private var isEffectScreenActive = false
+    private var qualityRecoveryNotBefore: TimeInterval = 0
     private var spatialRequestID = UUID()
     private var headphoneSpatialApplyTimer: Timer?
     private var effectApplyTimer: Timer?
@@ -3197,7 +3198,15 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         switch playbackSource {
         case .local:
             let renderHealth = hiResPlaybackEngine.pollRenderHealth()
+            if renderHealth.dropoutCount > audioRenderHealth.dropoutCount {
+                qualityRecoveryNotBefore = CFAbsoluteTimeGetCurrent() + 30
+                cancelOptionalQualityWork(reason: "render_gap")
+            }
             if renderHealth != audioRenderHealth { audioRenderHealth = renderHealth }
+            if qualityRecoveryNotBefore > 0, CFAbsoluteTimeGetCurrent() >= qualityRecoveryNotBefore {
+                qualityRecoveryNotBefore = 0
+                resumeAutomaticQualityUpgradeIfNeeded()
+            }
             let hasTrack = hiResPlaybackEngine.hasTrack
             let duration = hiResPlaybackEngine.duration
             let current = hiResPlaybackEngine.currentTime()
@@ -5574,6 +5583,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                   self.selectedSystemSongID == currentSongID,
                   self.systemQueueIndex == currentIndex,
                   self.isPlaying, self.memorySafetyMode == .normal,
+                  CFAbsoluteTimeGetCurrent() >= self.qualityRecoveryNotBefore,
                   ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue,
                   preloadMode.isPrecisionSinc else { return }
             do {
@@ -5592,7 +5602,8 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     private func startPrecisionSincUpgrade(songID: UInt64, assetURL: URL, targetUpsampling: UpsamplingMode) {
-        guard memorySafetyMode == .normal,
+        guard CFAbsoluteTimeGetCurrent() >= qualityRecoveryNotBefore,
+              memorySafetyMode == .normal,
               ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue else { return }
         precisionUpgradeTask?.cancel()
         let tokenAtStart = playbackPreparationToken

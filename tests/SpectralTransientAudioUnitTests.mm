@@ -5,7 +5,13 @@
 static void check(bool ok,const char*s){if(!ok){fprintf(stderr,"FAIL: %s\n",s);exit(1);}}
 int main(){@autoreleasepool{
  for(double rate:{44100.,48000.,96000.,192000.}) for(unsigned channels:{1u,2u,6u,8u}) {
-  AVAudioUnitEffect *node=[OngakuSpectralTransientAudioUnit makeNode];auto *unit=(OngakuSpectralTransientAudioUnit*)node.AUAudioUnit;
+  AVAudioUnitEffect *node=[OngakuSpectralTransientAudioUnit makeNode];
+  check(node!=nil,"custom AU creation");
+  AudioComponentDescription query=node.audioComponentDescription;query.componentFlags=0;query.componentFlagsMask=0;
+  AudioComponent component=AudioComponentFindNext(nullptr,&query);check(component!=nullptr,"component lookup");
+  AudioComponentDescription actual={};check(AudioComponentGetDescription(component,&actual)==noErr,"component description");
+  check((actual.componentFlags&kAudioComponentFlag_SandboxSafe)!=0,"sandbox safe registration");
+  auto *unit=(OngakuSpectralTransientAudioUnit*)node.AUAudioUnit;
   NSError *error=nil;
   AVAudioFormat *format;
   if(channels>2) {
