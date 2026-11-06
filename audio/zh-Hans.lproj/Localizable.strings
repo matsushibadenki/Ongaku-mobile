@@ -481,3 +481,5 @@
 
 "effect.vocal_presence.name" = "Vocal Presence · Prototype";
 "effect.vocal_presence.description" = "轻微调整整首歌曲的中高频，不会分离人声。建议从较低强度开始。";
+
+"sync.error.pairing_expired" = "连接请求已过期。请在Mac上重新发起配对。";

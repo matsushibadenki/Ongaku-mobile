@@ -3,6 +3,9 @@ import Foundation
 
 nonisolated enum DeviceSyncService {
     static let serviceType = "ongaku-sync"
+    static let pairingDecisionTimeout: TimeInterval = 25
+    static let invitationTimeout: TimeInterval = 30
+    static let connectionAttemptTimeout: TimeInterval = 35
 }
 
 nonisolated enum DeviceSyncConnectionState: Equatable, Sendable {

@@ -102,21 +102,62 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
         remoteItems = []
     }
 
+    // SwiftUI may dismiss the presentation before invoking its button action.
+    // Dismissal must not consume the invitation's one-shot response handler.
+    func dismissPairingPresentation(_ request: DesktopPairingRequest) {
+        guard pairingRequest?.id == request.id else { return }
+        pairingRequest = nil
+    }
+
     func acceptPairing(_ request: DesktopPairingRequest) {
+        guard let handler = lock.withLock({ invitationHandlers.removeValue(forKey: request.id) }) else {
+            PlaybackDebugLogger.event("sync.pairing.accept_ignored request=\(request.id)")
+            return
+        }
         pairingTimeoutWorkItem?.cancel()
         pairingTimeoutWorkItem = nil
-        let handler = lock.withLock { invitationHandlers.removeValue(forKey: request.id) }
-        pairingRequest = nil
-        handler?(true, session)
+        if pairingRequest?.id == request.id { pairingRequest = nil }
+        connectionState = .connecting(request.deviceName)
+        PlaybackDebugLogger.event("sync.pairing.accepted request=\(request.id)")
+        handler(true, session)
     }
 
     func declinePairing(_ request: DesktopPairingRequest) {
+        guard let handler = lock.withLock({ invitationHandlers.removeValue(forKey: request.id) }) else { return }
         pairingTimeoutWorkItem?.cancel()
         pairingTimeoutWorkItem = nil
-        let handler = lock.withLock { invitationHandlers.removeValue(forKey: request.id) }
-        pairingRequest = nil
-        handler?(false, nil)
+        if pairingRequest?.id == request.id { pairingRequest = nil }
+        PlaybackDebugLogger.event("sync.pairing.declined request=\(request.id)")
+        handler(false, nil)
         if isStarted { beginAdvertising() }
+    }
+
+    private func expirePairingRequest(_ requestID: UUID) {
+        guard let handler = lock.withLock({ invitationHandlers.removeValue(forKey: requestID) }) else { return }
+        pairingTimeoutWorkItem?.cancel()
+        pairingTimeoutWorkItem = nil
+        if pairingRequest?.id == requestID { pairingRequest = nil }
+        handler(false, nil)
+        PlaybackDebugLogger.event("sync.pairing.expired request=\(requestID)")
+        if isStarted { beginAdvertising() }
+        connectionState = .failed(L10n.tr("sync.error.pairing_expired"))
+    }
+
+    private func registerPairingInvitation(_ request: DesktopPairingRequest,
+                                          handler: @escaping (Bool, MCSession?) -> Void) {
+        guard isStarted, lock.withLock({ invitationHandlers.isEmpty }) else {
+            handler(false, nil)
+            return
+        }
+        lock.withLock { invitationHandlers[request.id] = handler }
+        advertisingRetryWorkItem?.cancel()
+        advertisingRetryWorkItem = nil
+        pairingRequest = request
+        PlaybackDebugLogger.event("sync.pairing.received request=\(request.id)")
+        let timeout = DispatchWorkItem { [weak self] in self?.expirePairingRequest(request.id) }
+        pairingTimeoutWorkItem?.cancel()
+        pairingTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + DeviceSyncService.pairingDecisionTimeout, execute: timeout)
     }
 
     func disconnect() {
@@ -141,7 +182,9 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
     }
 
     func resumeDiscovery() {
-        guard isStarted, session.connectedPeers.isEmpty else { return }
+        guard isStarted, session.connectedPeers.isEmpty,
+              lock.withLock({ invitationHandlers.isEmpty }) else { return }
+        if case .connecting = connectionState { return }
         beginAdvertising()
     }
 
@@ -198,6 +241,7 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
     }
 
     private func beginAdvertising() {
+        guard lock.withLock({ invitationHandlers.isEmpty }) else { return }
         advertisingRetryWorkItem?.cancel()
         if session.connectedPeers.isEmpty {
             connectionState = .searching
@@ -213,7 +257,7 @@ final class DesktopSyncController: NSObject, ObservableObject, @unchecked Sendab
             guard let self,
                   isStarted,
                   session.connectedPeers.isEmpty,
-                  pairingRequest == nil else { return }
+                  lock.withLock({ self.invitationHandlers.isEmpty }) else { return }
             advertiser.stopAdvertisingPeer()
             advertiser.startAdvertisingPeer()
             scheduleAdvertisingRetry()
@@ -454,32 +498,11 @@ extension DesktopSyncController: MCNearbyServiceAdvertiserDelegate {
             .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }?["pairingCode"]
             ?? pairingCode
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard pairingRequest == nil else {
-                invitationHandler(false, nil)
-                return
-            }
-            lock.withLock { self.invitationHandlers[requestID] = invitationHandler }
-            advertisingRetryWorkItem?.cancel()
-            advertisingRetryWorkItem = nil
-            pairingRequest = DesktopPairingRequest(
-                id: requestID,
-                deviceName: peerID.displayName,
-                pairingCode: receivedCode
+            guard let self else { invitationHandler(false, nil); return }
+            self.registerPairingInvitation(
+                DesktopPairingRequest(id: requestID, deviceName: peerID.displayName, pairingCode: receivedCode),
+                handler: invitationHandler
             )
-            let timeout = DispatchWorkItem { [weak self] in
-                guard let self, pairingRequest?.id == requestID else { return }
-                let handler = lock.withLock {
-                    self.invitationHandlers.removeValue(forKey: requestID)
-                }
-                pairingRequest = nil
-                pairingTimeoutWorkItem = nil
-                handler?(false, nil)
-                if isStarted { beginAdvertising() }
-            }
-            pairingTimeoutWorkItem?.cancel()
-            pairingTimeoutWorkItem = timeout
-            DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: timeout)
         }
     }
 

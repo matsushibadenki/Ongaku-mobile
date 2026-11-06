@@ -481,3 +481,5 @@
 
 "effect.vocal_presence.name" = "Vocal Presence · Prototype";
 "effect.vocal_presence.description" = "楽曲全体の中高域を控えめに調整します。ボーカルは分離せず、弱い設定からお試しください。";
+
+"sync.error.pairing_expired" = "接続要求の有効期限が切れました。Macからもう一度接続してください。";

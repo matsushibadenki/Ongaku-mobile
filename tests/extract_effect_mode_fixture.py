@@ -12,7 +12,7 @@ def block(text, anchor):
     while depth:
         depth += (text[end] == '{') - (text[end] == '}'); end += 1
     return text[start:end]
-parts = ['import Foundation', block(models, 'nonisolated enum HeadphoneHRTFPreset:'),
+parts = ['import Foundation', 'enum PlaybackDebugLogger { static func event(_ value: String) {} }', block(models, 'nonisolated enum HeadphoneHRTFPreset:'),
          block(models, 'nonisolated struct HeadphoneSpatialSettings:')]
 parts.append('''
 struct SelectionMemoryMode {

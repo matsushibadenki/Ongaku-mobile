@@ -62,7 +62,7 @@ struct audioApp: App {
                         get: { desktopSync.pairingRequest != nil },
                         set: { isPresented in
                             guard !isPresented, let request = desktopSync.pairingRequest else { return }
-                            desktopSync.declinePairing(request)
+                            desktopSync.dismissPairingPresentation(request)
                         }
                     ),
                     presenting: desktopSync.pairingRequest

@@ -1329,6 +1329,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     }
 
     func setEffectEnabled(_ isEnabled: Bool, for kind: RealtimeAudioEffectKind) {
+        PlaybackDebugLogger.event("audio.effect.user_intent kind=\(kind.rawValue) enabled=\(isEnabled) mode=\(selectedEffectPageTab.rawValue)")
         guard let index = effectSettings.firstIndex(where: { $0.kind == kind }) else { return }
         effectSettings[index].isEnabled = isEnabled
         scheduleEffectApply(after: 0.30)
@@ -1341,6 +1342,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
 
     func selectEffectPageTab(_ tab: AudioEffectPageTab) {
         guard selectedEffectPageTab != tab else { return }
+        PlaybackDebugLogger.event("audio.effects.mode_intent previous=\(selectedEffectPageTab.rawValue) selected=\(tab.rawValue)")
         selectedEffectPageTab = tab
         UserDefaults.standard.set(tab.rawValue, forKey: Self.selectedEffectPageTabDefaultsKey)
 
