@@ -54,9 +54,10 @@ xcrun simctl bootstatus "$mount_device" -b
 xcrun simctl install "$mount_device" "$mount_dir/build/Build/Products/Debug-iphonesimulator/audio.app"
 xcrun simctl privacy "$mount_device" revoke media-library local.ongaku.effects-mount
 mount_data=$(xcrun simctl get_app_container "$mount_device" local.ongaku.effects-mount data)
-rm -f "$mount_data/Documents/effects-mount.json"
+rm -f "$mount_data/Documents/effects-mount.json" "$mount_data/Documents/pipeline-error.txt"
 xcrun simctl launch --terminate-running-process "$mount_device" local.ongaku.effects-mount "--$mount_variant"
 for ((i=0;i<180;i++)); do
+ if [[ -f "$mount_data/Documents/pipeline-error.txt" ]]; then cat "$mount_data/Documents/pipeline-error.txt"; exit 1; fi
  if [[ -f "$mount_data/Documents/effects-mount.json" ]]; then
   cp "$mount_data/Documents/effects-mount.json" "$mount_out/$mount_variant.json"
   if [[ "$mount_variant" != pipeline ]]; then cp "$mount_data/Documents/effects-first.png" "$mount_out/$mount_variant.png"; fi

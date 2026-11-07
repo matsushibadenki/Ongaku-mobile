@@ -19,7 +19,7 @@ import CoreFoundation
         fixture.prepareForEffectsPresentation()
         fixture.setEffectScreenActive(true); fixture.setEffectScreenActive(true)
         precondition(fixture.qualityRecoveryNotBefore == deadline)
-        precondition(fixture.auditDelays == [0.8])
+        precondition(fixture.auditDelays == [0.8] && fixture.hiResPlaybackEngine.deferredWrites == 1)
         print("PASS: shipping preflight cancels optional tasks before activation and is idempotent")
         fixture.setEffectScreenActive(false)
         precondition(fixture.auditStops == 1 && !fixture.hasPreparedEffectsPresentation)

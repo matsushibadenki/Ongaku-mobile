@@ -19,9 +19,9 @@ s=s.replace('try file.read(into: buffer, frameCount: frameCount)', 'try FullPrep
 s=s.replace('Thread.sleep(forTimeInterval: interval)', 'FullPreparationProbe.sleep(interval)')
 s+='''
 extension HiResPlaybackEngine {
- nonisolated static func auditFullPrepare(_ url: URL) throws -> Int {
+ nonisolated static func auditFullPrepare(_ url: URL, mode: UpsamplingMode = .precisionSincMinimumPhaseEco) throws -> Int {
   let prepared = try preparePlaybackData(url: url, headphoneSpatialSettings: .default,
-       upsamplingMode: .precisionSincMinimumPhaseEco, storeSynchronously: true)
+       upsamplingMode: mode, storeSynchronously: true)
   return Int(prepared.playbackBuffer.frameLength)
  }
  nonisolated static func auditOptionalSpatial(_ buffer: AVAudioPCMBuffer) throws -> Int {
@@ -34,6 +34,22 @@ extension HiResPlaybackEngine {
   try Task.checkCancellation()
   guard isFiniteAudioBuffer(copy) else { throw HiResEngineError.upconvertFailed }
   return Int(copy.frameLength)
+ }
+ nonisolated static func auditIndependentStore(_ url: URL) throws -> (Task<Void, Never>?, URL, URL) {
+  let prepared = try preparePlaybackData(url: url, headphoneSpatialSettings: .default,
+       upsamplingMode: .precisionSincMinimumPhaseEco, skipDSPAnalysis: true)
+  let signature = fileSignatureForCache(url: url)
+  let paths = preparedAudioDiskCachePaths(url: url, sourceFileSize: signature.fileSize,
+      sourceModificationTime: signature.modificationTime, targetSampleRate: prepared.targetFormat.sampleRate,
+      upsamplingMode: prepared.upsamplingMode, spatialSettings: .default,
+      spatialProcessingApplied: prepared.spatialProcessingApplied)!
+  schedulePreparedPlaybackDataDiskStore(prepared, sourceFileSize: signature.fileSize,
+      sourceModificationTime: signature.modificationTime, spatialSettings: .default,
+      spatialProcessingApplied: prepared.spatialProcessingApplied)
+  preparedAudioDiskCacheTaskLock.lock()
+  let task = preparedAudioDiskCacheWriteTask
+  preparedAudioDiskCacheTaskLock.unlock()
+  return (task, paths.metadata, paths.baseAudio)
  }
  nonisolated static func auditResetPreparation() { clearAnalysisCache(); clearSincKernelCache() }
  nonisolated static func auditAnalysisCount() -> Int {

@@ -29,7 +29,7 @@ import CoreFoundation
     var systemAssetRecoveryTask: Task<Void, Never>?
     var precisionUpgradeTask: Task<Void, Never>?
     var preloadTrackTask: Task<Void, Never>?
-    final class Engine { var isPlaying = true }
+    final class Engine { var isPlaying = true; var deferredWrites = 0; func deferOptionalCacheWriteForPresentation() { deferredWrites += 1 } }
     let hiResPlaybackEngine = Engine()
     var isPlaying = false
     var systemQueueIndex: Int? = 0

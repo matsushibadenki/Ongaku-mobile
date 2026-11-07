@@ -1909,6 +1909,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         precisionUpgradeTask = nil
         preloadTrackTask?.cancel()
         preloadTrackTask = nil
+        hiResPlaybackEngine.deferOptionalCacheWriteForPresentation()
         PlaybackDebugLogger.event("audio.optional_work.deferred reason=effects_presentation minimumDelayMs=2000 current=\(cancelledCurrent) next=\(cancelledNext)")
     }
 

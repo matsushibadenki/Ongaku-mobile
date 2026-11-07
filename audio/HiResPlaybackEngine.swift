@@ -831,7 +831,9 @@ final class HiResPlaybackEngine {
         )
         playbackOffset = 0
 
-        if let prepared = await awaitPreloadedPlaybackData(for: preloadKey) {
+        let preloadedPrepared = await awaitPreloadedPlaybackData(for: preloadKey)
+        try Task.checkCancellation()
+        if let prepared = preloadedPrepared {
             try Task.checkCancellation()
             guard preparationGeneration == generation else { throw CancellationError() }
             guard Self.preparedPlaybackData(prepared, matches: url) else {
@@ -1487,7 +1489,9 @@ final class HiResPlaybackEngine {
             spatialSettings: headphoneSpatialSettings
         )
         let prepared: PreparedPlaybackData
-        if let cachedPrepared = await awaitPreloadedPlaybackData(for: preloadKey) {
+        let preloadedPrepared = await awaitPreloadedPlaybackData(for: preloadKey)
+        try Task.checkCancellation()
+        if let cachedPrepared = preloadedPrepared {
             prepared = cachedPrepared
         } else {
             prepared = try await Self.preparePlaybackDataInWorker(
@@ -1515,6 +1519,10 @@ final class HiResPlaybackEngine {
         }
     }
 
+    func deferOptionalCacheWriteForPresentation() {
+        Self.cancelPreparedAudioDiskCacheWrite()
+    }
+
     func seamlessUpgrade(
         url: URL,
         preparationURL: URL? = nil,
@@ -1536,7 +1544,9 @@ final class HiResPlaybackEngine {
             spatialSettings: headphoneSpatialSettings
         )
         let prepared: PreparedPlaybackData
-        if let cachedPrepared = await awaitPreloadedPlaybackData(for: preloadKey) {
+        let preloadedPrepared = await awaitPreloadedPlaybackData(for: preloadKey)
+        try Task.checkCancellation()
+        if let cachedPrepared = preloadedPrepared {
             prepared = cachedPrepared
         } else {
             qualityUpgradeWorker?.cancel()
@@ -2968,14 +2978,24 @@ final class HiResPlaybackEngine {
     private func awaitPreloadedPlaybackData(
         for key: PreloadedPlaybackKey
     ) async -> PreparedPlaybackData? {
+        guard !Task.isCancelled else { return nil }
         if let prepared = preloadedPlaybackCache.removeValue(forKey: key),
            prepared.spatialProcessingApplied == key.spatialProcessingApplied {
             return prepared
         }
         if let task = preloadTasks[key] {
-            await task.value
+            let waiter = SharedPreparationWait()
+            let completed = await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    if waiter.install(continuation) {
+                        Task { await task.value; waiter.resolve(true) }
+                    }
+                }
+            } onCancel: { waiter.resolve(false) }
+            guard completed, !Task.isCancelled else { return nil }
         }
-        guard let prepared = preloadedPlaybackCache.removeValue(forKey: key),
+        guard !Task.isCancelled,
+              let prepared = preloadedPlaybackCache.removeValue(forKey: key),
               prepared.spatialProcessingApplied == key.spatialProcessingApplied else { return nil }
         return prepared
     }
@@ -5520,5 +5540,30 @@ private extension PrecisionSincQualityMode {
         case .master:
             return SincKernelProfile(radius: 40, numPhases: 2048)
         }
+    }
+}
+
+/// A cancelled waiter leaves promptly without cancelling the shared producer.
+/// Continuation installation and cancellation may race on different executors.
+nonisolated private final class SharedPreparationWait: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Bool?
+    private var continuation: CheckedContinuation<Bool, Never>?
+    func install(_ continuation: CheckedContinuation<Bool, Never>) -> Bool {
+        lock.lock()
+        if let result {
+            lock.unlock(); continuation.resume(returning: result); return false
+        }
+        self.continuation = continuation
+        lock.unlock(); return true
+    }
+    func resolve(_ result: Bool) {
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: result)
     }
 }
