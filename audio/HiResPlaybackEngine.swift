@@ -1553,12 +1553,14 @@ final class HiResPlaybackEngine {
             qualityUpgradeWorkerGeneration &+= 1
             let workerGeneration = qualityUpgradeWorkerGeneration
             let workerStartedAt = CFAbsoluteTimeGetCurrent()
+            let cancellationTiming = PreparationCancellationTiming()
             let worker = Task.detached(priority: .background) {
                 var outcome = "failed"
                 defer {
                     let elapsed = CFAbsoluteTimeGetCurrent() - workerStartedAt
+                    let cancelLatency = cancellationTiming.latencyMilliseconds().map { String(format: "%.2f", $0) } ?? "unknown"
                     PlaybackDebugLogger.event(
-                        "audio.quality_worker.ended generation=\(workerGeneration) outcome=\(outcome) cancelled=\(Task.isCancelled) elapsed=\(String(format: "%.2f", elapsed)) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) \(Self.processMemoryDiagnostic)"
+                        "audio.quality_worker.ended generation=\(workerGeneration) outcome=\(outcome) cancelled=\(Task.isCancelled) cancelLatencyMs=\(cancelLatency) elapsed=\(String(format: "%.2f", elapsed)) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) \(Self.processMemoryDiagnostic)"
                     )
                 }
                 do {
@@ -1582,6 +1584,7 @@ final class HiResPlaybackEngine {
             prepared = try await withTaskCancellationHandler {
                 try await worker.value
             } onCancel: {
+                cancellationTiming.markRequested()
                 worker.cancel()
             }
         }
@@ -5565,5 +5568,20 @@ nonisolated private final class SharedPreparationWait: @unchecked Sendable {
         self.continuation = nil
         lock.unlock()
         continuation?.resume(returning: result)
+    }
+}
+
+/// Optional worker diagnostics only; never read or written by an audio callback.
+nonisolated private final class PreparationCancellationTiming: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requestedAt: UInt64?
+    func markRequested(now: UInt64 = DispatchTime.now().uptimeNanoseconds) {
+        lock.lock(); defer { lock.unlock() }
+        if requestedAt == nil { requestedAt = now }
+    }
+    func latencyMilliseconds(now: UInt64 = DispatchTime.now().uptimeNanoseconds) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        guard let requestedAt, now >= requestedAt else { return nil }
+        return Double(now - requestedAt) / 1_000_000
     }
 }
