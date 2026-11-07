@@ -1893,6 +1893,7 @@ final class HiResPlaybackEngine {
         if !anyChanged {
             return false
         }
+        AudioMixerCapacity.reserveAvailableMixers(in: engine)
         estimatedPipelineLatencyFrames = effectPipeline.reduce(0) { $0 + $1.estimatedLatencyFrames } + finalOutputProtectionLatencyFrames
         
         // Editing an inactive module must not re-sample audits and change
@@ -3651,19 +3652,23 @@ final class HiResPlaybackEngine {
     }
 
     nonisolated private static func readPCMBuffer(from url: URL) throws -> AVAudioPCMBuffer {
+        try Task.checkCancellation()
         let file = try AVAudioFile(forReading: url)
         let frameCount = try checkedAudioFrameCount(
             file.length,
             format: file.processingFormat,
             failure: .sourceBufferFailed
         )
+        try Task.checkCancellation()
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: file.processingFormat,
             frameCapacity: frameCount
         ) else {
             throw HiResEngineError.sourceBufferFailed
         }
+        try Task.checkCancellation()
         try file.read(into: buffer, frameCount: frameCount)
+        try Task.checkCancellation()
         return buffer
     }
 
@@ -4007,7 +4012,9 @@ final class HiResPlaybackEngine {
         skipDSPAnalysis: Bool = false,
         storeSynchronously: Bool = false
     ) throws -> PreparedPlaybackData {
+        try Task.checkCancellation()
         migratePreparedAudioDiskCacheIfNeeded()
+        try Task.checkCancellation()
         let audioFile = try AudioPreparationFailure.at(.offlineOpen) { try AVAudioFile(forReading: url) }
         let bitDepth = audioFile.fileFormat.streamDescription.pointee.mBitsPerChannel
         let sourceSampleRate = audioFile.fileFormat.sampleRate
@@ -4057,6 +4064,7 @@ final class HiResPlaybackEngine {
                spatialSettings: headphoneSpatialSettings,
                spatialProcessingApplied: spatialProcessingApplied
            ) {
+            try Task.checkCancellation()
             return cached
         }
         try Task.checkCancellation()
@@ -4087,8 +4095,11 @@ final class HiResPlaybackEngine {
         } else {
             playbackBuffer = convertedBuffer
         }
+        try Task.checkCancellation()
         if !skipDSPAnalysis {
-            guard Self.isFiniteAudioBuffer(playbackBuffer) else {
+            let isFinite = Self.isFiniteAudioBuffer(playbackBuffer)
+            try Task.checkCancellation()
+            guard isFinite else {
                 throw AudioPreparationFailure.tagging(HiResEngineError.upconvertFailed, stage: .offlineValidation)
             }
         }
@@ -4121,10 +4132,13 @@ final class HiResPlaybackEngine {
             cacheHit = true
         } else {
             diagnostics = Self.analyzeSignalLevels(in: playbackBuffer)
+            try Task.checkCancellation()
             automaticDSPProfile = Self.analyzeAutomaticDSP(in: playbackBuffer, diagnostics: diagnostics)
+            try Task.checkCancellation()
             Self.storeCachedAnalysis(.init(diagnostics: diagnostics, automaticDSPProfile: automaticDSPProfile), for: cacheKey)
             cacheHit = false
         }
+        try Task.checkCancellation()
         let duration = Double(playbackBuffer.frameLength) / targetFormat.sampleRate
         let formatDescription = HiResPlaybackFormat(
             sampleRate: targetSampleRate,
@@ -4163,6 +4177,7 @@ final class HiResPlaybackEngine {
                     spatialProcessingApplied: spatialProcessingApplied)
             }
         }
+        try Task.checkCancellation()
         return prepared
     }
 
@@ -4546,7 +4561,7 @@ final class HiResPlaybackEngine {
         let kernelSize = kernelProfile.radius * (phaseMode == .minimumPhase ? 4 : 2) + 1
         let numPhases = kernelProfile.numPhases
         let cutoff = Float(min(1.0, targetRate / sourceRate) * Double(phaseMode.cutoffScale))
-        let kernels = cachedPolyphaseSincKernels(
+        let kernels = try cachedPolyphaseSincKernels(
             cutoff: cutoff,
             kernelRadius: kernelRadius,
             kernelSize: kernelSize,
@@ -4592,12 +4607,15 @@ final class HiResPlaybackEngine {
                     throw HiResEngineError.sourceBufferFailed
                 }
                 audioFile.framePosition = AVAudioFramePosition(sourceReadStart)
+                try Task.checkCancellation()
                 try audioFile.read(into: sourceChunk, frameCount: sourceChunkCapacity)
+                try Task.checkCancellation()
                 let normalizedChunk = try normalizePrecisionSincSourceChunk(
                     sourceChunk,
                     sourceFormat: sourceFormat,
                     intermediateFormat: intermediateFormat
                 )
+                try Task.checkCancellation()
                 guard let sourceChannels = normalizedChunk.floatChannelData else {
                     throw HiResEngineError.upconvertFailed
                 }
@@ -4640,7 +4658,7 @@ final class HiResPlaybackEngine {
         var remainingDelay = workDuration * 3.0
         while remainingDelay > 0 {
             try Task.checkCancellation()
-            let interval = min(0.020, remainingDelay)
+            let interval = min(0.005, remainingDelay)
             Thread.sleep(forTimeInterval: interval)
             remainingDelay -= interval
         }
@@ -4870,7 +4888,7 @@ final class HiResPlaybackEngine {
         let kernelRadius = kernelProfile.radius * (phaseMode == .minimumPhase ? 3 : 1)
         let kernelSize = kernelProfile.radius * (phaseMode == .minimumPhase ? 4 : 2) + 1
         let numPhases = kernelProfile.numPhases
-        let polyphaseKernels = Self.cachedPolyphaseSincKernels(
+        let polyphaseKernels = try Self.cachedPolyphaseSincKernels(
             cutoff: cutoff,
             kernelRadius: kernelRadius,
             kernelSize: kernelSize,
@@ -5105,7 +5123,8 @@ final class HiResPlaybackEngine {
         numPhases: Int,
         phaseMode: PrecisionSincPhaseMode,
         qualityMode: PrecisionSincQualityMode
-    ) -> [Float] {
+    ) throws -> [Float] {
+        try Task.checkCancellation()
         let key = SincKernelCacheKey(
             kernelSize: kernelSize,
             numPhases: numPhases,
@@ -5121,6 +5140,7 @@ final class HiResPlaybackEngine {
         }
         sincKernelCacheLock.unlock()
 
+        try Task.checkCancellation()
         var kernels = [Float](repeating: 0, count: numPhases * kernelSize)
 
         // A magnitude-only minimum-phase reconstruction removes fractional
@@ -5143,15 +5163,17 @@ final class HiResPlaybackEngine {
                 if let inverse { vDSP_DFT_DestroySetup(inverse) }
             }
             if let forward, let inverse {
-                sourceFilter = Self.minimumPhaseKernel(prototype, fftSize: fftSize,
+                sourceFilter = try Self.minimumPhaseKernel(prototype, fftSize: fftSize,
                     forwardSetup: forward, inverseSetup: inverse)
             }
         }
 
         for p in 0..<numPhases {
+            try Task.checkCancellation()
             let fractional = Float(p) / Float(numPhases)
             let phaseOffset = p * kernelSize
             for k in 0..<prototypeSize {
+                if k & 0xF == 0 { try Task.checkCancellation() }
                 let coefficient = Self.sincCoefficientFloat(
                     distance: Float(k - prototypeRadius) - fractional,
                     cutoff: cutoff, kernelRadius: prototypeRadius, phaseMode: phaseMode)
@@ -5174,6 +5196,7 @@ final class HiResPlaybackEngine {
             }
         }
 
+        try Task.checkCancellation()
         sincKernelCacheLock.lock()
         if sincKernelCache.count > 24 {
             sincKernelCache.removeAll(keepingCapacity: true)
@@ -5188,7 +5211,8 @@ final class HiResPlaybackEngine {
         fftSize: Int,
         forwardSetup: vDSP_DFT_Setup,
         inverseSetup: vDSP_DFT_Setup
-    ) -> [Float] {
+    ) throws -> [Float] {
+        try Task.checkCancellation()
         guard !input.isEmpty, fftSize >= input.count else { return input }
 
         var inputReal = Array(repeating: Float(0), count: fftSize)
@@ -5197,6 +5221,7 @@ final class HiResPlaybackEngine {
         var spectrumReal = Array(repeating: Float(0), count: fftSize)
         var spectrumImag = Array(repeating: Float(0), count: fftSize)
 
+        try Task.checkCancellation()
         inputReal.withUnsafeBufferPointer { realPointer in
             inputImag.withUnsafeBufferPointer { imagPointer in
                 spectrumReal.withUnsafeMutableBufferPointer { outputRealPointer in
@@ -5213,13 +5238,16 @@ final class HiResPlaybackEngine {
             }
         }
 
+        try Task.checkCancellation()
         var logMagnitude = Array(repeating: Float(0), count: fftSize)
         for index in 0..<fftSize {
             let magnitude = max(1e-8, hypot(spectrumReal[index], spectrumImag[index]))
             logMagnitude[index] = log(magnitude)
         }
 
+        try Task.checkCancellation()
         var cepstrum = Array(repeating: Float(0), count: fftSize)
+        try Task.checkCancellation()
         var cepstrumImag = Array(repeating: Float(0), count: fftSize)
         let zeroImag = Array(repeating: Float(0), count: fftSize)
         logMagnitude.withUnsafeBufferPointer { realPointer in
@@ -5238,6 +5266,7 @@ final class HiResPlaybackEngine {
             }
         }
 
+        try Task.checkCancellation()
         let inverseScale = 1.0 / Float(fftSize)
         for index in 0..<fftSize {
             cepstrum[index] *= inverseScale
@@ -5252,6 +5281,7 @@ final class HiResPlaybackEngine {
             }
         }
 
+        try Task.checkCancellation()
         var minimumLogReal = Array(repeating: Float(0), count: fftSize)
         var minimumLogImag = Array(repeating: Float(0), count: fftSize)
         cepstrum.withUnsafeBufferPointer { realPointer in
@@ -5270,6 +5300,7 @@ final class HiResPlaybackEngine {
             }
         }
 
+        try Task.checkCancellation()
         var minimumSpectrumReal = Array(repeating: Float(0), count: fftSize)
         var minimumSpectrumImag = Array(repeating: Float(0), count: fftSize)
         for index in 0..<fftSize {
@@ -5278,6 +5309,7 @@ final class HiResPlaybackEngine {
             minimumSpectrumImag[index] = magnitude * sin(minimumLogImag[index])
         }
 
+        try Task.checkCancellation()
         var outputReal = Array(repeating: Float(0), count: fftSize)
         var outputImag = Array(repeating: Float(0), count: fftSize)
         minimumSpectrumReal.withUnsafeBufferPointer { realPointer in
@@ -5296,6 +5328,7 @@ final class HiResPlaybackEngine {
             }
         }
 
+        try Task.checkCancellation()
         let targetDC = input.reduce(0, +)
         let generatedDC = outputReal.prefix(input.count).reduce(0, +) * inverseScale
         let gain = abs(generatedDC) > 1e-8 ? targetDC / generatedDC : 1
@@ -5341,6 +5374,7 @@ final class HiResPlaybackEngine {
     }
 
     nonisolated private static func clonePlaybackBuffer(from sourceBuffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
+        try Task.checkCancellation()
         guard let clonedBuffer = AVAudioPCMBuffer(
             pcmFormat: sourceBuffer.format,
             frameCapacity: sourceBuffer.frameCapacity
@@ -5348,6 +5382,7 @@ final class HiResPlaybackEngine {
             throw HiResEngineError.upconvertBufferFailed
         }
 
+        try Task.checkCancellation()
         clonedBuffer.frameLength = sourceBuffer.frameLength
         guard let sourceChannels = sourceBuffer.floatChannelData,
               let targetChannels = clonedBuffer.floatChannelData else {
@@ -5357,7 +5392,11 @@ final class HiResPlaybackEngine {
         let channelCount = Int(sourceBuffer.format.channelCount)
         let frameCount = Int(sourceBuffer.frameLength)
         for channel in 0..<channelCount {
-            targetChannels[channel].update(from: sourceChannels[channel], count: frameCount)
+            for offset in stride(from: 0, to: frameCount, by: 16_384) {
+                try Task.checkCancellation()
+                targetChannels[channel].advanced(by: offset).update(
+                    from: sourceChannels[channel].advanced(by: offset), count: min(16_384, frameCount - offset))
+            }
         }
 
         return clonedBuffer

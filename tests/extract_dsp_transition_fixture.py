@@ -68,6 +68,8 @@ final class ShippingDSPTransition {
 ''')
 output.append(block(source, 'fileprivate struct AutomaticDSPProfile:').replace('fileprivate ', '', 1))
 output.append('''
+    // Use the real attached graph for shipping mixer-capacity reservation.
+    var engine: AVAudioEngine { activePlayerNode.engine! }
     let activePlayerNode: AVAudioPlayerNode
     let automaticDSPEQ: AVAudioUnitEQ
     let declickMixer: AVAudioMixerNode

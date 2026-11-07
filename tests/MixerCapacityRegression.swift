@@ -7,20 +7,27 @@ import Foundation
             for outputRate in [44_100.0, 48_000, 88_200, 96_000] {
                 let engine = AVAudioEngine()
                 let player = AVAudioPlayerNode()
-                let mixer = AudioMixerCapacity.makeMixer()
+                let mixer = AVAudioMixerNode()
+                let branch = AVAudioMixerNode()
                 AudioMixerCapacity.reserve(engine.mainMixerNode)
-                engine.attach(player); engine.attach(mixer)
+                engine.attach(player); engine.attach(mixer); engine.attach(branch)
                 let source = AVAudioFormat(standardFormatWithSampleRate: sourceRate, channels: 2)!
                 let processing = AVAudioFormat(standardFormatWithSampleRate: 96_000, channels: 2)!
                 let output = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 2)!
-                engine.connect(player, to: mixer, format: source)
+                engine.connect(player, to: branch, format: source)
+                engine.connect(branch, to: mixer, format: processing)
                 engine.connect(mixer, to: engine.mainMixerNode, format: processing)
+                AudioMixerCapacity.reserveAvailableMixers(in: engine)
+                guard mixer.auAudioUnit.maximumFramesToRender >= 4096, branch.auAudioUnit.maximumFramesToRender >= 4096 else { fatalError("branch capacity not reserved") }
                 try engine.enableManualRenderingMode(.offline, format: output, maximumFrameCount: 2048)
                 let input = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: 48_000)!
                 input.frameLength = input.frameCapacity
                 for c in 0..<2 { for i in 0..<Int(input.frameLength) { input.floatChannelData![c][i] = 0.1 * sin(Float(i) * 0.04) } }
                 player.scheduleBuffer(input, at: nil, options: .loops, completionHandler: nil)
                 engine.prepare(); try engine.start(); player.play()
+                let liveCapacity = mixer.auAudioUnit.maximumFramesToRender
+                AudioMixerCapacity.reserveAvailableMixers(in: engine)
+                guard mixer.auAudioUnit.maximumFramesToRender == liveCapacity else { fatalError("live resources resized") }
                 let buffer = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: 2048)!
                 var peak: Float = 0
                 for frames: AVAudioFrameCount in [512, 558, 1024, 2048, 558] {

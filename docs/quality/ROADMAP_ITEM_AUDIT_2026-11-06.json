@@ -3,6 +3,910 @@
   "source_files_scanned": 168,
   "items": [
     {
+      "section": "iPhone初回カード生成とSincキャンセル遅延 — 2026-11-07",
+      "text": "- 🟢 [Done] 全EffectCardの初回一括生成と、冷Sincカーネル生成中のキャンセル未確認を残る負荷経路として特定。メーター通知分離や表示前の取消要求だけでは防げなかった処理であり、実機ノイズの単一原因と断定しない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "cb2768de852f72289fc7",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 5,
+      "review": {
+        "report": "docs/quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku",
+            "path": "audio/HiResPlaybackEngine.swift",
+            "symbol": "nonisolated private static func cachedPolyphaseSincKernels(",
+            "line": 5105
+          },
+          {
+            "repository": "Ongaku",
+            "path": "audio/ContentView.swift",
+            "symbol": "LazyVStack(spacing: 20) { // Defer offscreen effect cards.",
+            "line": 1144
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku",
+            "path": "tests/SincCancellationRegression.swift",
+            "symbol": "@main struct SincCancellationRegression",
+            "line": 4
+          },
+          {
+            "repository": "Ongaku",
+            "path": "tests/EffectsMountAuditApp.swift",
+            "symbol": "func run() async",
+            "line": 24
+          }
+        ],
+        "scope": "Actual isolated Simulator UI mount/scroll, Mac extracted Sinc cancellation and coefficient equality, 14 existing groups, benchmark typecheck and iPhone unsigned build. Physical audible/GPU/full-pipeline latency remains Pending."
+      }
+    },
+    {
+      "section": "iPhone初回カード生成とSincキャンセル遅延 — 2026-11-07",
+      "text": "- 🟢 [Done] 画面外カードを遅延生成し、見出し・実際の先頭アンカー・設定と音声経路を維持。Sinc生成・キャッシュ公開・読込前後へ取消確認を追加。係数3種は旧実装と同一、取消済みの未完成キャッシュを残さない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "e451d085734c300ca15f",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 6,
+      "review": {
+        "report": "docs/quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku",
+            "path": "audio/HiResPlaybackEngine.swift",
+            "symbol": "nonisolated private static func cachedPolyphaseSincKernels(",
+            "line": 5105
+          },
+          {
+            "repository": "Ongaku",
+            "path": "audio/ContentView.swift",
+            "symbol": "LazyVStack(spacing: 20) { // Defer offscreen effect cards.",
+            "line": 1144
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku",
+            "path": "tests/SincCancellationRegression.swift",
+            "symbol": "@main struct SincCancellationRegression",
+            "line": 4
+          },
+          {
+            "repository": "Ongaku",
+            "path": "tests/EffectsMountAuditApp.swift",
+            "symbol": "func run() async",
+            "line": 24
+          }
+        ],
+        "scope": "Actual isolated Simulator UI mount/scroll, Mac extracted Sinc cancellation and coefficient equality, 14 existing groups, benchmark typecheck and iPhone unsigned build. Physical audible/GPU/full-pipeline latency remains Pending."
+      }
+    },
+    {
+      "section": "iPhone初回カード生成とSincキャンセル遅延 — 2026-11-07",
+      "text": "- 🟢 [Done] 同一Simulator実行ファイルの比較でカード評価11→2、下端スクロール・先頭復帰・Pro保持を確認。Mac上の冷生成取消3回は約46〜55ms→約1.2〜4.9ms。既存14群・係数／取消回帰・ベンチマーク利用側型検査とiPhone署名なしビルド成功。[測定・制限・ログ](quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md)を保存。Mac実行コード・共通DSPは変更なし。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "d305be78b068fed60737",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 7,
+      "review": {
+        "report": "docs/quality/EFFECTS_MOUNT_CANCELLATION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku",
+            "path": "audio/HiResPlaybackEngine.swift",
+            "symbol": "nonisolated private static func cachedPolyphaseSincKernels(",
+            "line": 5105
+          },
+          {
+            "repository": "Ongaku",
+            "path": "audio/ContentView.swift",
+            "symbol": "LazyVStack(spacing: 20) { // Defer offscreen effect cards.",
+            "line": 1144
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku",
+            "path": "tests/SincCancellationRegression.swift",
+            "symbol": "@main struct SincCancellationRegression",
+            "line": 4
+          },
+          {
+            "repository": "Ongaku",
+            "path": "tests/EffectsMountAuditApp.swift",
+            "symbol": "func run() async",
+            "line": 24
+          }
+        ],
+        "scope": "Actual isolated Simulator UI mount/scroll, Mac extracted Sinc cancellation and coefficient equality, 14 existing groups, benchmark typecheck and iPhone unsigned build. Physical audible/GPU/full-pipeline latency remains Pending."
+      }
+    },
+    {
+      "section": "iPhone初回カード生成とSincキャンセル遅延 — 2026-11-07",
+      "text": "- ⭕️ [Pending] iPhone実機で初回／再表示の音切れ・ノイズ、再生中の操作・スクロール、全ライブラリ、画面サイズ、読込・FFT・確保・待機を含む全変換取消時間、切替・停止再開・復帰、GPU負荷・署名済み構成・温度電力を確認。隔離描画とMac上の取消測定を実機解消とは扱わない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "ce9a594f79574cb1565f",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 8
+    },
+    {
+      "section": "iPhoneエフェクト画面の不要なメーター通知を分離 — 2026-11-07",
+      "text": "- 🟢 [Done] エフェクト画面がプレイヤー全体を監視し、表示に不要なVU・スペクトラム・再生位置更新でラック全体を再評価していた経路を確認。前回の任意変換延期では残るUI負荷であり、実機ノイズの単一原因と断定しない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "9d6d5a7f0bc539f7252d",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 12,
+      "review": {
+        "report": "docs/quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku",
+            "path": "audio/AudioPlayerViewModel.swift",
+            "symbol": "var effectsPresentationEvents:",
+            "line": 1873
+          },
+          {
+            "repository": "Ongaku",
+            "path": "audio/ContentView.swift",
+            "symbol": "private struct EffectsTabContent: View",
+            "line": 915
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku",
+            "path": "tests/EffectEventsRegression.swift",
+            "symbol": "@main struct EffectEventsRegression",
+            "line": 4
+          }
+        ],
+        "scope": "Production publisher-selection fixture, existing preflight/navigation/DSP regressions and unsigned iOS Simulator build. No physical audio or real SwiftUI performance measurement."
+      }
+    },
+    {
+      "section": "iPhoneエフェクト画面の不要なメーター通知を分離 — 2026-11-07",
+      "text": "- 🟢 [Done] 設定・モード・準備・復旧・診断の21通知だけへ監視を限定し、同期変更を集約。既存の表示前キャンセル・再開保護を維持し、音声グラフ・DSP・音量・レートは変更しない。実ソース抽出試験で不要1800通知から画面通知0、必要な設定／状態反映を確認。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "a00dec7808bdca0ee53d",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 13,
+      "review": {
+        "report": "docs/quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku",
+            "path": "audio/AudioPlayerViewModel.swift",
+            "symbol": "var effectsPresentationEvents:",
+            "line": 1873
+          },
+          {
+            "repository": "Ongaku",
+            "path": "audio/ContentView.swift",
+            "symbol": "private struct EffectsTabContent: View",
+            "line": 915
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku",
+            "path": "tests/EffectEventsRegression.swift",
+            "symbol": "@main struct EffectEventsRegression",
+            "line": 4
+          }
+        ],
+        "scope": "Production publisher-selection fixture, existing preflight/navigation/DSP regressions and unsigned iOS Simulator build. No physical audio or real SwiftUI performance measurement."
+      }
+    },
+    {
+      "section": "iPhoneエフェクト画面の不要なメーター通知を分離 — 2026-11-07",
+      "text": "- 🟢 [Done] 通知4群・表示前保護4群・既存ナビゲーション6群とDSP遷移回帰が成功。iPhone Debug Simulator署名なしビルド成功。[条件・ログ](quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md)を保存。Mac実行コードは変更なし。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "a6e8b90043d5e8498d55",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 14,
+      "review": {
+        "report": "docs/quality/EFFECTS_TELEMETRY_ISOLATION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku",
+            "path": "audio/AudioPlayerViewModel.swift",
+            "symbol": "var effectsPresentationEvents:",
+            "line": 1873
+          },
+          {
+            "repository": "Ongaku",
+            "path": "audio/ContentView.swift",
+            "symbol": "private struct EffectsTabContent: View",
+            "line": 915
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku",
+            "path": "tests/EffectEventsRegression.swift",
+            "symbol": "@main struct EffectEventsRegression",
+            "line": 4
+          }
+        ],
+        "scope": "Production publisher-selection fixture, existing preflight/navigation/DSP regressions and unsigned iOS Simulator build. No physical audio or real SwiftUI performance measurement."
+      }
+    },
+    {
+      "section": "iPhoneエフェクト画面の不要なメーター通知を分離 — 2026-11-07",
+      "text": "- ⭕️ [Pending] iPhone内蔵スピーカーで初回／再表示、OFF/BASIC/Pro、変換中・先読み中、スクロール・操作、停止再開・復帰を確認。実機の波形・フレーム／render締切、初回構築コストと全変換のキャンセル遅延を測定し、実ノイズ解消・描画負荷削減を確認する。通知試験やビルドだけで聴感問題を解決扱いにしない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "a8ba7375d94a48370e24",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 15
+    },
+    {
+      "section": "Macウインドウ初期接続のレイアウト再帰を特定・修正 — 2026-11-07",
+      "text": "- 🟢 [Done] 実アプリの_NSDetectedLayoutRecursionで停止し、NSHostingView.layout中のWindowProbeView→connect→attach→setStyleMaskを発生元として特定。前回の背景・スクローラー対策では初回ウインドウ接続を覆っていなかったことを確認。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "224002476b499fd44f49",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 19,
+      "review": {
+        "report": "docs/quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/WindowPresentationController.swift",
+            "symbol": "func scheduleWindowChange()",
+            "line": 286
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/WindowBridgeLayoutTests.swift",
+            "symbol": "func hostingLayoutDoesNotReenterWindow()",
+            "line": 40
+          }
+        ],
+        "scope": "Actual app startup breakpoint before/after; 52 related regressions; Mac Debug and App Store Release unsigned builds. Full-library installed app and other OS/UI states remain Pending."
+      }
+    },
+    {
+      "section": "Macウインドウ初期接続のレイアウト再帰を特定・修正 — 2026-11-07",
+      "text": "- 🟢 [Done] 挿入・SwiftUI更新時のウインドウ接続を次のメインキューへ集約し、最新の所属先だけへ反映。退役時の通知解除、不要なstyle書込の回避、style適用後の現行ミニ化ボタン取得を追加。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "06766fdb4cfad7862c84",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 20,
+      "review": {
+        "report": "docs/quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/WindowPresentationController.swift",
+            "symbol": "func scheduleWindowChange()",
+            "line": 286
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/WindowBridgeLayoutTests.swift",
+            "symbol": "func hostingLayoutDoesNotReenterWindow()",
+            "line": 40
+          }
+        ],
+        "scope": "Actual app startup breakpoint before/after; 52 related regressions; Mac Debug and App Store Release unsigned builds. Full-library installed app and other OS/UI states remain Pending."
+      }
+    },
+    {
+      "section": "Macウインドウ初期接続のレイアウト再帰を特定・修正 — 2026-11-07",
+      "text": "- 🟢 [Done] 実NSHostingViewを含む52試験／4 suite、Mac Debug・App Store Release署名なしビルド成功。修正前の実アプリで再現し、修正後2回の隔離ライブラリ起動で再帰breakpoint未検出（最終35.05秒）。[原因・検証・ログ](quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md)を保存。iPhone実行コード・共通DSPは変更なし。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "37f331b0b6bc29134237",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 21,
+      "review": {
+        "report": "docs/quality/WINDOW_LAYOUT_RECURSION_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/WindowPresentationController.swift",
+            "symbol": "func scheduleWindowChange()",
+            "line": 286
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/WindowBridgeLayoutTests.swift",
+            "symbol": "func hostingLayoutDoesNotReenterWindow()",
+            "line": 40
+          }
+        ],
+        "scope": "Actual app startup breakpoint before/after; 52 related regressions; Mac Debug and App Store Release unsigned builds. Full-library installed app and other OS/UI states remain Pending."
+      }
+    },
+    {
+      "section": "Macウインドウ初期接続のレイアウト再帰を特定・修正 — 2026-11-07",
+      "text": "- ⭕️ [Pending] 署名済み実アプリとユーザーの全ライブラリで起動・タブ・テーマ・サイズ・シート・ミニ表示復帰、複数画面と別macOSを確認。音切れ・実出力・接続拒否・OS警告は別項目として維持し、今回の起動経路以外の再帰解消も保証しない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "e8c598affb9ad5b119f8",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 22
+    },
+    {
+      "section": "Mac背景レイアウト再入の追加保護と同期診断 — 2026-11-07",
+      "text": "- 🟢 [Done] スペクトラム背景のマスク／Core Imageフィルター更新をlayout内から次のメインキューへ移動し、連続リサイズを集約。SwiftUI更新時のappearance／opacityも必要時だけ遅延反映し、現在の背景形状とテーマに合わせる。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "7d07a6dac4fcd9d1dfdf",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 26
+    },
+    {
+      "section": "Mac背景レイアウト再入の追加保護と同期診断 — 2026-11-07",
+      "text": "- 🟢 [Done] 背景リサイズ・テーマ・退役、既存クリック／スクロール・同期モデルの30試験／3 suiteと、ペアリング所有権6群が成功。Mac Debug・App Store Release、iPhone Debug Simulator署名なしビルド成功。[条件・ログ](quality/DESKTOP_LAYOUT_WARNING_2026-11-07.md)を保存。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "680d7a64e54afb03e79f",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 27
+    },
+    {
+      "section": "Mac背景レイアウト再入の追加保護と同期診断 — 2026-11-07",
+      "text": "- 🟢 [Done] Mac/iPhoneの同期セッション状態を同じログ形式で記録。接続拒否との照合を可能にし、再接続・招待の頻度や転送仕様は変更しない。音声DSPと通常ビルドのtrue-peak設定も変更しない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "40307cc97cab3553d1f0",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 28
+    },
+    {
+      "section": "Mac背景レイアウト再入の追加保護と同期診断 — 2026-11-07",
+      "text": "- ⭕️ [Pending] ユーザー環境の全画面で残存する別のレイアウト再帰経路の確認（初回ウインドウ接続は上記で特定・修正済み）、実Mac/iPhoneの接続拒否・復帰、OS署名／CoreMedia／factory警告、実88.2 kHz出力。今回のログに-10874がないことだけで元の音声問題の解消とは扱わない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "34aac49e6fbb9394f3de",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 29
+    },
+    {
+      "section": "iPhoneエフェクト画面表示時の再生優先 — 2026-11-07",
+      "text": "- 🟢 [Done] エフェクトタブの状態変更前に任意の高音質変換・次曲先読みへキャンセルを要求し、再投入を最低2秒待機。重複呼出しを抑え、既存の長い音切れ待機時間を短縮しない。再生グラフや音源復旧、エフェクト設定を変更せず表示負荷との競合を減らす。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "69127afbc906a6f97095",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 33
+    },
+    {
+      "section": "iPhoneエフェクト画面表示時の再生優先 — 2026-11-07",
+      "text": "- 🟢 [Done] 待機後はアプリとエンジンの再生中を確認し、現在曲の変換と欠けた次曲先読みを再投入。一時停止中は待機を保持し、既存先読みは保つ。実装抽出による4群の回帰とiPhone Debug Simulator署名なしビルド成功。[条件・ログ](quality/EFFECTS_PRESENTATION_2026-11-07.md)を保存。iPhone専用の表示／任意処理スケジューリングで、共通DSP・Mac再生処理の変更はない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "712aa803314081d4708b",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 34
+    },
+    {
+      "section": "iPhoneエフェクト画面表示時の再生優先 — 2026-11-07",
+      "text": "- ⭕️ [Pending] iPhone内蔵スピーカーで、初回／再表示、高音質変換中・次曲先読み中、停止再開・foreground復帰を実操作してノイズを再確認。gapログがないことだけで短いノイズを否定せず、今回の対策を実機での解消とは扱わない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "5abcdacc9881f2658b35",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 35
+    },
+    {
+      "section": "独立したサンプル間ピークと長い残響・リリース — 2026-11-07",
+      "text": "- 🟢 [Done] 製品検出器とは異なるKaiser窓・Float64・32倍補間の測定器を追加。既知のサンプル間超過・DC・無音・端部パルスで校正し、最悪PCMを64倍／長いカーネルでも再測定。推定ピーク差は約0.00075 dB。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "60800182fe39908fa9a0",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 39,
+      "review": {
+        "report": "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/PlaybackController.swift",
+            "symbol": "func auditProductFrames(",
+            "line": 1748
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentIntersampleMeter.swift",
+            "symbol": "struct IndependentIntersampleMeter",
+            "line": 6
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func analyticCalibration(",
+            "line": 8
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func phaseLevelAndLongTail(",
+            "line": 56
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentLimiterReleaseTests.swift",
+            "symbol": "func quietProbeRecovers(",
+            "line": 9
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductFrameCapacityTests.swift",
+            "symbol": "func routeAndTrackTransitions(",
+            "line": 62
+          }
+        ],
+        "scope": "Calibrated independent reconstruction; 16 phase/level product captures, 2 eight-second tails, isolated final limiter release, prior 32-render regression; Mac build and shared iOS meter compilation. Excludes physical/DAC/ordinary unprotected build qualification."
+      }
+    },
+    {
+      "section": "独立したサンプル間ピークと長い残響・リリース — 2026-11-07",
+      "text": "- 🟢 [Done] 保護ON/ON製品経路で位相×音量・異なる入力ファイルの16条件と8秒cathedral残響2条件が成功。最大推定ピークは約-1.480 dBTP、判定基準−1 dBTP以下。残響の減衰、最終保護単体の強入力後の小信号回復、既存再構築／再利用32描画を含む4試験／4 suiteが成功。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "89eedc40f3c35d3c849a",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 40,
+      "review": {
+        "report": "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/PlaybackController.swift",
+            "symbol": "func auditProductFrames(",
+            "line": 1748
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentIntersampleMeter.swift",
+            "symbol": "struct IndependentIntersampleMeter",
+            "line": 6
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func analyticCalibration(",
+            "line": 8
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func phaseLevelAndLongTail(",
+            "line": 56
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentLimiterReleaseTests.swift",
+            "symbol": "func quietProbeRecovers(",
+            "line": 9
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductFrameCapacityTests.swift",
+            "symbol": "func routeAndTrackTransitions(",
+            "line": 62
+          }
+        ],
+        "scope": "Calibrated independent reconstruction; 16 phase/level product captures, 2 eight-second tails, isolated final limiter release, prior 32-render regression; Mac build and shared iOS meter compilation. Excludes physical/DAC/ordinary unprotected build qualification."
+      }
+    },
+    {
+      "section": "独立したサンプル間ピークと長い残響・リリース — 2026-11-07",
+      "text": "- 🟢 [Done] Mac内部構成Debug・App Store Release署名なしビルド成功。同一測定器をiPhone試験側へ置き、iOS Simulatorモジュールのコンパイルとnative DSP・AU・容量方針の一致を確認。[条件・実測値・限界](quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md)を保存。測定上の超過がなくDSP係数・配布設定は変更しない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "94b0130f27961e3b28ab",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 41,
+      "review": {
+        "report": "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/PlaybackController.swift",
+            "symbol": "func auditProductFrames(",
+            "line": 1748
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentIntersampleMeter.swift",
+            "symbol": "struct IndependentIntersampleMeter",
+            "line": 6
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func analyticCalibration(",
+            "line": 8
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func phaseLevelAndLongTail(",
+            "line": 56
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentLimiterReleaseTests.swift",
+            "symbol": "func quietProbeRecovers(",
+            "line": 9
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductFrameCapacityTests.swift",
+            "symbol": "func routeAndTrackTransitions(",
+            "line": 62
+          }
+        ],
+        "scope": "Calibrated independent reconstruction; 16 phase/level product captures, 2 eight-second tails, isolated final limiter release, prior 32-render regression; Mac build and shared iOS meter compilation. Excludes physical/DAC/ordinary unprotected build qualification."
+      }
+    },
+    {
+      "section": "独立したサンプル間ピークと長い残響・リリース — 2026-11-07",
+      "text": "- ⭕️ [Pending] 実Mac/iPhoneのDAC・88.2 kHz機器切替・切断復帰、元のエラー／音切れ、実曲の曲送り・背景復帰、署名・聴感・クリック・温度電力。今回の推定補間を認証測定や最終保護OFFの通常構成の保証とは扱わない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "2f73edec156a8e06e7c3",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 42
+    },
+    {
+      "section": "保護併用製品経路の強入力・高クレスト信号 — 2026-11-07",
+      "text": "- 🟢 [Done] 全エフェクト・保護併用構成で、振幅4.0の正弦波／高クレスト信号、44.1/48 kHz音源、88.2/48 kHz出力、512/2048フレーム、クリッピング防止ON/OFFを検証。再構築・再利用の64描画すべてで有限・非無音とグラフ世代維持を確認。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "bc9974e22c42e7f19bf4",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 46
+    },
+    {
+      "section": "保護併用製品経路の強入力・高クレスト信号 — 2026-11-07",
+      "text": "- 🟢 [Done] 最大サンプルピーク0.84139514、試験上限0.9以下で成功（1試験宣言）。iPhone/Macのnative保護実装・容量ポリシーの一致を確認。[条件とログ](quality/PRODUCT_STRONG_INPUT_2026-11-07.md)を保存。今回は試験追加のみで、DSP・配布設定の変更や独立iPhone／Xcodeアプリの再ビルドは行っていない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "b1836f4898e74ffb7caa",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 47
+    },
+    {
+      "section": "保護併用製品経路の強入力・高クレスト信号 — 2026-11-07",
+      "text": "- 🟢 [Done] 上記の独立測定・位相／音量・長い残響／リリースは、後続の[独立補間測定](quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md)で検証済み。実機聴感はPendingを維持。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "f5fef8c33da7a4441cda",
+      "code_candidates": [],
+      "references": [
+        "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md"
+      ],
+      "verification": "current_implementation_and_regression_scope_reviewed",
+      "line": 48,
+      "review": {
+        "report": "docs/quality/INDEPENDENT_INTERSAMPLE_2026-11-07.md",
+        "code": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Sources/OngakuDesktop/PlaybackController.swift",
+            "symbol": "func auditProductFrames(",
+            "line": 1748
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentIntersampleMeter.swift",
+            "symbol": "struct IndependentIntersampleMeter",
+            "line": 6
+          }
+        ],
+        "tests": [
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func analyticCalibration(",
+            "line": 8
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductIntersampleTests.swift",
+            "symbol": "func phaseLevelAndLongTail(",
+            "line": 56
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/IndependentLimiterReleaseTests.swift",
+            "symbol": "func quietProbeRecovers(",
+            "line": 9
+          },
+          {
+            "repository": "Ongaku-desktop",
+            "path": "Tests/OngakuDesktopTests/ProductFrameCapacityTests.swift",
+            "symbol": "func routeAndTrackTransitions(",
+            "line": 62
+          }
+        ],
+        "scope": "Calibrated independent reconstruction; 16 phase/level product captures, 2 eight-second tails, isolated final limiter release, prior 32-render regression; Mac build and shared iOS meter compilation. Excludes physical/DAC/ordinary unprotected build qualification."
+      }
+    },
+    {
+      "section": "保護併用製品経路の強入力・高クレスト信号 — 2026-11-07",
+      "text": "- ⭕️ [Pending] 元の実88.2 kHzエラー、機器切替・切断復帰、実曲の曲送り・リピート、署名済み配布構成、iPhone/Mac実機のクリック・残響・聴感・温度電力。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "3d58b528c7913d6469a6",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 49
+    },
+    {
+      "section": "true-peak・共通音量保護併用の製品経路 — 2026-11-07",
+      "text": "- 🟢 [Done] 内部検証構成で最終true-peakと共通音量保護を同時に有効化。全エフェクト・内部45ミキサー、88.2 kHzを含む再構築16件＋再利用16件の描画が成功。true-peak生成を必須確認し、検証口のゲインは資源確保後に反映するよう整備した。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "9d5211a839a8e253eeac",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 53
+    },
+    {
+      "section": "true-peak・共通音量保護併用の製品経路 — 2026-11-07",
+      "text": "- 🟢 [Done] 同じ構成で実コントローラーの互換曲読み替え・停止再開・クロスフェード回帰2件、Xcode Debug署名なしビルド成功。iPhone/Macのtrue-peak・ゲインAU実装と容量ポリシーの一致を確認。[条件・ログ](quality/PROTECTED_PRODUCT_FRAME_2026-11-07.md)を保存。通常配布設定の変更やiPhoneの再ビルドは行っていない。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "82bf87b2e2a25d2e72e6",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 54
+    },
+    {
+      "section": "true-peak・共通音量保護併用の製品経路 — 2026-11-07",
+      "text": "- ⭕️ [Pending] 実機の88.2 kHz出力・切断復帰・元のエラー再現、実曲末／リピート、聴感・クリック・残響、署名済み配布構成・温度電力。今回は両保護ONの内部構成であり、全フラグ組み合わせ・強入力の保護精度や実機問題の解消とは扱わない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "0f70557120e85d6b9d39",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 55
+    },
+    {
+      "section": "全エフェクトを含む曲間グラフ再利用 — 2026-11-07",
+      "text": "- 🟢 [Done] 製品経路の試験を拡張し、再構築16ケース＋同形式の別ファイルでの再利用16ケースが成功。状態リセット後もグラフ世代を保持し、512/2048フレーム・88.2 kHzを含む形式切替で有限・非無音PCMを確認。全エフェクトON・パラメーター中間値、製品のクロスフェード計算を使用。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "1553b871a4c8f23fa5eb",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 59
+    },
+    {
+      "section": "全エフェクトを含む曲間グラフ再利用 — 2026-11-07",
+      "text": "- 🟢 [Done] 実コントローラーの互換ファイル再読込・ノード同一性・正規化参照・停止再開・非互換mono・クリア後再読込の回帰成功。Mac Debug署名なしビルド成功。iPhoneと共通の容量ポリシー一致を確認。[条件・ログ](quality/PRODUCT_FRAME_REUSE_2026-11-07.md)を保存。今回の変更はDebug検証口と試験で、iPhone／Releaseの再ビルドは未実施。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "7b92b7b295bda5998b71",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 60
+    },
+    {
+      "section": "全エフェクトを含む曲間グラフ再利用 — 2026-11-07",
+      "text": "- ⭕️ [Pending] 物理機器切替・切断復帰・実88.2 kHz出力での元エラー、実曲の自動曲送り／リピート、iPhone聴感、実験ビルドの追加構成。オフライン再利用成功を実機での解消とは扱わない。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "eba299d1040063282dc4",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 61
+    },
+    {
+      "section": "実エフェクト製品グラフのフレーム上限 — 2026-11-07",
+      "text": "- 🟢 [Done] Macの製品グラフ構築を直接使うDebug限定試験を追加。全エフェクトON・全パラメーター中間値で内部44ミキサーを記録。512/2048出力ブロック、88.2→48→96→88.2 kHz形式切替、44.1/48 kHz音源の16条件で有限・非無音PCMの描画が成功。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "75e6e4359eb4134527dd",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 65
+    },
+    {
+      "section": "実エフェクト製品グラフのフレーム上限 — 2026-11-07",
+      "text": "- 🟢 [Done] 2プレイヤーと製品のクロスフェードゲインで遷移開始〜終了を描画。別途、実コントローラーのクロスフェード・停止再開回帰も成功。Mac Debug・App Store Releaseの署名なしビルド成功。共通容量ポリシーはiPhoneと同一。[条件・ログ・制限](quality/PRODUCT_FRAME_CAPACITY_2026-11-07.md)を保存。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "2b57e56ad00fe87709d2",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 66
+    },
+    {
+      "section": "実エフェクト製品グラフのフレーム上限 — 2026-11-07",
+      "text": "- ⭕️ [Pending] 物理88.2 kHz出力、実機器切替通知・切断再接続、元の-10874発生時のミキサー特定、実曲の自動曲送り・リピート、iPhoneの聴感確認。今回はオフライン形式切替の成功であり、実機不具合の解消とは扱わない。実験ビルドのtrue-peak併用・グラフ再利用も今回の保証範囲外。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "b1b0e1d719c4f8fedf24",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 67
+    },
+    {
+      "section": "内部ミキサーの容量予約範囲 — 2026-11-07",
+      "text": "- 🟢 [Done] 音源・最終出力だけでなく、停止したグラフに属するエフェクト内部のミキサーも容量予約の対象に追加。確保済み資源や再生中のグラフを変更しない共通ポリシーを両アプリで一致させた。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "3086542d22b121060045",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 71
+    },
+    {
+      "section": "内部ミキサーの容量予約範囲 — 2026-11-07",
+      "text": "- 🟢 [Done] 2段ミキサーで44.1/48 kHz音源→96 kHz処理→44.1/48/88.2/96 kHz出力の8条件が成功。558フレームを含む描画、有限・非無音出力、初期容量予約、再生中の非変更を検証。両アプリの署名なしDebugビルド成功。[ログ](measurements/mixer-capacity-2026-11-07/)を保存。",
+      "statuses": [
+        "Done"
+      ],
+      "id": "a35b7b908dedc2044c38",
+      "code_candidates": [],
+      "references": [],
+      "verification": "semantic_review_required",
+      "line": 72
+    },
+    {
+      "section": "内部ミキサーの容量予約範囲 — 2026-11-07",
+      "text": "- ⭕️ [Pending] 実88.2 kHz出力の-10874再現と、実エフェクト全分岐・機器切替・曲間遷移の確認。エンジンが確保時に容量を再調整するため、初期予約を実機での解消証明とは扱わない。iPhoneの画面切替時の音切れとMacレイアウト警告の再現確認も継続。",
+      "statuses": [
+        "Pending"
+      ],
+      "id": "c8c7e8aec35574f7866e",
+      "code_candidates": [],
+      "references": [],
+      "verification": "tracked_unfinished",
+      "line": 73
+    },
+    {
       "section": "再生・レイアウト警告への保護 — 2026-11-06",
       "text": "- 🟢 [Done] 両アプリの音源／最終変換ミキサーとメインミキサーに、資源確保前の4096フレーム容量予約を追加。44.1/48 kHz音源→96 kHz処理→44.1/48/88.2/96 kHz出力の8条件で、558を含む512〜2048フレームの実オフライン描画が成功。",
       "statuses": [
@@ -12,7 +916,7 @@
       "code_candidates": [],
       "references": [],
       "verification": "semantic_review_required",
-      "line": 5
+      "line": 77
     },
     {
       "section": "再生・レイアウト警告への保護 — 2026-11-06",
@@ -24,7 +928,7 @@
       "code_candidates": [],
       "references": [],
       "verification": "semantic_review_required",
-      "line": 6
+      "line": 78
     },
     {
       "section": "再生・レイアウト警告への保護 — 2026-11-06",
@@ -36,7 +940,7 @@
       "code_candidates": [],
       "references": [],
       "verification": "semantic_review_required",
-      "line": 7
+      "line": 79
     },
     {
       "section": "再生・レイアウト警告への保護 — 2026-11-06",
@@ -48,7 +952,7 @@
       "code_candidates": [],
       "references": [],
       "verification": "tracked_unfinished",
-      "line": 8
+      "line": 80
     },
     {
       "section": "再生・レイアウト警告への保護 — 2026-11-06",
@@ -60,7 +964,7 @@
       "code_candidates": [],
       "references": [],
       "verification": "tracked_unfinished",
-      "line": 9
+      "line": 81
     },
     {
       "section": "旧破損記録から独立したライブラリへの救済 — 2026-11-06",
@@ -74,7 +978,7 @@
         "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md"
       ],
       "verification": "current_implementation_and_regression_scope_reviewed",
-      "line": 13,
+      "line": 85,
       "review": {
         "report": "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md",
         "code": [
@@ -180,7 +1084,7 @@
         "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md"
       ],
       "verification": "current_implementation_and_regression_scope_reviewed",
-      "line": 14,
+      "line": 86,
       "review": {
         "report": "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md",
         "code": [
@@ -286,7 +1190,7 @@
         "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md"
       ],
       "verification": "current_implementation_and_regression_scope_reviewed",
-      "line": 15,
+      "line": 87,
       "review": {
         "report": "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md",
         "code": [
@@ -392,7 +1296,7 @@
         "docs/quality/LEGACY_RECOVERY_COPY_2026-11-06.md"
       ],
       "verification": "tracked_unfinished",
-      "line": 16
+      "line": 88
     },
     {
       "section": "転送workerから表示用状態までの実経路計測 — 2026-11-06",
@@ -450,7 +1354,7 @@
         ],
         "scope": "Actual receiver worker and production Published reducer; synthetic four-file/256-chunk loopback, 3 history sizes x3 rounds, isolated final controller tests. Excludes real MC transport, SwiftUI frame rendering and large-descriptor scales."
       },
-      "line": 20
+      "line": 92
     },
     {
       "section": "転送workerから表示用状態までの実経路計測 — 2026-11-06",
@@ -508,7 +1412,7 @@
         ],
         "scope": "Actual receiver worker and production Published reducer; synthetic four-file/256-chunk loopback, 3 history sizes x3 rounds, isolated final controller tests. Excludes real MC transport, SwiftUI frame rendering and large-descriptor scales."
       },
-      "line": 21
+      "line": 93
     },
     {
       "section": "転送workerから表示用状態までの実経路計測 — 2026-11-06",
@@ -566,7 +1470,7 @@
         ],
         "scope": "Actual receiver worker and production Published reducer; synthetic four-file/256-chunk loopback, 3 history sizes x3 rounds, isolated final controller tests. Excludes real MC transport, SwiftUI frame rendering and large-descriptor scales."
       },
-      "line": 22
+      "line": 94
     },
     {
       "section": "転送workerから表示用状態までの実経路計測 — 2026-11-06",
@@ -580,7 +1484,7 @@
         "docs/quality/WORKER_PUBLISHED_DELIVERY_2026-11-06.md"
       ],
       "verification": "physical_device_verification_pending",
-      "line": 23
+      "line": 95
     },
     {
       "section": "カスタムAudio Unit生成と共通回帰の整合 — 2026-11-06",
@@ -656,7 +1560,7 @@
         ],
         "scope": "Shared native registration and Transient failure bypass; six fallback renders, native/sanitizer checks, 48 extracted-control DSP transitions and iPhone Simulator compilation. No physical-device or startup-performance qualification."
       },
-      "line": 27
+      "line": 99
     },
     {
       "section": "カスタムAudio Unit生成と共通回帰の整合 — 2026-11-06",
@@ -732,7 +1636,7 @@
         ],
         "scope": "Shared native registration and Transient failure bypass; six fallback renders, native/sanitizer checks, 48 extracted-control DSP transitions and iPhone Simulator compilation. No physical-device or startup-performance qualification."
       },
-      "line": 28
+      "line": 100
     },
     {
       "section": "カスタムAudio Unit生成と共通回帰の整合 — 2026-11-06",
@@ -808,7 +1712,7 @@
         ],
         "scope": "Shared native registration and Transient failure bypass; six fallback renders, native/sanitizer checks, 48 extracted-control DSP transitions and iPhone Simulator compilation. No physical-device or startup-performance qualification."
       },
-      "line": 29
+      "line": 101
     },
     {
       "section": "カスタムAudio Unit生成と共通回帰の整合 — 2026-11-06",
@@ -822,7 +1726,7 @@
         "docs/quality/AUDIO_UNIT_ALIGNMENT_2026-11-06.md"
       ],
       "verification": "physical_device_verification_pending",
-      "line": 30
+      "line": 102
     },
     {
       "section": "保存先復元ジャーナルの副本からの復旧 — 2026-11-06",
@@ -909,7 +1813,7 @@
         ],
         "scope": "Generation-bound recovery copy for new Mac storage restores and healthy legacy rollback; damaged legacy without valid copy and real power loss excluded."
       },
-      "line": 34
+      "line": 106
     },
     {
       "section": "保存先復元ジャーナルの副本からの復旧 — 2026-11-06",
@@ -996,7 +1900,7 @@
         ],
         "scope": "Generation-bound recovery copy for new Mac storage restores and healthy legacy rollback; damaged legacy without valid copy and real power loss excluded."
       },
-      "line": 35
+      "line": 107
     },
     {
       "section": "保存先復元ジャーナルの副本からの復旧 — 2026-11-06",
@@ -1083,7 +1987,7 @@
         ],
         "scope": "Generation-bound recovery copy for new Mac storage restores and healthy legacy rollback; damaged legacy without valid copy and real power loss excluded."
       },
-      "line": 36
+      "line": 108
     },
     {
       "section": "保存先復元ジャーナルの副本からの復旧 — 2026-11-06",
@@ -1095,7 +1999,7 @@
       "code_candidates": [],
       "references": [],
       "verification": "tracked_unfinished",
-      "line": 37
+      "line": 109
     },
     {
       "section": "破損した台帳・インポート記録の明示的救済 — 2026-11-06",
@@ -1172,7 +2076,7 @@
         ],
         "scope": "Explicit catalog/import damaged-journal rollback only; physical devices and other rescue journals excluded."
       },
-      "line": 41
+      "line": 113
     },
     {
       "section": "破損した台帳・インポート記録の明示的救済 — 2026-11-06",
@@ -1249,7 +2153,7 @@
         ],
         "scope": "Explicit catalog/import damaged-journal rollback only; physical devices and other rescue journals excluded."
       },
-      "line": 42
+      "line": 114
     },
     {
       "section": "破損した台帳・インポート記録の明示的救済 — 2026-11-06",
@@ -1326,7 +2230,7 @@
         ],
         "scope": "Explicit catalog/import damaged-journal rollback only; physical devices and other rescue journals excluded."
       },
-      "line": 43
+      "line": 115
     },
     {
       "section": "破損した台帳・インポート記録の明示的救済 — 2026-11-06",
@@ -1340,7 +2244,7 @@
         "docs/quality/SAVE_JOURNAL_RESCUE_2026-11-06.md"
       ],
       "verification": "physical_device_verification_pending",
-      "line": 44
+      "line": 116
     },
     {
       "section": "iPhoneペアリング許可の応答保護 — 2026-11-06",
@@ -1354,7 +2258,7 @@
       "references": [
         "docs/quality/PAIRING_INVITATION_2026-11-06.md"
       ],
-      "line": 48
+      "line": 120
     },
     {
       "section": "iPhoneペアリング許可の応答保護 — 2026-11-06",
@@ -1368,7 +2272,7 @@
       "references": [
         "docs/quality/PAIRING_INVITATION_2026-11-06.md"
       ],
-      "line": 49
+      "line": 121
     },
     {
       "section": "iPhoneペアリング許可の応答保護 — 2026-11-06",
@@ -1382,10 +2286,10 @@
       "references": [
         "docs/quality/PAIRING_INVITATION_2026-11-06.md"
       ],
-      "line": 50
+      "line": 122
     },
     {
-      "line": 54,
+      "line": 126,
       "section": "Macプレイヤーノード停止のQoS保護 — 2026-11-06",
       "text": "- 🟢 [Done] MacのAVAudioPlayerNode.stopをMainActorの同期呼出しから専用キューへ移し、停止完了までノード・音源・engineを保持。重複停止をまとめ、古い操作の完了を拒否して次のスケジュールを保護する。クロスフェードの終了ノードも非同期停止する。",
       "statuses": [
@@ -1425,7 +2329,7 @@
       }
     },
     {
-      "line": 55,
+      "line": 127,
       "section": "Macプレイヤーノード停止のQoS保護 — 2026-11-06",
       "text": "- 🟢 [Done] 非同期停止／出力保護8テストと実エンジン再生制御16テストが成功。通常版・App Store版の署名なしDebugビルド成功。[条件・初回失敗・最終ログ](quality/PLAYER_NODE_STOP_QOS_2026-11-06.md)を保存。iPhone側の動作変更はない。",
       "statuses": [
@@ -1470,7 +2374,7 @@
       }
     },
     {
-      "line": 56,
+      "line": 128,
       "section": "Macプレイヤーノード停止のQoS保護 — 2026-11-06",
       "text": "- ⭕️ [Pending] 利用中のMacでThread Performance Checkerの警告消失、署名済み配布版、実出力機器とスリープ復帰を確認する。",
       "statuses": [
@@ -1482,7 +2386,7 @@
       "references": []
     },
     {
-      "line": 60,
+      "line": 132,
       "section": "世代補助ファイルの同時消失からの復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1537,7 +2441,7 @@
       }
     },
     {
-      "line": 61,
+      "line": 133,
       "section": "世代補助ファイルの同時消失からの復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1597,7 +2501,7 @@
       }
     },
     {
-      "line": 62,
+      "line": 134,
       "section": "世代補助ファイルの同時消失からの復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -1609,7 +2513,7 @@
       "verification": "tracked_unfinished"
     },
     {
-      "line": 66,
+      "line": 138,
       "section": "現行コードの検証再実行 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1626,7 +2530,7 @@
       "id": "81976b1232d90ac55bfd"
     },
     {
-      "line": 67,
+      "line": 139,
       "section": "現行コードの検証再実行 — 2026-11-06",
       "statuses": [
         "Next"
@@ -1638,7 +2542,7 @@
       "id": "312272561966ab9f3fff"
     },
     {
-      "line": 68,
+      "line": 140,
       "section": "現行コードの検証再実行 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -1650,7 +2554,7 @@
       "id": "5f0b638fc764029436d0"
     },
     {
-      "line": 72,
+      "line": 144,
       "section": "機能表と検証根拠の再照合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1667,7 +2571,7 @@
       "id": "83942dac6c0f0809a8ab"
     },
     {
-      "line": 73,
+      "line": 145,
       "section": "機能表と検証根拠の再照合 — 2026-11-06",
       "statuses": [
         "Next"
@@ -1679,7 +2583,7 @@
       "id": "0b0538899d3eebe4c83f"
     },
     {
-      "line": 74,
+      "line": 146,
       "section": "機能表と検証根拠の再照合 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -1691,7 +2595,7 @@
       "id": "7a27e28e105eb1b82255"
     },
     {
-      "line": 78,
+      "line": 150,
       "section": "保存・復旧項目の根拠確認 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1708,7 +2612,7 @@
       "id": "3805ef8cb35bf9c767be"
     },
     {
-      "line": 79,
+      "line": 151,
       "section": "保存・復旧項目の根拠確認 — 2026-11-06",
       "statuses": [
         "Next"
@@ -1720,7 +2624,7 @@
       "verification": "tracked_unfinished"
     },
     {
-      "line": 80,
+      "line": 152,
       "section": "保存・復旧項目の根拠確認 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -1732,7 +2636,7 @@
       "id": "2733693868cacd846edb"
     },
     {
-      "line": 84,
+      "line": 156,
       "section": "全項目照合の管理 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1749,7 +2653,7 @@
       "id": "e2156c686dda061af16b"
     },
     {
-      "line": 85,
+      "line": 157,
       "section": "全項目照合の管理 — 2026-11-06",
       "statuses": [
         "Next"
@@ -1766,7 +2670,7 @@
       "id": "8f0232b3c39b4d2148a6"
     },
     {
-      "line": 86,
+      "line": 158,
       "section": "全項目照合の管理 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -1778,7 +2682,7 @@
       "id": "b6963ca7e87277ab5a38"
     },
     {
-      "line": 92,
+      "line": 164,
       "section": "現在の進捗と優先項目 — 2026-11-06確認",
       "statuses": [
         "Done"
@@ -1799,10 +2703,10 @@
       "code_candidates": [],
       "references": [],
       "verification": "tracked_unfinished",
-      "line": 93
+      "line": 165
     },
     {
-      "line": 94,
+      "line": 166,
       "section": "現在の進捗と優先項目 — 2026-11-06確認",
       "statuses": [
         "Next"
@@ -1825,10 +2729,10 @@
         "docs/quality/WORKER_PUBLISHED_DELIVERY_2026-11-06.md"
       ],
       "verification": "semantic_review_required",
-      "line": 95
+      "line": 167
     },
     {
-      "line": 96,
+      "line": 168,
       "section": "現在の進捗と優先項目 — 2026-11-06確認",
       "statuses": [
         "Pending",
@@ -1841,7 +2745,7 @@
       "id": "187d149f824df2cb18f6"
     },
     {
-      "line": 97,
+      "line": 169,
       "section": "現在の進捗と優先項目 — 2026-11-06確認",
       "statuses": [
         "Later"
@@ -1853,7 +2757,7 @@
       "id": "71198949a24cce052d98"
     },
     {
-      "line": 101,
+      "line": 173,
       "section": "Mac同期タグ保存の容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1883,7 +2787,7 @@
       }
     },
     {
-      "line": 102,
+      "line": 174,
       "section": "Mac同期タグ保存の容量不足 — 2026-11-06",
       "statuses": [
         "Next"
@@ -1895,7 +2799,7 @@
       "verification": "tracked_unfinished"
     },
     {
-      "line": 103,
+      "line": 175,
       "section": "Mac同期タグ保存の容量不足 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -1907,7 +2811,7 @@
       "id": "9fce5d5fda8e2b178634"
     },
     {
-      "line": 107,
+      "line": 179,
       "section": "Mac世代ファイル消失時の復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1947,7 +2851,7 @@
       }
     },
     {
-      "line": 108,
+      "line": 180,
       "section": "Mac世代ファイル消失時の復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -1987,7 +2891,7 @@
       }
     },
     {
-      "line": 109,
+      "line": 181,
       "section": "Mac世代ファイル消失時の復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2047,7 +2951,7 @@
       }
     },
     {
-      "line": 112,
+      "line": 184,
       "section": "Mac世代ファイル消失時の復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2059,7 +2963,7 @@
       "id": "153b40fc0dd8731ea3c7"
     },
     {
-      "line": 116,
+      "line": 188,
       "section": "Mac世代情報の破損復旧と保存先復元の容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2114,7 +3018,7 @@
       }
     },
     {
-      "line": 117,
+      "line": 189,
       "section": "Mac世代情報の破損復旧と保存先復元の容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2169,7 +3073,7 @@
       }
     },
     {
-      "line": 118,
+      "line": 190,
       "section": "Mac世代情報の破損復旧と保存先復元の容量不足 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2181,7 +3085,7 @@
       "verification": "tracked_unfinished"
     },
     {
-      "line": 119,
+      "line": 191,
       "section": "Mac世代情報の破損復旧と保存先復元の容量不足 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2193,7 +3097,7 @@
       "id": "014a59894ed8242734ba"
     },
     {
-      "line": 123,
+      "line": 195,
       "section": "Mac復旧情報の退避とインポート容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2238,7 +3142,7 @@
       }
     },
     {
-      "line": 124,
+      "line": 196,
       "section": "Mac復旧情報の退避とインポート容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2283,7 +3187,7 @@
       }
     },
     {
-      "line": 125,
+      "line": 197,
       "section": "Mac復旧情報の退避とインポート容量不足 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2295,7 +3199,7 @@
       "id": "bf4656e88379b23c2970"
     },
     {
-      "line": 126,
+      "line": 198,
       "section": "Mac復旧情報の退避とインポート容量不足 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2307,7 +3211,7 @@
       "id": "0e9857b0bbef33bfd49e"
     },
     {
-      "line": 130,
+      "line": 202,
       "section": "Mac自己完結化の中断・救済と保存容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2362,7 +3266,7 @@
       }
     },
     {
-      "line": 131,
+      "line": 203,
       "section": "Mac自己完結化の中断・救済と保存容量不足 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2417,7 +3321,7 @@
       }
     },
     {
-      "line": 132,
+      "line": 204,
       "section": "Mac自己完結化の中断・救済と保存容量不足 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2429,7 +3333,7 @@
       "id": "92bfadd2811937a1fa9f"
     },
     {
-      "line": 133,
+      "line": 205,
       "section": "Mac自己完結化の中断・救済と保存容量不足 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2441,7 +3345,7 @@
       "id": "cb0a3af77dd70b7bf535"
     },
     {
-      "line": 137,
+      "line": 209,
       "section": "Mac保存ロックの待機上限と容量不足の検証 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2476,7 +3380,7 @@
       }
     },
     {
-      "line": 138,
+      "line": 210,
       "section": "Mac保存ロックの待機上限と容量不足の検証 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2511,7 +3415,7 @@
       }
     },
     {
-      "line": 139,
+      "line": 211,
       "section": "Mac保存ロックの待機上限と容量不足の検証 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2523,7 +3427,7 @@
       "id": "7f89c73da29f8a553e54"
     },
     {
-      "line": 140,
+      "line": 212,
       "section": "Mac保存ロックの待機上限と容量不足の検証 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2535,7 +3439,7 @@
       "id": "63e60fb0d40f72341c96"
     },
     {
-      "line": 144,
+      "line": 216,
       "section": "Mac保存先選択と未完了復旧の分離 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2547,7 +3451,7 @@
       "id": "766ad3d32e797be06df6"
     },
     {
-      "line": 145,
+      "line": 217,
       "section": "Mac保存先選択と未完了復旧の分離 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2559,7 +3463,7 @@
       "id": "a747673d349c40c687f8"
     },
     {
-      "line": 146,
+      "line": 218,
       "section": "Mac保存先選択と未完了復旧の分離 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2571,7 +3475,7 @@
       "id": "38d530ded1fc9a1318d6"
     },
     {
-      "line": 147,
+      "line": 219,
       "section": "Mac保存先選択と未完了復旧の分離 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2583,7 +3487,7 @@
       "id": "9287389190d5ff7ec4a1"
     },
     {
-      "line": 151,
+      "line": 223,
       "section": "Mac外部参照コピーの中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2595,7 +3499,7 @@
       "id": "6054f8ad6988d90ee767"
     },
     {
-      "line": 152,
+      "line": 224,
       "section": "Mac外部参照コピーの中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2607,7 +3511,7 @@
       "id": "ff1e959deb794749155c"
     },
     {
-      "line": 153,
+      "line": 225,
       "section": "Mac外部参照コピーの中断復旧 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2619,7 +3523,7 @@
       "id": "5e261514a6ba9bd82722"
     },
     {
-      "line": 154,
+      "line": 226,
       "section": "Mac外部参照コピーの中断復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2631,7 +3535,7 @@
       "id": "cc3312260a0304d5c677"
     },
     {
-      "line": 158,
+      "line": 230,
       "section": "Macインポート開始時の世代予約と中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2643,7 +3547,7 @@
       "id": "c2bfe25581f02af499d4"
     },
     {
-      "line": 159,
+      "line": 231,
       "section": "Macインポート開始時の世代予約と中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2655,7 +3559,7 @@
       "id": "6d3ec48a9a341af5e033"
     },
     {
-      "line": 160,
+      "line": 232,
       "section": "Macインポート開始時の世代予約と中断復旧 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2667,7 +3571,7 @@
       "id": "d188fdfb9451670b382b"
     },
     {
-      "line": 161,
+      "line": 233,
       "section": "Macインポート開始時の世代予約と中断復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2679,7 +3583,7 @@
       "id": "512bd16f7f70028d7fdc"
     },
     {
-      "line": 167,
+      "line": 239,
       "section": "Mac台帳復旧ジャーナルの内容検証 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2709,7 +3613,7 @@
       }
     },
     {
-      "line": 168,
+      "line": 240,
       "section": "Mac台帳復旧ジャーナルの内容検証 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2739,7 +3643,7 @@
       }
     },
     {
-      "line": 169,
+      "line": 241,
       "section": "Mac台帳復旧ジャーナルの内容検証 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2751,7 +3655,7 @@
       "id": "5ac5cbcbef50af85847b"
     },
     {
-      "line": 170,
+      "line": 242,
       "section": "Mac台帳復旧ジャーナルの内容検証 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2763,7 +3667,7 @@
       "id": "7d86a15f913eae58bfe3"
     },
     {
-      "line": 174,
+      "line": 246,
       "section": "Mac復旧ジャーナル破損時の保護 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2798,7 +3702,7 @@
       }
     },
     {
-      "line": 175,
+      "line": 247,
       "section": "Mac復旧ジャーナル破損時の保護 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2833,7 +3737,7 @@
       }
     },
     {
-      "line": 176,
+      "line": 248,
       "section": "Mac復旧ジャーナル破損時の保護 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2845,7 +3749,7 @@
       "id": "d81c50800434e43fe9b8"
     },
     {
-      "line": 177,
+      "line": 249,
       "section": "Mac復旧ジャーナル破損時の保護 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2857,7 +3761,7 @@
       "id": "efbfca4a0d1564186ae1"
     },
     {
-      "line": 181,
+      "line": 253,
       "section": "Mac保存先復元の中断・再復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2897,7 +3801,7 @@
       }
     },
     {
-      "line": 182,
+      "line": 254,
       "section": "Mac保存先復元の中断・再復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2937,7 +3841,7 @@
       }
     },
     {
-      "line": 183,
+      "line": 255,
       "section": "Mac保存先復元の中断・再復旧 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2949,7 +3853,7 @@
       "id": "c62f7542a48a63d02042"
     },
     {
-      "line": 184,
+      "line": 256,
       "section": "Mac保存先復元の中断・再復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -2961,7 +3865,7 @@
       "id": "a4ec035504a637180bf8"
     },
     {
-      "line": 188,
+      "line": 260,
       "section": "Mac保存先復元時の世代連携 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2973,7 +3877,7 @@
       "id": "73ed4d1f6e828cbb28a0"
     },
     {
-      "line": 189,
+      "line": 261,
       "section": "Mac保存先復元時の世代連携 — 2026-11-06",
       "statuses": [
         "Done"
@@ -2985,7 +3889,7 @@
       "id": "993172282c77d104341a"
     },
     {
-      "line": 190,
+      "line": 262,
       "section": "Mac保存先復元時の世代連携 — 2026-11-06",
       "statuses": [
         "Next"
@@ -2997,7 +3901,7 @@
       "id": "481b9ff99f9eb64cb726"
     },
     {
-      "line": 191,
+      "line": 263,
       "section": "Mac保存先復元時の世代連携 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3009,7 +3913,7 @@
       "id": "9a766ac6912e99c7cdcb"
     },
     {
-      "line": 195,
+      "line": 267,
       "section": "Mac全登録解除の中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3021,7 +3925,7 @@
       "id": "3ffa38cbf0efaa4ee3be"
     },
     {
-      "line": 196,
+      "line": 268,
       "section": "Mac全登録解除の中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3033,7 +3937,7 @@
       "id": "ed34977e2096c6580ff1"
     },
     {
-      "line": 197,
+      "line": 269,
       "section": "Mac全登録解除の中断復旧 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3045,7 +3949,7 @@
       "id": "21076d766f18959e667e"
     },
     {
-      "line": 198,
+      "line": 270,
       "section": "Mac全登録解除の中断復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3057,7 +3961,7 @@
       "id": "7f7ead4b7902cb8ed6a1"
     },
     {
-      "line": 202,
+      "line": 274,
       "section": "Mac台帳・再生サイドカーの中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3069,7 +3973,7 @@
       "id": "a58fcff5c3874d667869"
     },
     {
-      "line": 203,
+      "line": 275,
       "section": "Mac台帳・再生サイドカーの中断復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3081,7 +3985,7 @@
       "id": "5d655c6f9bff266b2a79"
     },
     {
-      "line": 204,
+      "line": 276,
       "section": "Mac台帳・再生サイドカーの中断復旧 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3093,7 +3997,7 @@
       "id": "1192dace323862ebaa91"
     },
     {
-      "line": 205,
+      "line": 277,
       "section": "Mac台帳・再生サイドカーの中断復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3105,7 +4009,7 @@
       "id": "d2d25ab986a17687790b"
     },
     {
-      "line": 209,
+      "line": 281,
       "section": "Mac永続世代の予約と旧台帳の移行 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3117,7 +4021,7 @@
       "id": "73cd7d262ddced1852fc"
     },
     {
-      "line": 210,
+      "line": 282,
       "section": "Mac永続世代の予約と旧台帳の移行 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3129,7 +4033,7 @@
       "id": "367e0a2cba7dd300a6b6"
     },
     {
-      "line": 211,
+      "line": 283,
       "section": "Mac永続世代の予約と旧台帳の移行 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3141,7 +4045,7 @@
       "id": "9ed2575a64c6e64d3c7a"
     },
     {
-      "line": 212,
+      "line": 284,
       "section": "Mac永続世代の予約と旧台帳の移行 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3153,7 +4057,7 @@
       "id": "ac06aa16e6f9df2acad7"
     },
     {
-      "line": 216,
+      "line": 288,
       "section": "Mac台帳全体の古いスナップショットとCDインポート復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3165,7 +4069,7 @@
       "id": "f647be138b767513528e"
     },
     {
-      "line": 217,
+      "line": 289,
       "section": "Mac台帳全体の古いスナップショットとCDインポート復旧 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3177,7 +4081,7 @@
       "id": "11b4680864d8074830db"
     },
     {
-      "line": 218,
+      "line": 290,
       "section": "Mac台帳全体の古いスナップショットとCDインポート復旧 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3189,7 +4093,7 @@
       "id": "cbca77236d207bd592b1"
     },
     {
-      "line": 219,
+      "line": 291,
       "section": "Mac台帳全体の古いスナップショットとCDインポート復旧 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3201,7 +4105,7 @@
       "id": "1929eebc759730e970dc"
     },
     {
-      "line": 223,
+      "line": 295,
       "section": "Macファイル参照・コピーとインポートの競合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3213,7 +4117,7 @@
       "id": "c1a6a9982360f9a7230b"
     },
     {
-      "line": 224,
+      "line": 296,
       "section": "Macファイル参照・コピーとインポートの競合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3225,7 +4129,7 @@
       "id": "878556d30a1e75d26dae"
     },
     {
-      "line": 225,
+      "line": 297,
       "section": "Macファイル参照・コピーとインポートの競合 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3237,7 +4141,7 @@
       "id": "0f3ea468728595e51098"
     },
     {
-      "line": 226,
+      "line": 298,
       "section": "Macファイル参照・コピーとインポートの競合 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3249,7 +4153,7 @@
       "id": "a117262b543a23e72e7c"
     },
     {
-      "line": 230,
+      "line": 302,
       "section": "Mac非同期インポートと復旧の競合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3261,7 +4165,7 @@
       "id": "c90c6f36145b94ea3e2b"
     },
     {
-      "line": 231,
+      "line": 303,
       "section": "Mac非同期インポートと復旧の競合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3273,7 +4177,7 @@
       "id": "39c94c261cd2b4f3cb69"
     },
     {
-      "line": 232,
+      "line": 304,
       "section": "Mac非同期インポートと復旧の競合 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3285,7 +4189,7 @@
       "id": "e30a819daa19546c87b6"
     },
     {
-      "line": 233,
+      "line": 305,
       "section": "Mac非同期インポートと復旧の競合 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3297,7 +4201,7 @@
       "id": "2cdeb5a02ef8632e30e9"
     },
     {
-      "line": 237,
+      "line": 309,
       "section": "Mac台帳のプロセス間排他と変更照合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3309,7 +4213,7 @@
       "id": "b92308c67deb3f2f9389"
     },
     {
-      "line": 238,
+      "line": 310,
       "section": "Mac台帳のプロセス間排他と変更照合 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3321,7 +4225,7 @@
       "id": "0b61d7dc8df2a2765cbc"
     },
     {
-      "line": 239,
+      "line": 311,
       "section": "Mac台帳のプロセス間排他と変更照合 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3333,7 +4237,7 @@
       "id": "27079731b6434e3ce808"
     },
     {
-      "line": 240,
+      "line": 312,
       "section": "Mac台帳のプロセス間排他と変更照合 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3345,7 +4249,7 @@
       "id": "8bd117ae1c7cf239e3b2"
     },
     {
-      "line": 244,
+      "line": 316,
       "section": "Mac別repositoryによる台帳更新の検出 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3357,7 +4261,7 @@
       "id": "087c7b5e5289bf26e3ca"
     },
     {
-      "line": 245,
+      "line": 317,
       "section": "Mac別repositoryによる台帳更新の検出 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3369,7 +4273,7 @@
       "id": "cd46c4bea8355963d4af"
     },
     {
-      "line": 246,
+      "line": 318,
       "section": "Mac別repositoryによる台帳更新の検出 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3381,7 +4285,7 @@
       "id": "13b2f45837cc3aed67a6"
     },
     {
-      "line": 247,
+      "line": 319,
       "section": "Mac別repositoryによる台帳更新の検出 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3393,7 +4297,7 @@
       "id": "0dd80051b93c4064df90"
     },
     {
-      "line": 251,
+      "line": 323,
       "section": "Mac曲属性の保存とライブラリ切替 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3405,7 +4309,7 @@
       "id": "2dd10573a4a876478aa0"
     },
     {
-      "line": 252,
+      "line": 324,
       "section": "Mac曲属性の保存とライブラリ切替 — 2026-11-06",
       "statuses": [
         "Done"
@@ -3417,7 +4321,7 @@
       "id": "58ba5d2c1e55c9995ff4"
     },
     {
-      "line": 253,
+      "line": 325,
       "section": "Mac曲属性の保存とライブラリ切替 — 2026-11-06",
       "statuses": [
         "Next"
@@ -3429,7 +4333,7 @@
       "id": "096764d85d6caaca8298"
     },
     {
-      "line": 254,
+      "line": 326,
       "section": "Mac曲属性の保存とライブラリ切替 — 2026-11-06",
       "statuses": [
         "Pending"
@@ -3441,7 +4345,7 @@
       "id": "942bbb39ad8a875f60d3"
     },
     {
-      "line": 258,
+      "line": 330,
       "section": "Macメディア整理と曲編集の競合 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3453,7 +4357,7 @@
       "id": "a5d6e0b552138d08cedb"
     },
     {
-      "line": 259,
+      "line": 331,
       "section": "Macメディア整理と曲編集の競合 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3465,7 +4369,7 @@
       "id": "97b1ea4543bb32d05e6e"
     },
     {
-      "line": 260,
+      "line": 332,
       "section": "Macメディア整理と曲編集の競合 — 2026-11-04",
       "statuses": [
         "Next"
@@ -3477,7 +4381,7 @@
       "id": "c2cc0236b3e11d7dd301"
     },
     {
-      "line": 261,
+      "line": 333,
       "section": "Macメディア整理と曲編集の競合 — 2026-11-04",
       "statuses": [
         "Pending"
@@ -3489,7 +4393,7 @@
       "id": "0552b9dcd7a1cdd0edfa"
     },
     {
-      "line": 265,
+      "line": 337,
       "section": "Macメディア整理中の競合と復旧 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3501,7 +4405,7 @@
       "id": "c8c4d5490236652c6630"
     },
     {
-      "line": 266,
+      "line": 338,
       "section": "Macメディア整理中の競合と復旧 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3513,7 +4417,7 @@
       "id": "5051b3e68c7baba58ef1"
     },
     {
-      "line": 267,
+      "line": 339,
       "section": "Macメディア整理中の競合と復旧 — 2026-11-04",
       "statuses": [
         "Next"
@@ -3525,7 +4429,7 @@
       "id": "775d854c416029563ad7"
     },
     {
-      "line": 268,
+      "line": 340,
       "section": "Macメディア整理中の競合と復旧 — 2026-11-04",
       "statuses": [
         "Pending"
@@ -3537,7 +4441,7 @@
       "id": "7ed35eb952d8f711c115"
     },
     {
-      "line": 272,
+      "line": 344,
       "section": "Mac整理プレビューの更新競合 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3549,7 +4453,7 @@
       "id": "dfd8f5ec5a6a211785f2"
     },
     {
-      "line": 273,
+      "line": 345,
       "section": "Mac整理プレビューの更新競合 — 2026-11-04",
       "statuses": [
         "Next"
@@ -3561,7 +4465,7 @@
       "id": "8240028ab07c2c5e3c3f"
     },
     {
-      "line": 274,
+      "line": 346,
       "section": "Mac整理プレビューの更新競合 — 2026-11-04",
       "statuses": [
         "Pending"
@@ -3573,7 +4477,7 @@
       "id": "36619203943db658bae2"
     },
     {
-      "line": 278,
+      "line": 350,
       "section": "Macメディア保存先の再選択 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3585,7 +4489,7 @@
       "id": "289190d77381d328535b"
     },
     {
-      "line": 279,
+      "line": 351,
       "section": "Macメディア保存先の再選択 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3597,7 +4501,7 @@
       "id": "490a7f30e9a58f23d11a"
     },
     {
-      "line": 280,
+      "line": 352,
       "section": "Macメディア保存先の再選択 — 2026-11-04",
       "statuses": [
         "Pending"
@@ -3609,7 +4513,7 @@
       "id": "57c50b3e46249c7095b0"
     },
     {
-      "line": 284,
+      "line": 356,
       "section": "Macライブラリの再選択 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3621,7 +4525,7 @@
       "id": "9ab1b379b175a0d1847a"
     },
     {
-      "line": 285,
+      "line": 357,
       "section": "Macライブラリの再選択 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3633,7 +4537,7 @@
       "id": "4c41de7931b518c8d2eb"
     },
     {
-      "line": 286,
+      "line": 358,
       "section": "Macライブラリの再選択 — 2026-11-04",
       "statuses": [
         "Pending"
@@ -3645,7 +4549,7 @@
       "id": "13564d7f0fc70f6e7214"
     },
     {
-      "line": 290,
+      "line": 362,
       "section": "Macの整理処理と保存先切替 — 2026-11-04",
       "statuses": [
         "Done"
@@ -3657,7 +4561,7 @@
       "id": "79315e08cf8069018132"
     },
     {
-      "line": 291,
+      "line": 363,
       "section": "Macの整理処理と保存先切替 — 2026-11-04",
       "statuses": [
         "Next"
@@ -3669,7 +4573,7 @@
       "id": "f2ee05e22e1a860e4fed"
     },
     {
-      "line": 292,
+      "line": 364,
       "section": "Macの整理処理と保存先切替 — 2026-11-04",
       "statuses": [
         "Pending"
@@ -3681,7 +4585,7 @@
       "id": "1c8b930cc08c4feca788"
     },
     {
-      "line": 296,
+      "line": 368,
       "section": "Mac同期情報と保存先の分離 — 2026-11-03",
       "statuses": [
         "Done"
@@ -3693,7 +4597,7 @@
       "id": "bd68b3332c1fc9e20aa9"
     },
     {
-      "line": 297,
+      "line": 369,
       "section": "Mac同期情報と保存先の分離 — 2026-11-03",
       "statuses": [
         "Pending"
@@ -3705,7 +4609,7 @@
       "id": "ebb771fe3f0e7afc8552"
     },
     {
-      "line": 298,
+      "line": 370,
       "section": "Mac同期情報と保存先の分離 — 2026-11-03",
       "statuses": [
         "Done"
@@ -3717,7 +4621,7 @@
       "id": "19b275e48acf7ff8ab6c"
     },
     {
-      "line": 299,
+      "line": 371,
       "section": "Mac同期情報と保存先の分離 — 2026-11-03",
       "statuses": [
         "Next"
@@ -3729,7 +4633,7 @@
       "id": "d65f4e4dfc26c54a236b"
     },
     {
-      "line": 300,
+      "line": 372,
       "section": "Mac同期情報と保存先の分離 — 2026-11-03",
       "statuses": [
         "Done"
@@ -3741,7 +4645,7 @@
       "id": "fe57e47daac856a04698"
     },
     {
-      "line": 301,
+      "line": 373,
       "section": "Mac同期情報と保存先の分離 — 2026-11-03",
       "statuses": [
         "Pending"
@@ -3753,7 +4657,7 @@
       "id": "bf8e8cbc2f280f24e1c7"
     },
     {
-      "line": 305,
+      "line": 377,
       "section": "Macエフェクトモードの終了・再起動検証 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3770,7 +4674,7 @@
       "id": "69af6c5f77fafc052100"
     },
     {
-      "line": 306,
+      "line": 378,
       "section": "Macエフェクトモードの終了・再起動検証 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3782,7 +4686,7 @@
       "id": "1578f8f72bda2ae363b6"
     },
     {
-      "line": 307,
+      "line": 379,
       "section": "Macエフェクトモードの終了・再起動検証 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -3794,7 +4698,7 @@
       "id": "b832a2a82fedffbab9f1"
     },
     {
-      "line": 311,
+      "line": 383,
       "section": "Macエフェクトモードの選択保持 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3811,7 +4715,7 @@
       "id": "7a6c35b593e166244753"
     },
     {
-      "line": 312,
+      "line": 384,
       "section": "Macエフェクトモードの選択保持 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3823,7 +4727,7 @@
       "id": "6728d4baf586f8ceb031"
     },
     {
-      "line": 313,
+      "line": 385,
       "section": "Macエフェクトモードの選択保持 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -3835,7 +4739,7 @@
       "id": "52d65d771f6271f63bd2"
     },
     {
-      "line": 317,
+      "line": 389,
       "section": "再生クロック取得時のクラッシュ対策 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3852,7 +4756,7 @@
       "id": "be0aded2e38e5a6b076d"
     },
     {
-      "line": 318,
+      "line": 390,
       "section": "再生クロック取得時のクラッシュ対策 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3864,7 +4768,7 @@
       "id": "84751ad4a90f49d2f1d9"
     },
     {
-      "line": 319,
+      "line": 391,
       "section": "再生クロック取得時のクラッシュ対策 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3876,7 +4780,7 @@
       "id": "0506d42e9528dbb5ed31"
     },
     {
-      "line": 320,
+      "line": 392,
       "section": "再生クロック取得時のクラッシュ対策 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -3888,7 +4792,7 @@
       "id": "6352ea25e0895b4cb96a"
     },
     {
-      "line": 324,
+      "line": 396,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3905,7 +4809,7 @@
       "id": "e0b897752d821450bbb0"
     },
     {
-      "line": 325,
+      "line": 397,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3917,7 +4821,7 @@
       "id": "495b52b28e9243fad6aa"
     },
     {
-      "line": 326,
+      "line": 398,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3929,7 +4833,7 @@
       "id": "1433a83c12df90a17c05"
     },
     {
-      "line": 327,
+      "line": 399,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3946,7 +4850,7 @@
       "id": "95fa58289b495461694c"
     },
     {
-      "line": 328,
+      "line": 400,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3963,7 +4867,7 @@
       "id": "2cb7403f6bcfb101dee2"
     },
     {
-      "line": 329,
+      "line": 401,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3980,7 +4884,7 @@
       "id": "55293ab81e06b7aa9e30"
     },
     {
-      "line": 330,
+      "line": 402,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Done"
@@ -3997,7 +4901,7 @@
       "id": "748cdedaad0ab35772a8"
     },
     {
-      "line": 331,
+      "line": 403,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Next"
@@ -4009,7 +4913,7 @@
       "id": "ddaaaf247846495c0adb"
     },
     {
-      "line": 332,
+      "line": 404,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -4021,7 +4925,7 @@
       "id": "9b3bbc55079ad560d9cf"
     },
     {
-      "line": 333,
+      "line": 405,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -4033,7 +4937,7 @@
       "id": "a95d8432cdc46399e345"
     },
     {
-      "line": 334,
+      "line": 406,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -4045,7 +4949,7 @@
       "id": "acda61acb2a468736199"
     },
     {
-      "line": 335,
+      "line": 407,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -4057,7 +4961,7 @@
       "id": "7ceb0b60928c988b548b"
     },
     {
-      "line": 336,
+      "line": 408,
       "section": "Vocal Presence 試作 — 2026-10-28",
       "statuses": [
         "Pending"
@@ -4069,7 +4973,7 @@
       "id": "a6b5b3d99f26d5e07979"
     },
     {
-      "line": 340,
+      "line": 412,
       "section": "iPhone復帰時の再生セッション再試行 — 2026-10-27",
       "statuses": [
         "Done"
@@ -4081,7 +4985,7 @@
       "id": "a29050d05695fe7c8dd5"
     },
     {
-      "line": 341,
+      "line": 413,
       "section": "iPhone復帰時の再生セッション再試行 — 2026-10-27",
       "statuses": [
         "Done"
@@ -4098,7 +5002,7 @@
       "id": "6a6fdbda34795017894e"
     },
     {
-      "line": 342,
+      "line": 414,
       "section": "iPhone復帰時の再生セッション再試行 — 2026-10-27",
       "statuses": [
         "Done"
@@ -4110,7 +5014,7 @@
       "id": "677aca6eb2fe774825b9"
     },
     {
-      "line": 343,
+      "line": 415,
       "section": "iPhone復帰時の再生セッション再試行 — 2026-10-27",
       "statuses": [
         "Pending"
@@ -4122,7 +5026,7 @@
       "id": "adc1c2ede9578346e26a"
     },
     {
-      "line": 347,
+      "line": 419,
       "section": "Macエフェクトページの描画負荷 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4134,7 +5038,7 @@
       "id": "eb28c8e3d07b80834308"
     },
     {
-      "line": 348,
+      "line": 420,
       "section": "Macエフェクトページの描画負荷 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4151,7 +5055,7 @@
       "id": "be4f9098cdb6c3997543"
     },
     {
-      "line": 349,
+      "line": 421,
       "section": "Macエフェクトページの描画負荷 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4163,7 +5067,7 @@
       "id": "818cd221c4f8ee414b9b"
     },
     {
-      "line": 350,
+      "line": 422,
       "section": "Macエフェクトページの描画負荷 — 2026-10-26",
       "statuses": [
         "Next"
@@ -4175,7 +5079,7 @@
       "id": "7d9cf4be3924d3c1f108"
     },
     {
-      "line": 351,
+      "line": 423,
       "section": "Macエフェクトページの描画負荷 — 2026-10-26",
       "statuses": [
         "Pending"
@@ -4187,7 +5091,7 @@
       "id": "2765cf556486d920e995"
     },
     {
-      "line": 355,
+      "line": 427,
       "section": "エフェクトページの初回表示 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4204,7 +5108,7 @@
       "id": "2e791cb0e37b247a84c1"
     },
     {
-      "line": 356,
+      "line": 428,
       "section": "エフェクトページの初回表示 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4216,7 +5120,7 @@
       "id": "f368290ec151fde23708"
     },
     {
-      "line": 357,
+      "line": 429,
       "section": "エフェクトページの初回表示 — 2026-10-26",
       "statuses": [
         "Next"
@@ -4228,7 +5132,7 @@
       "id": "31287bbc401894fde38a"
     },
     {
-      "line": 358,
+      "line": 430,
       "section": "エフェクトページの初回表示 — 2026-10-26",
       "statuses": [
         "Pending"
@@ -4240,7 +5144,7 @@
       "id": "6de770fec277eae3766d"
     },
     {
-      "line": 362,
+      "line": 434,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4252,7 +5156,7 @@
       "id": "56ea5e83566680c4fa22"
     },
     {
-      "line": 364,
+      "line": 436,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4269,7 +5173,7 @@
       "id": "b9a0f3aa40590a411a53"
     },
     {
-      "line": 365,
+      "line": 437,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4281,7 +5185,7 @@
       "id": "f3da6ef0b119b6664456"
     },
     {
-      "line": 366,
+      "line": 438,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4293,7 +5197,7 @@
       "id": "ebe225aedbaddd92babf"
     },
     {
-      "line": 367,
+      "line": 439,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4305,7 +5209,7 @@
       "id": "283e6fe7560f6f95fc68"
     },
     {
-      "line": 368,
+      "line": 440,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4322,7 +5226,7 @@
       "id": "57b552fa067e8fd166c4"
     },
     {
-      "line": 369,
+      "line": 441,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Done"
@@ -4334,7 +5238,7 @@
       "id": "68cfa855bb7bcbb3b6e9"
     },
     {
-      "line": 370,
+      "line": 442,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Next"
@@ -4346,7 +5250,7 @@
       "id": "3fc15d89f6736d61b176"
     },
     {
-      "line": 371,
+      "line": 443,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Pending"
@@ -4358,7 +5262,7 @@
       "id": "3f71511de04e42f26b39"
     },
     {
-      "line": 372,
+      "line": 444,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Later"
@@ -4370,7 +5274,7 @@
       "id": "d2df56998e77c451bcf0"
     },
     {
-      "line": 373,
+      "line": 445,
       "section": "控えめなスペクトラル・トランジェント試作 — 2026-10-26",
       "statuses": [
         "Pending"
@@ -4382,7 +5286,7 @@
       "id": "a21b2dfe0cae2ef50877"
     },
     {
-      "line": 378,
+      "line": 450,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4399,7 +5303,7 @@
       "id": "a54025ba1dc353ace7be"
     },
     {
-      "line": 380,
+      "line": 452,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4416,7 +5320,7 @@
       "id": "76facbf1ae53a48a2596"
     },
     {
-      "line": 382,
+      "line": 454,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4433,7 +5337,7 @@
       "id": "6599baa97e787a7208e4"
     },
     {
-      "line": 384,
+      "line": 456,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4450,7 +5354,7 @@
       "id": "5269817ef84e398b2e8f"
     },
     {
-      "line": 385,
+      "line": 457,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4462,7 +5366,7 @@
       "id": "938b0d46c457a51b843a"
     },
     {
-      "line": 386,
+      "line": 458,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4474,7 +5378,7 @@
       "id": "65f99e7f823cf5c5dc98"
     },
     {
-      "line": 387,
+      "line": 459,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Next"
@@ -4486,7 +5390,7 @@
       "id": "149f77900197ea0ba2d0"
     },
     {
-      "line": 388,
+      "line": 460,
       "section": "受信スナップショット・永続化・UI反映経路 — 2026-10-25",
       "statuses": [
         "Pending"
@@ -4498,7 +5402,7 @@
       "id": "1d2f937a801d12cd06f7"
     },
     {
-      "line": 393,
+      "line": 465,
       "section": "不足チャンク要求の走査・生成・送信負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4515,7 +5419,7 @@
       "id": "025cf68925466a3f9b9f"
     },
     {
-      "line": 394,
+      "line": 466,
       "section": "不足チャンク要求の走査・生成・送信負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4527,7 +5431,7 @@
       "id": "1b1ad8cfa1b1832f1b50"
     },
     {
-      "line": 395,
+      "line": 467,
       "section": "不足チャンク要求の走査・生成・送信負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4539,7 +5443,7 @@
       "id": "6e8889aa022948c8d275"
     },
     {
-      "line": 396,
+      "line": 468,
       "section": "不足チャンク要求の走査・生成・送信負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4551,7 +5455,7 @@
       "id": "94b0e350cd962d19e2f9"
     },
     {
-      "line": 397,
+      "line": 469,
       "section": "不足チャンク要求の走査・生成・送信負荷 — 2026-10-25",
       "statuses": [
         "Pending"
@@ -4563,7 +5467,7 @@
       "id": "0fba35246681b5a33c28"
     },
     {
-      "line": 402,
+      "line": 474,
       "section": "大規模チャンク転送の保存負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4580,7 +5484,7 @@
       "id": "fc79072b03baf5d62a8f"
     },
     {
-      "line": 403,
+      "line": 475,
       "section": "大規模チャンク転送の保存負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4592,7 +5496,7 @@
       "id": "1b46613fcb57475e5e81"
     },
     {
-      "line": 404,
+      "line": 476,
       "section": "大規模チャンク転送の保存負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4604,7 +5508,7 @@
       "id": "9870a978bdd60a230d70"
     },
     {
-      "line": 405,
+      "line": 477,
       "section": "大規模チャンク転送の保存負荷 — 2026-10-25",
       "statuses": [
         "Done"
@@ -4616,7 +5520,7 @@
       "id": "707c89f410946791a6fe"
     },
     {
-      "line": 406,
+      "line": 478,
       "section": "大規模チャンク転送の保存負荷 — 2026-10-25",
       "statuses": [
         "Pending"
@@ -4628,7 +5532,7 @@
       "id": "af3e721862dd12b9091c"
     },
     {
-      "line": 411,
+      "line": 483,
       "section": "Chunk transfer actor ownership — 2026-10-24",
       "statuses": [
         "Done"
@@ -4645,7 +5549,7 @@
       "id": "29288fcd098750554c07"
     },
     {
-      "line": 412,
+      "line": 484,
       "section": "Chunk transfer actor ownership — 2026-10-24",
       "statuses": [
         "Done"
@@ -4657,7 +5561,7 @@
       "id": "cf63aa7eab211873d8d1"
     },
     {
-      "line": 413,
+      "line": 485,
       "section": "Chunk transfer actor ownership — 2026-10-24",
       "statuses": [
         "Done"
@@ -4669,7 +5573,7 @@
       "id": "0cf2c576e00682cb7be2"
     },
     {
-      "line": 414,
+      "line": 486,
       "section": "Chunk transfer actor ownership — 2026-10-24",
       "statuses": [
         "Pending"
@@ -4681,7 +5585,7 @@
       "id": "d3be693a0b739098f896"
     },
     {
-      "line": 419,
+      "line": 491,
       "section": "Validated chunk transfer snapshots — 2026-10-24",
       "statuses": [
         "Done"
@@ -4698,7 +5602,7 @@
       "id": "3f0e8755bf99ce12c1d5"
     },
     {
-      "line": 420,
+      "line": 492,
       "section": "Validated chunk transfer snapshots — 2026-10-24",
       "statuses": [
         "Done"
@@ -4710,7 +5614,7 @@
       "id": "2644bf6761cc8625c038"
     },
     {
-      "line": 421,
+      "line": 493,
       "section": "Validated chunk transfer snapshots — 2026-10-24",
       "statuses": [
         "Done"
@@ -4722,7 +5626,7 @@
       "id": "cef9b7658e4356fceca9"
     },
     {
-      "line": 422,
+      "line": 494,
       "section": "Validated chunk transfer snapshots — 2026-10-24",
       "statuses": [
         "Done",
@@ -4735,7 +5639,7 @@
       "id": "dbd3294e627500af3e58"
     },
     {
-      "line": 423,
+      "line": 495,
       "section": "Validated chunk transfer snapshots — 2026-10-24",
       "statuses": [
         "Pending"
@@ -4747,7 +5651,7 @@
       "id": "b5666ec63d49fcf24d1a"
     },
     {
-      "line": 428,
+      "line": 500,
       "section": "Monotonic gain acknowledgement and PCM startup qualification — 2026-10-22",
       "statuses": [
         "Done"
@@ -4764,7 +5668,7 @@
       "id": "1577ced662fd6fb72486"
     },
     {
-      "line": 429,
+      "line": 501,
       "section": "Monotonic gain acknowledgement and PCM startup qualification — 2026-10-22",
       "statuses": [
         "Done"
@@ -4776,7 +5680,7 @@
       "id": "bab5c8040a536c8402a7"
     },
     {
-      "line": 430,
+      "line": 502,
       "section": "Monotonic gain acknowledgement and PCM startup qualification — 2026-10-22",
       "statuses": [
         "Done"
@@ -4788,7 +5692,7 @@
       "id": "45d0479ae115da8e576f"
     },
     {
-      "line": 431,
+      "line": 503,
       "section": "Monotonic gain acknowledgement and PCM startup qualification — 2026-10-22",
       "statuses": [
         "Next"
@@ -4800,7 +5704,7 @@
       "id": "8f730b787c23f4652308"
     },
     {
-      "line": 432,
+      "line": 504,
       "section": "Monotonic gain acknowledgement and PCM startup qualification — 2026-10-22",
       "statuses": [
         "Pending"
@@ -4812,7 +5716,7 @@
       "id": "9a06616a575f76714abf"
     },
     {
-      "line": 437,
+      "line": 509,
       "section": "Desktop fallback search memory lifecycle — 2026-10-22",
       "statuses": [
         "Done"
@@ -4829,7 +5733,7 @@
       "id": "333805b38568b000948d"
     },
     {
-      "line": 438,
+      "line": 510,
       "section": "Desktop fallback search memory lifecycle — 2026-10-22",
       "statuses": [
         "Done"
@@ -4841,7 +5745,7 @@
       "id": "20970bc1cba6a24931e2"
     },
     {
-      "line": 439,
+      "line": 511,
       "section": "Desktop fallback search memory lifecycle — 2026-10-22",
       "statuses": [
         "Done"
@@ -4853,7 +5757,7 @@
       "id": "26122eb90ba640b01a58"
     },
     {
-      "line": 440,
+      "line": 512,
       "section": "Desktop fallback search memory lifecycle — 2026-10-22",
       "statuses": [
         "Next"
@@ -4865,7 +5769,7 @@
       "id": "41ed18c8fdbfd44fa7d8"
     },
     {
-      "line": 441,
+      "line": 513,
       "section": "Desktop fallback search memory lifecycle — 2026-10-22",
       "statuses": [
         "Pending"
@@ -4877,7 +5781,7 @@
       "id": "8f94dfa4cf9d82b4e4d5"
     },
     {
-      "line": 446,
+      "line": 518,
       "section": "Initial graph setup and compatible reload reuse — 2026-10-22",
       "statuses": [
         "Done"
@@ -4894,7 +5798,7 @@
       "id": "185cf0cff7550a034b19"
     },
     {
-      "line": 447,
+      "line": 519,
       "section": "Initial graph setup and compatible reload reuse — 2026-10-22",
       "statuses": [
         "Done"
@@ -4906,7 +5810,7 @@
       "id": "efe5a9d8ff458cd89e6e"
     },
     {
-      "line": 448,
+      "line": 520,
       "section": "Initial graph setup and compatible reload reuse — 2026-10-22",
       "statuses": [
         "Done"
@@ -4918,7 +5822,7 @@
       "id": "8bece13733a084b6f93f"
     },
     {
-      "line": 449,
+      "line": 521,
       "section": "Initial graph setup and compatible reload reuse — 2026-10-22",
       "statuses": [
         "Done"
@@ -4930,7 +5834,7 @@
       "id": "5d916dca4a89e5a79052"
     },
     {
-      "line": 450,
+      "line": 522,
       "section": "Initial graph setup and compatible reload reuse — 2026-10-22",
       "statuses": [
         "Next"
@@ -4942,7 +5846,7 @@
       "id": "c6847b427549d604d9cc"
     },
     {
-      "line": 451,
+      "line": 523,
       "section": "Initial graph setup and compatible reload reuse — 2026-10-22",
       "statuses": [
         "Pending"
@@ -4954,7 +5858,7 @@
       "id": "c7d47326d44094af8901"
     },
     {
-      "line": 455,
+      "line": 527,
       "section": "Matched startup cost and retained render resources — 2026-10-22",
       "statuses": [
         "Done"
@@ -4971,7 +5875,7 @@
       "id": "a51ed952001679995d58"
     },
     {
-      "line": 456,
+      "line": 528,
       "section": "Matched startup cost and retained render resources — 2026-10-22",
       "statuses": [
         "Done"
@@ -4983,7 +5887,7 @@
       "id": "363f41ec4c2ab669b069"
     },
     {
-      "line": 457,
+      "line": 529,
       "section": "Matched startup cost and retained render resources — 2026-10-22",
       "statuses": [
         "Done",
@@ -4996,7 +5900,7 @@
       "id": "33e8343591a4150f7b41"
     },
     {
-      "line": 458,
+      "line": 530,
       "section": "Matched startup cost and retained render resources — 2026-10-22",
       "statuses": [
         "Pending"
@@ -5008,7 +5912,7 @@
       "id": "33da6d4660c8471e6041"
     },
     {
-      "line": 462,
+      "line": 534,
       "section": "Connected audio-thread protection — 2026-10-22",
       "statuses": [
         "Done"
@@ -5031,7 +5935,7 @@
       "id": "bf6cede7c6fde5f2573b"
     },
     {
-      "line": 463,
+      "line": 535,
       "section": "Connected audio-thread protection — 2026-10-22",
       "statuses": [
         "Done"
@@ -5043,7 +5947,7 @@
       "id": "99d538f2702e4bd2043a"
     },
     {
-      "line": 464,
+      "line": 536,
       "section": "Connected audio-thread protection — 2026-10-22",
       "statuses": [
         "Done"
@@ -5055,7 +5959,7 @@
       "id": "2899d6e8ecaea8b3069d"
     },
     {
-      "line": 465,
+      "line": 537,
       "section": "Connected audio-thread protection — 2026-10-22",
       "statuses": [
         "Done"
@@ -5067,7 +5971,7 @@
       "id": "7c8c1e8c6e7e68a2ebe2"
     },
     {
-      "line": 466,
+      "line": 538,
       "section": "Connected audio-thread protection — 2026-10-22",
       "statuses": [
         "Pending"
@@ -5079,7 +5983,7 @@
       "id": "acbaf0df3bc1a7ba5827"
     },
     {
-      "line": 470,
+      "line": 542,
       "section": "Shared audio-thread gain stage — 2026-10-22",
       "statuses": [
         "Done"
@@ -5096,7 +6000,7 @@
       "id": "24ac5d99d785387c2625"
     },
     {
-      "line": 471,
+      "line": 543,
       "section": "Shared audio-thread gain stage — 2026-10-22",
       "statuses": [
         "Done"
@@ -5108,7 +6012,7 @@
       "id": "3105628f15679e055a63"
     },
     {
-      "line": 472,
+      "line": 544,
       "section": "Shared audio-thread gain stage — 2026-10-22",
       "statuses": [
         "Done"
@@ -5120,7 +6024,7 @@
       "id": "282dffdaaf1c19ba9ead"
     },
     {
-      "line": 473,
+      "line": 545,
       "section": "Shared audio-thread gain stage — 2026-10-22",
       "statuses": [
         "Pending"
@@ -5132,7 +6036,7 @@
       "id": "0323858a50d7fcfeff4a"
     },
     {
-      "line": 477,
+      "line": 549,
       "section": "Desktop automatic-repair restart coordination — 2026-10-22",
       "statuses": [
         "Done"
@@ -5144,7 +6048,7 @@
       "id": "a59f9fe93b15ed0dc6ba"
     },
     {
-      "line": 478,
+      "line": 550,
       "section": "Desktop automatic-repair restart coordination — 2026-10-22",
       "statuses": [
         "Pending"
@@ -5156,7 +6060,7 @@
       "id": "247143ce3094e5994a74"
     },
     {
-      "line": 482,
+      "line": 554,
       "section": "Foreground track-end follow-up — 2026-10-21",
       "statuses": [
         "Done"
@@ -5168,7 +6072,7 @@
       "id": "d6c5bf91d7fa20283f2b"
     },
     {
-      "line": 483,
+      "line": 555,
       "section": "Foreground track-end follow-up — 2026-10-21",
       "statuses": [
         "Done"
@@ -5185,7 +6089,7 @@
       "id": "d91dffa529c9365742b5"
     },
     {
-      "line": 484,
+      "line": 556,
       "section": "Foreground track-end follow-up — 2026-10-21",
       "statuses": [
         "Pending"
@@ -5197,7 +6101,7 @@
       "id": "585b07af9a481adbd9f2"
     },
     {
-      "line": 488,
+      "line": 560,
       "section": "Original source information in track details — 2026-10-21",
       "statuses": [
         "Done"
@@ -5209,7 +6113,7 @@
       "id": "dc9f3a8c639a2c5a012c"
     },
     {
-      "line": 489,
+      "line": 561,
       "section": "Original source information in track details — 2026-10-21",
       "statuses": [
         "Done"
@@ -5226,7 +6130,7 @@
       "id": "6cb69d620a270e3298ed"
     },
     {
-      "line": 490,
+      "line": 562,
       "section": "Original source information in track details — 2026-10-21",
       "statuses": [
         "Pending"
@@ -5238,7 +6142,7 @@
       "id": "fda4742ce94709ac662c"
     },
     {
-      "line": 494,
+      "line": 566,
       "section": "Desktop CD-import mono / meter parity — 2026-10-21",
       "statuses": [
         "Done"
@@ -5250,7 +6154,7 @@
       "id": "74e3a3374039b5153763"
     },
     {
-      "line": 495,
+      "line": 567,
       "section": "Desktop CD-import mono / meter parity — 2026-10-21",
       "statuses": [
         "Done"
@@ -5262,7 +6166,7 @@
       "id": "d03ae767aff7c4b01c42"
     },
     {
-      "line": 496,
+      "line": 568,
       "section": "Desktop CD-import mono / meter parity — 2026-10-21",
       "statuses": [
         "Done"
@@ -5274,7 +6178,7 @@
       "id": "c00c69ce48025871302a"
     },
     {
-      "line": 497,
+      "line": 569,
       "section": "Desktop CD-import mono / meter parity — 2026-10-21",
       "statuses": [
         "Pending"
@@ -5286,7 +6190,7 @@
       "id": "134ab45481df1a805d6d"
     },
     {
-      "line": 501,
+      "line": 573,
       "section": "CD-import meter / effect availability recovery — 2026-10-21",
       "statuses": [
         "Done"
@@ -5298,7 +6202,7 @@
       "id": "69f7efb105b272bfc48c"
     },
     {
-      "line": 502,
+      "line": 574,
       "section": "CD-import meter / effect availability recovery — 2026-10-21",
       "statuses": [
         "Done"
@@ -5315,7 +6219,7 @@
       "id": "9fa2420170dbc7ed0eb5"
     },
     {
-      "line": 503,
+      "line": 575,
       "section": "CD-import meter / effect availability recovery — 2026-10-21",
       "statuses": [
         "Pending"
@@ -5327,7 +6231,7 @@
       "id": "e5b93edaa9b394b976fd"
     },
     {
-      "line": 507,
+      "line": 579,
       "section": "Mobile VU response / Desktop reference — 2026-10-20",
       "statuses": [
         "Done"
@@ -5339,7 +6243,7 @@
       "id": "ff9bcc2d72a8d2b2e222"
     },
     {
-      "line": 508,
+      "line": 580,
       "section": "Mobile VU response / Desktop reference — 2026-10-20",
       "statuses": [
         "Done"
@@ -5356,7 +6260,7 @@
       "id": "dbc66e0b7325e28fa2a2"
     },
     {
-      "line": 509,
+      "line": 581,
       "section": "Mobile VU response / Desktop reference — 2026-10-20",
       "statuses": [
         "Pending"
@@ -5368,7 +6272,7 @@
       "id": "1207f089fb8efc82639c"
     },
     {
-      "line": 513,
+      "line": 585,
       "section": "Release 1.0.7 — 2026-10-20",
       "statuses": [
         "Done"
@@ -5380,7 +6284,7 @@
       "id": "92f0512424239194be0d"
     },
     {
-      "line": 514,
+      "line": 586,
       "section": "Release 1.0.7 — 2026-10-20",
       "statuses": [
         "Done"
@@ -5397,7 +6301,7 @@
       "id": "42bc43d90b4611ada9b3"
     },
     {
-      "line": 515,
+      "line": 587,
       "section": "Release 1.0.7 — 2026-10-20",
       "statuses": [
         "Pending"
@@ -5409,7 +6313,7 @@
       "id": "c7893c8310440c499265"
     },
     {
-      "line": 519,
+      "line": 591,
       "section": "Mac effect-rack layout coordination — 2026-10-20",
       "statuses": [
         "Done"
@@ -5421,7 +6325,7 @@
       "id": "2f4af98254051123b7ed"
     },
     {
-      "line": 520,
+      "line": 592,
       "section": "Mac effect-rack layout coordination — 2026-10-20",
       "statuses": [
         "Done"
@@ -5433,7 +6337,7 @@
       "id": "5925da92e73695a10267"
     },
     {
-      "line": 521,
+      "line": 593,
       "section": "Mac effect-rack layout coordination — 2026-10-20",
       "statuses": [
         "Pending"
@@ -5445,7 +6349,7 @@
       "id": "764901e95588c335d940"
     },
     {
-      "line": 525,
+      "line": 597,
       "section": "Mac / iPhone track-end ownership parity — 2026-10-20",
       "statuses": [
         "Done"
@@ -5457,7 +6361,7 @@
       "id": "7c080a810cf9ec33ed0c"
     },
     {
-      "line": 526,
+      "line": 598,
       "section": "Mac / iPhone track-end ownership parity — 2026-10-20",
       "statuses": [
         "Done"
@@ -5469,7 +6373,7 @@
       "id": "d42e311bd9168135a599"
     },
     {
-      "line": 527,
+      "line": 599,
       "section": "Mac / iPhone track-end ownership parity — 2026-10-20",
       "statuses": [
         "Done"
@@ -5486,7 +6390,7 @@
       "id": "ab61a30f46b0af20702d"
     },
     {
-      "line": 528,
+      "line": 600,
       "section": "Mac / iPhone track-end ownership parity — 2026-10-20",
       "statuses": [
         "Pending"
@@ -5498,7 +6402,7 @@
       "id": "1da713e5cc62676e6de1"
     },
     {
-      "line": 532,
+      "line": 604,
       "section": "Track-end follow-up: retained EOF and prepared handoff — 2026-10-20",
       "statuses": [
         "Done"
@@ -5510,7 +6414,7 @@
       "id": "e5d910d99d9b4a80dac2"
     },
     {
-      "line": 533,
+      "line": 605,
       "section": "Track-end follow-up: retained EOF and prepared handoff — 2026-10-20",
       "statuses": [
         "Done"
@@ -5522,7 +6426,7 @@
       "id": "c8e3f670f520a5f25e6d"
     },
     {
-      "line": 534,
+      "line": 606,
       "section": "Track-end follow-up: retained EOF and prepared handoff — 2026-10-20",
       "statuses": [
         "Done"
@@ -5539,7 +6443,7 @@
       "id": "0b52e750afef5dc0f448"
     },
     {
-      "line": 535,
+      "line": 607,
       "section": "Track-end follow-up: retained EOF and prepared handoff — 2026-10-20",
       "statuses": [
         "Pending"
@@ -5551,7 +6455,7 @@
       "id": "608a7f142c825dfadcb5"
     },
     {
-      "line": 539,
+      "line": 611,
       "section": "Track-end continuity after other-app audio — 2026-10-19",
       "statuses": [
         "Done"
@@ -5563,7 +6467,7 @@
       "id": "32c92ab4256772ed4db1"
     },
     {
-      "line": 540,
+      "line": 612,
       "section": "Track-end continuity after other-app audio — 2026-10-19",
       "statuses": [
         "Done"
@@ -5580,7 +6484,7 @@
       "id": "aca31da73358afb0d17f"
     },
     {
-      "line": 541,
+      "line": 613,
       "section": "Track-end continuity after other-app audio — 2026-10-19",
       "statuses": [
         "Pending"
@@ -5592,7 +6496,7 @@
       "id": "3ff18d3d198a6437c1e9"
     },
     {
-      "line": 545,
+      "line": 617,
       "section": "Mobile settings tabs — 2026-10-19",
       "statuses": [
         "Done"
@@ -5604,7 +6508,7 @@
       "id": "f6a02a00ed7762a3009a"
     },
     {
-      "line": 547,
+      "line": 619,
       "section": "Mobile settings tabs — 2026-10-19",
       "statuses": [
         "Done"
@@ -5616,7 +6520,7 @@
       "id": "dec66cb490b440e1fddf"
     },
     {
-      "line": 548,
+      "line": 620,
       "section": "Mobile settings tabs — 2026-10-19",
       "statuses": [
         "Done"
@@ -5653,7 +6557,7 @@
       "id": "f20b0e5f3b2c087a693e"
     },
     {
-      "line": 549,
+      "line": 621,
       "section": "Mobile settings tabs — 2026-10-19",
       "statuses": [
         "Pending"
@@ -5665,7 +6569,7 @@
       "id": "0d37b1dbf09bef2dc430"
     },
     {
-      "line": 553,
+      "line": 625,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Done"
@@ -5686,7 +6590,7 @@
       "id": "346b936c6eec908bfa1b"
     },
     {
-      "line": 554,
+      "line": 626,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Done"
@@ -5698,7 +6602,7 @@
       "id": "6aa0e6baabbcf2be7083"
     },
     {
-      "line": 555,
+      "line": 627,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Done"
@@ -5710,7 +6614,7 @@
       "id": "a66e2305636097933cbe"
     },
     {
-      "line": 556,
+      "line": 628,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Done"
@@ -5727,7 +6631,7 @@
       "id": "0e490a529317b812095c"
     },
     {
-      "line": 557,
+      "line": 629,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Done"
@@ -5739,7 +6643,7 @@
       "id": "148f24c4244722da43ce"
     },
     {
-      "line": 558,
+      "line": 630,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Later"
@@ -5751,7 +6655,7 @@
       "id": "d8518426d717ad9c4b40"
     },
     {
-      "line": 559,
+      "line": 631,
       "section": "Effect tails and latency-change protection — 2026-10-19",
       "statuses": [
         "Pending"
@@ -5763,7 +6667,7 @@
       "id": "892b09eb7f36445e56f9"
     },
     {
-      "line": 563,
+      "line": 635,
       "section": "CPU / Metal upsampling comparison — 2026-10-19",
       "statuses": [
         "Done"
@@ -5775,7 +6679,7 @@
       "id": "831caddef859a66415a0"
     },
     {
-      "line": 564,
+      "line": 636,
       "section": "CPU / Metal upsampling comparison — 2026-10-19",
       "statuses": [
         "Done"
@@ -5792,7 +6696,7 @@
       "id": "3d4583d20649a73b54be"
     },
     {
-      "line": 565,
+      "line": 637,
       "section": "CPU / Metal upsampling comparison — 2026-10-19",
       "statuses": [
         "Done"
@@ -5804,7 +6708,7 @@
       "id": "457da3b0242e19e132b6"
     },
     {
-      "line": 566,
+      "line": 638,
       "section": "CPU / Metal upsampling comparison — 2026-10-19",
       "statuses": [
         "Done"
@@ -5821,7 +6725,7 @@
       "id": "fa66b42152ec4ca2c193"
     },
     {
-      "line": 567,
+      "line": 639,
       "section": "CPU / Metal upsampling comparison — 2026-10-19",
       "statuses": [
         "Later"
@@ -5833,7 +6737,7 @@
       "id": "a036b7dea0f6318d8622"
     },
     {
-      "line": 568,
+      "line": 640,
       "section": "CPU / Metal upsampling comparison — 2026-10-19",
       "statuses": [
         "Pending"
@@ -5845,7 +6749,7 @@
       "id": "b1efd3448dc164fd2137"
     },
     {
-      "line": 572,
+      "line": 644,
       "section": "Mac transport and late-analysis parity — 2026-10-19",
       "statuses": [
         "Done"
@@ -5857,7 +6761,7 @@
       "id": "0220c841d5e10aaa33d9"
     },
     {
-      "line": 573,
+      "line": 645,
       "section": "Mac transport and late-analysis parity — 2026-10-19",
       "statuses": [
         "Done"
@@ -5869,7 +6773,7 @@
       "id": "4bb973ca51b0cb28b35d"
     },
     {
-      "line": 574,
+      "line": 646,
       "section": "Mac transport and late-analysis parity — 2026-10-19",
       "statuses": [
         "Done"
@@ -5886,7 +6790,7 @@
       "id": "730f9815909270355287"
     },
     {
-      "line": 575,
+      "line": 647,
       "section": "Mac transport and late-analysis parity — 2026-10-19",
       "statuses": [
         "Done"
@@ -5903,7 +6807,7 @@
       "id": "458eface59e798f86708"
     },
     {
-      "line": 576,
+      "line": 648,
       "section": "Mac transport and late-analysis parity — 2026-10-19",
       "statuses": [
         "Pending"
@@ -5915,7 +6819,7 @@
       "id": "ceaac89aa838e7b05923"
     },
     {
-      "line": 577,
+      "line": 649,
       "section": "Mac transport and late-analysis parity — 2026-10-19",
       "statuses": [
         "Done"
@@ -5932,7 +6836,7 @@
       "id": "42a7fc2be9954ac20722"
     },
     {
-      "line": 581,
+      "line": 653,
       "section": "Foreground recovery after other-app audio — 2026-10-19",
       "statuses": [
         "Done"
@@ -5944,7 +6848,7 @@
       "id": "dada2195351db7a6dd1a"
     },
     {
-      "line": 582,
+      "line": 654,
       "section": "Foreground recovery after other-app audio — 2026-10-19",
       "statuses": [
         "Done"
@@ -5961,7 +6865,7 @@
       "id": "f28085d0e11fd741ced5"
     },
     {
-      "line": 583,
+      "line": 655,
       "section": "Foreground recovery after other-app audio — 2026-10-19",
       "statuses": [
         "Pending"
@@ -5973,7 +6877,7 @@
       "id": "5a4b14669a9fd39ffc49"
     },
     {
-      "line": 587,
+      "line": 659,
       "section": "Destructive playback shutdown — 2026-10-18",
       "statuses": [
         "Done"
@@ -5985,7 +6889,7 @@
       "id": "4423e690feca72a98cfb"
     },
     {
-      "line": 588,
+      "line": 660,
       "section": "Destructive playback shutdown — 2026-10-18",
       "statuses": [
         "Done"
@@ -6002,7 +6906,7 @@
       "id": "02d749f497a7281a09a9"
     },
     {
-      "line": 589,
+      "line": 661,
       "section": "Destructive playback shutdown — 2026-10-18",
       "statuses": [
         "Done"
@@ -6019,7 +6923,7 @@
       "id": "11c43b03077cfe173979"
     },
     {
-      "line": 590,
+      "line": 662,
       "section": "Destructive playback shutdown — 2026-10-18",
       "statuses": [
         "Done"
@@ -6036,7 +6940,7 @@
       "id": "58015950888e53e7c46f"
     },
     {
-      "line": 591,
+      "line": 663,
       "section": "Destructive playback shutdown — 2026-10-18",
       "statuses": [
         "Pending"
@@ -6048,7 +6952,7 @@
       "id": "320126eccee4951e159b"
     },
     {
-      "line": 595,
+      "line": 667,
       "section": "Pastel desktop parity and dial detail — 2026-10-18",
       "statuses": [
         "Done"
@@ -6060,7 +6964,7 @@
       "id": "56bd026f07a141e9b37d"
     },
     {
-      "line": 596,
+      "line": 668,
       "section": "Pastel desktop parity and dial detail — 2026-10-18",
       "statuses": [
         "Done"
@@ -6072,7 +6976,7 @@
       "id": "75ef0d2932175103fcb4"
     },
     {
-      "line": 597,
+      "line": 669,
       "section": "Pastel desktop parity and dial detail — 2026-10-18",
       "statuses": [
         "Done"
@@ -6084,7 +6988,7 @@
       "id": "729f850756f561ac2bc6"
     },
     {
-      "line": 598,
+      "line": 670,
       "section": "Pastel desktop parity and dial detail — 2026-10-18",
       "statuses": [
         "Done"
@@ -6101,7 +7005,7 @@
       "id": "72751c0dbc8f279f9e69"
     },
     {
-      "line": 599,
+      "line": 671,
       "section": "Pastel desktop parity and dial detail — 2026-10-18",
       "statuses": [
         "Pending"
@@ -6113,7 +7017,7 @@
       "id": "e5d6777f2c210745a107"
     },
     {
-      "line": 603,
+      "line": 675,
       "section": "Mobile pastel appearance — 2026-10-18",
       "statuses": [
         "Done"
@@ -6125,7 +7029,7 @@
       "id": "ffcf62c85269dc9ba602"
     },
     {
-      "line": 604,
+      "line": 676,
       "section": "Mobile pastel appearance — 2026-10-18",
       "statuses": [
         "Done"
@@ -6142,7 +7046,7 @@
       "id": "4e0c1830df627c6c8fb3"
     },
     {
-      "line": 605,
+      "line": 677,
       "section": "Mobile pastel appearance — 2026-10-18",
       "statuses": [
         "Done"
@@ -6159,7 +7063,7 @@
       "id": "5c28bdbaf3cc7bbe2e98"
     },
     {
-      "line": 606,
+      "line": 678,
       "section": "Mobile pastel appearance — 2026-10-18",
       "statuses": [
         "Pending"
@@ -6171,7 +7075,7 @@
       "id": "a9067f840ca64381af4b"
     },
     {
-      "line": 611,
+      "line": 683,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6183,7 +7087,7 @@
       "id": "edda7acb3d59f5364a60"
     },
     {
-      "line": 612,
+      "line": 684,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6195,7 +7099,7 @@
       "id": "56f816ea5de4833027c7"
     },
     {
-      "line": 613,
+      "line": 685,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6212,7 +7116,7 @@
       "id": "f09181448186e73ee835"
     },
     {
-      "line": 614,
+      "line": 686,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6229,7 +7133,7 @@
       "id": "f9fa3e0767fba63b6d8d"
     },
     {
-      "line": 615,
+      "line": 687,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6246,7 +7150,7 @@
       "id": "6efa469aac6d067d8630"
     },
     {
-      "line": 616,
+      "line": 688,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6263,7 +7167,7 @@
       "id": "7bf37f1625f268a4c673"
     },
     {
-      "line": 617,
+      "line": 689,
       "section": "iPhone speaker playback continuity — 2026-10-17",
       "statuses": [
         "Pending"
@@ -6275,7 +7179,7 @@
       "id": "ef8c4ed886b4ef731f60"
     },
     {
-      "line": 621,
+      "line": 693,
       "section": "Preparation failure diagnostics — 2026-10-17",
       "statuses": [
         "Done"
@@ -6287,7 +7191,7 @@
       "id": "50ffdbb4311133a6da70"
     },
     {
-      "line": 622,
+      "line": 694,
       "section": "Preparation failure diagnostics — 2026-10-17",
       "statuses": [
         "Done"
@@ -6299,7 +7203,7 @@
       "id": "b1375fa26026c282c10b"
     },
     {
-      "line": 623,
+      "line": 695,
       "section": "Preparation failure diagnostics — 2026-10-17",
       "statuses": [
         "Done"
@@ -6316,7 +7220,7 @@
       "id": "fd94c402ab3addf1a186"
     },
     {
-      "line": 624,
+      "line": 696,
       "section": "Preparation failure diagnostics — 2026-10-17",
       "statuses": [
         "Pending"
@@ -6328,7 +7232,7 @@
       "id": "50f06cec491d5f941e43"
     },
     {
-      "line": 628,
+      "line": 700,
       "section": "Effect ON/OFF protection — 2026-10-17",
       "statuses": [
         "Done"
@@ -6340,7 +7244,7 @@
       "id": "ff39c61dd04650a1323e"
     },
     {
-      "line": 629,
+      "line": 701,
       "section": "Effect ON/OFF protection — 2026-10-17",
       "statuses": [
         "Done"
@@ -6352,7 +7256,7 @@
       "id": "0f3122417b421ddfb7dc"
     },
     {
-      "line": 630,
+      "line": 702,
       "section": "Effect ON/OFF protection — 2026-10-17",
       "statuses": [
         "Done"
@@ -6369,7 +7273,7 @@
       "id": "e532731d8b27c2453163"
     },
     {
-      "line": 631,
+      "line": 703,
       "section": "Effect ON/OFF protection — 2026-10-17",
       "statuses": [
         "Done"
@@ -6381,7 +7285,7 @@
       "id": "eb2e8a8d4fe113cfb2ef"
     },
     {
-      "line": 632,
+      "line": 704,
       "section": "Effect ON/OFF protection — 2026-10-17",
       "statuses": [
         "Pending"
@@ -6393,7 +7297,7 @@
       "id": "dcf49f42d2d37e244c74"
     },
     {
-      "line": 633,
+      "line": 705,
       "section": "Effect ON/OFF protection — 2026-10-17",
       "statuses": [
         "Later"
@@ -6405,7 +7309,7 @@
       "id": "ede25d91cd3fefb97871"
     },
     {
-      "line": 637,
+      "line": 709,
       "section": "Effect parameter parity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6417,7 +7321,7 @@
       "id": "7270b788dba1ef6f76ab"
     },
     {
-      "line": 638,
+      "line": 710,
       "section": "Effect parameter parity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6434,7 +7338,7 @@
       "id": "1703b46ac6b052af8a02"
     },
     {
-      "line": 639,
+      "line": 711,
       "section": "Effect parameter parity — 2026-10-17",
       "statuses": [
         "Done"
@@ -6451,7 +7355,7 @@
       "id": "f8662199170385647eb6"
     },
     {
-      "line": 640,
+      "line": 712,
       "section": "Effect parameter parity — 2026-10-17",
       "statuses": [
         "Pending"
@@ -6463,7 +7367,7 @@
       "id": "cf0016b13cfa375946b3"
     },
     {
-      "line": 641,
+      "line": 713,
       "section": "Effect parameter parity — 2026-10-17",
       "statuses": [
         "Later"
@@ -6475,7 +7379,7 @@
       "id": "a0cb6c6b237bafca1de3"
     },
     {
-      "line": 645,
+      "line": 717,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Done"
@@ -6487,7 +7391,7 @@
       "id": "ea177183b64e70769fcd"
     },
     {
-      "line": 646,
+      "line": 718,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Done"
@@ -6499,7 +7403,7 @@
       "id": "2b3035a864409023761e"
     },
     {
-      "line": 647,
+      "line": 719,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Done"
@@ -6516,7 +7420,7 @@
       "id": "537758f77dcda8ea01e6"
     },
     {
-      "line": 648,
+      "line": 720,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Done"
@@ -6533,7 +7437,7 @@
       "id": "27c032e085161e461ea2"
     },
     {
-      "line": 649,
+      "line": 721,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Done"
@@ -6545,7 +7449,7 @@
       "id": "3b01c165008fad6e6645"
     },
     {
-      "line": 650,
+      "line": 722,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Pending"
@@ -6560,7 +7464,7 @@
       "id": "deaf257f3a46a3c0caab"
     },
     {
-      "line": 651,
+      "line": 723,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Pending"
@@ -6572,7 +7476,7 @@
       "id": "323b11a8b9571eb30544"
     },
     {
-      "line": 652,
+      "line": 724,
       "section": "Audio fidelity policy — 2026-10-17",
       "statuses": [
         "Later"
@@ -6584,7 +7488,7 @@
       "id": "de7dede55b6766cb91e4"
     },
     {
-      "line": 657,
+      "line": 729,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6596,7 +7500,7 @@
       "id": "e5da5d0c58cbd8a91879"
     },
     {
-      "line": 658,
+      "line": 730,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6608,7 +7512,7 @@
       "id": "d3f79762c2f286423c61"
     },
     {
-      "line": 659,
+      "line": 731,
       "section": "Appearance",
       "statuses": [
         "Pending"
@@ -6620,7 +7524,7 @@
       "id": "45b2cb27366582e4277d"
     },
     {
-      "line": 660,
+      "line": 732,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6632,7 +7536,7 @@
       "id": "6b4bb266224c5112f9dd"
     },
     {
-      "line": 661,
+      "line": 733,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6644,7 +7548,7 @@
       "id": "4e37a926aac450236149"
     },
     {
-      "line": 662,
+      "line": 734,
       "section": "Appearance",
       "statuses": [
         "Pending"
@@ -6656,7 +7560,7 @@
       "id": "29ca8f48cf45ad36a9e2"
     },
     {
-      "line": 663,
+      "line": 735,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6668,7 +7572,7 @@
       "id": "e51ef16295b32fcb29f9"
     },
     {
-      "line": 664,
+      "line": 736,
       "section": "Appearance",
       "statuses": [
         "Pending"
@@ -6680,7 +7584,7 @@
       "id": "59b26162ec5fc7e65ee7"
     },
     {
-      "line": 665,
+      "line": 737,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6692,7 +7596,7 @@
       "id": "886a82718c7e835cd704"
     },
     {
-      "line": 666,
+      "line": 738,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6704,7 +7608,7 @@
       "id": "a06652d7ca4926a9ac14"
     },
     {
-      "line": 667,
+      "line": 739,
       "section": "Appearance",
       "statuses": [
         "Pending"
@@ -6716,7 +7620,7 @@
       "id": "c7631c1bc0e8cee25a4e"
     },
     {
-      "line": 668,
+      "line": 740,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6728,7 +7632,7 @@
       "id": "48185300b441ac047416"
     },
     {
-      "line": 669,
+      "line": 741,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6740,7 +7644,7 @@
       "id": "1b1277d4dbc088f17ab9"
     },
     {
-      "line": 670,
+      "line": 742,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6752,7 +7656,7 @@
       "id": "32f87421aa0fb418f851"
     },
     {
-      "line": 671,
+      "line": 743,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6764,7 +7668,7 @@
       "id": "8009b415c648db704ebc"
     },
     {
-      "line": 672,
+      "line": 744,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6776,7 +7680,7 @@
       "id": "217cbfcb37cb380fac0f"
     },
     {
-      "line": 673,
+      "line": 745,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6788,7 +7692,7 @@
       "id": "b3a5f8058d88f2ea820d"
     },
     {
-      "line": 674,
+      "line": 746,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6800,7 +7704,7 @@
       "id": "ea66bee9715c4db482b1"
     },
     {
-      "line": 675,
+      "line": 747,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6812,7 +7716,7 @@
       "id": "d9125c301c7113e61df1"
     },
     {
-      "line": 676,
+      "line": 748,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6824,7 +7728,7 @@
       "id": "d308e40e7eeba09f7192"
     },
     {
-      "line": 677,
+      "line": 749,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6836,7 +7740,7 @@
       "id": "140ad58096fba3b53e08"
     },
     {
-      "line": 678,
+      "line": 750,
       "section": "Appearance",
       "statuses": [
         "Pending"
@@ -6848,7 +7752,7 @@
       "id": "a5a67c0aaa37adaab6be"
     },
     {
-      "line": 680,
+      "line": 752,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6860,7 +7764,7 @@
       "id": "6179c024b6858a4c4d3a"
     },
     {
-      "line": 681,
+      "line": 753,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6872,7 +7776,7 @@
       "id": "4a0c866716f7995d327b"
     },
     {
-      "line": 682,
+      "line": 754,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6889,7 +7793,7 @@
       "id": "d6c7c408d1ea0c164beb"
     },
     {
-      "line": 683,
+      "line": 755,
       "section": "Appearance",
       "statuses": [
         "Done"
@@ -6906,7 +7810,7 @@
       "id": "796b17d0716351ab3947"
     },
     {
-      "line": 684,
+      "line": 756,
       "section": "Appearance",
       "statuses": [
         "Pending"
@@ -6918,7 +7822,7 @@
       "id": "6218276de8c0fd7fc1c1"
     },
     {
-      "line": 688,
+      "line": 760,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -6935,7 +7839,7 @@
       "id": "dc8860649de64dc7303f"
     },
     {
-      "line": 689,
+      "line": 761,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -6947,7 +7851,7 @@
       "id": "9cb1b837c5eb31cff415"
     },
     {
-      "line": 691,
+      "line": 763,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -6959,7 +7863,7 @@
       "id": "ea1d748ecad03566fd77"
     },
     {
-      "line": 692,
+      "line": 764,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -6971,7 +7875,7 @@
       "id": "67352859305f4c6f6470"
     },
     {
-      "line": 694,
+      "line": 766,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -6988,7 +7892,7 @@
       "id": "8c0c86526c03147cb52f"
     },
     {
-      "line": 695,
+      "line": 767,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7000,7 +7904,7 @@
       "id": "83d9662a2db1453c237f"
     },
     {
-      "line": 697,
+      "line": 769,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7012,7 +7916,7 @@
       "id": "dc076592dda4a464f74c"
     },
     {
-      "line": 698,
+      "line": 770,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7024,7 +7928,7 @@
       "id": "a8e4f7812de4aedd4350"
     },
     {
-      "line": 699,
+      "line": 771,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7036,7 +7940,7 @@
       "id": "c04a317cb04b3e4cad06"
     },
     {
-      "line": 700,
+      "line": 772,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7048,7 +7952,7 @@
       "id": "008a6a8aab1483b94b67"
     },
     {
-      "line": 701,
+      "line": 773,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7060,7 +7964,7 @@
       "id": "00cf1cfc9840ab950eaa"
     },
     {
-      "line": 702,
+      "line": 774,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7072,7 +7976,7 @@
       "id": "350e94a1cb5b9daaa989"
     },
     {
-      "line": 703,
+      "line": 775,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7084,7 +7988,7 @@
       "id": "347b384e47102a22487c"
     },
     {
-      "line": 704,
+      "line": 776,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7096,7 +8000,7 @@
       "id": "de4a7f14052a98304094"
     },
     {
-      "line": 705,
+      "line": 777,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7113,7 +8017,7 @@
       "id": "38b780540d219f67f2e5"
     },
     {
-      "line": 706,
+      "line": 778,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7130,7 +8034,7 @@
       "id": "b749cb21acddd75568c1"
     },
     {
-      "line": 707,
+      "line": 779,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Later"
@@ -7142,7 +8046,7 @@
       "id": "f0c57e73c4be14ebc8e7"
     },
     {
-      "line": 708,
+      "line": 780,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7154,7 +8058,7 @@
       "id": "d5d6a87d4834f136034b"
     },
     {
-      "line": 709,
+      "line": 781,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7171,7 +8075,7 @@
       "id": "eae4ff663733f736390c"
     },
     {
-      "line": 710,
+      "line": 782,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7188,7 +8092,7 @@
       "id": "3be50895bc62a0851af5"
     },
     {
-      "line": 711,
+      "line": 783,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7200,7 +8104,7 @@
       "id": "4b3722419969c24c56a2"
     },
     {
-      "line": 712,
+      "line": 784,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7212,7 +8116,7 @@
       "id": "9905ab47b92016d45816"
     },
     {
-      "line": 713,
+      "line": 785,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7229,7 +8133,7 @@
       "id": "7cbabcc616aa45ea0000"
     },
     {
-      "line": 714,
+      "line": 786,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7241,7 +8145,7 @@
       "id": "78baa2beb47854e59f57"
     },
     {
-      "line": 715,
+      "line": 787,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7258,7 +8162,7 @@
       "id": "8583c18a1826002706d0"
     },
     {
-      "line": 716,
+      "line": 788,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7275,7 +8179,7 @@
       "id": "df14e753f8d4279bf1af"
     },
     {
-      "line": 717,
+      "line": 789,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7287,7 +8191,7 @@
       "id": "f6101f1bfaa00aba3719"
     },
     {
-      "line": 718,
+      "line": 790,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7299,7 +8203,7 @@
       "id": "0ca51db05e1c773ee946"
     },
     {
-      "line": 719,
+      "line": 791,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7316,7 +8220,7 @@
       "id": "9815b24f0b8677676ec6"
     },
     {
-      "line": 720,
+      "line": 792,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7328,7 +8232,7 @@
       "id": "d9fb1f4edeb75ccd5bcb"
     },
     {
-      "line": 721,
+      "line": 793,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7340,7 +8244,7 @@
       "id": "5bc9cb134bb47833bc32"
     },
     {
-      "line": 722,
+      "line": 794,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7352,7 +8256,7 @@
       "id": "737fb2865b5cacea5690"
     },
     {
-      "line": 723,
+      "line": 795,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7364,7 +8268,7 @@
       "id": "ec5b8cd00b845eea884c"
     },
     {
-      "line": 724,
+      "line": 796,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7376,7 +8280,7 @@
       "id": "6dd4e5e58c57c7b6e444"
     },
     {
-      "line": 725,
+      "line": 797,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7393,7 +8297,7 @@
       "id": "52b46d8a820153b8a61b"
     },
     {
-      "line": 726,
+      "line": 798,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7410,7 +8314,7 @@
       "id": "4eb2f7b724b4e1158a69"
     },
     {
-      "line": 727,
+      "line": 799,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7422,7 +8326,7 @@
       "id": "97c833642e25763025fe"
     },
     {
-      "line": 728,
+      "line": 800,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7439,7 +8343,7 @@
       "id": "916698ae622dc98c8c76"
     },
     {
-      "line": 729,
+      "line": 801,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7451,7 +8355,7 @@
       "id": "18cc60845cf2eaf12041"
     },
     {
-      "line": 730,
+      "line": 802,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7468,7 +8372,7 @@
       "id": "2e5a4ba29c486b494e19"
     },
     {
-      "line": 731,
+      "line": 803,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7480,7 +8384,7 @@
       "id": "ade398b3df1f5a14777c"
     },
     {
-      "line": 732,
+      "line": 804,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7492,7 +8396,7 @@
       "id": "889e32332c8241b2092e"
     },
     {
-      "line": 733,
+      "line": 805,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7504,7 +8408,7 @@
       "id": "3c7ef15080f9f2cc7484"
     },
     {
-      "line": 734,
+      "line": 806,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Later"
@@ -7516,7 +8420,7 @@
       "id": "0e7296cf3a52a30bca40"
     },
     {
-      "line": 735,
+      "line": 807,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7533,7 +8437,7 @@
       "id": "fa9d1b53af19428bb175"
     },
     {
-      "line": 736,
+      "line": 808,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Done"
@@ -7550,7 +8454,7 @@
       "id": "9f9b34c55b45e5de4f27"
     },
     {
-      "line": 737,
+      "line": 809,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7562,7 +8466,7 @@
       "id": "12fcfee78cf5254df17c"
     },
     {
-      "line": 738,
+      "line": 810,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7574,7 +8478,7 @@
       "id": "946a34303091b1f0fc78"
     },
     {
-      "line": 739,
+      "line": 811,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Pending"
@@ -7586,7 +8490,7 @@
       "id": "bab3505c814ce63d5ff8"
     },
     {
-      "line": 740,
+      "line": 812,
       "section": "Playback fidelity and timing",
       "statuses": [
         "Later"
@@ -7598,7 +8502,7 @@
       "id": "154c36f4389540a9820c"
     },
     {
-      "line": 744,
+      "line": 816,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7610,7 +8514,7 @@
       "id": "09d740142fa012eb741e"
     },
     {
-      "line": 745,
+      "line": 817,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7622,7 +8526,7 @@
       "id": "8d1762760f2a6137957e"
     },
     {
-      "line": 747,
+      "line": 819,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7636,7 +8540,7 @@
       "id": "6bccc2d0891e611604c1"
     },
     {
-      "line": 748,
+      "line": 820,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7653,7 +8557,7 @@
       "id": "fd60dcd9b48a2d993799"
     },
     {
-      "line": 749,
+      "line": 821,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7665,7 +8569,7 @@
       "id": "23f808a8101dc4bae0ff"
     },
     {
-      "line": 750,
+      "line": 822,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7677,7 +8581,7 @@
       "id": "777202c8bd397544f62c"
     },
     {
-      "line": 751,
+      "line": 823,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7689,7 +8593,7 @@
       "id": "7bffc8a40cbcdbde4918"
     },
     {
-      "line": 752,
+      "line": 824,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7701,7 +8605,7 @@
       "id": "572ff4206d3d12bf5dd2"
     },
     {
-      "line": 753,
+      "line": 825,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7713,7 +8617,7 @@
       "id": "7250541713397becff58"
     },
     {
-      "line": 754,
+      "line": 826,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7725,7 +8629,7 @@
       "id": "ac3ab0c5490436a93aed"
     },
     {
-      "line": 755,
+      "line": 827,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7737,7 +8641,7 @@
       "id": "65a205c1d5f1146be12a"
     },
     {
-      "line": 756,
+      "line": 828,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7749,7 +8653,7 @@
       "id": "bcb1457a33d00deb2e1c"
     },
     {
-      "line": 757,
+      "line": 829,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7761,7 +8665,7 @@
       "id": "0a7236c8a66831059a39"
     },
     {
-      "line": 758,
+      "line": 830,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7775,7 +8679,7 @@
       "id": "3c8fd69825ca84bdd0e4"
     },
     {
-      "line": 759,
+      "line": 831,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7787,7 +8691,7 @@
       "id": "4f0c56680c9f1d5f7701"
     },
     {
-      "line": 760,
+      "line": 832,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7799,7 +8703,7 @@
       "id": "de7ce64142e05dabc841"
     },
     {
-      "line": 761,
+      "line": 833,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7811,7 +8715,7 @@
       "id": "a3ab72150aa3a80a5a6e"
     },
     {
-      "line": 762,
+      "line": 834,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7823,7 +8727,7 @@
       "id": "fe14bb9058990b4ab7d2"
     },
     {
-      "line": 763,
+      "line": 835,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7835,7 +8739,7 @@
       "id": "2c405edf92a91bf90c4d"
     },
     {
-      "line": 764,
+      "line": 836,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7847,7 +8751,7 @@
       "id": "c1630d7b7f5aecf8378e"
     },
     {
-      "line": 765,
+      "line": 837,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7859,7 +8763,7 @@
       "id": "d5dfcbf8d58352913af7"
     },
     {
-      "line": 767,
+      "line": 839,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7871,7 +8775,7 @@
       "id": "13299a7307a8c1c2a543"
     },
     {
-      "line": 768,
+      "line": 840,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7883,7 +8787,7 @@
       "id": "0d4440458f9ae689cd2c"
     },
     {
-      "line": 769,
+      "line": 841,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7895,7 +8799,7 @@
       "id": "4df69b42fd5e853468c5"
     },
     {
-      "line": 771,
+      "line": 843,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7912,7 +8816,7 @@
       "id": "a5612d351d818c668d84"
     },
     {
-      "line": 772,
+      "line": 844,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7924,7 +8828,7 @@
       "id": "fbfa9e37f9055b0faee4"
     },
     {
-      "line": 774,
+      "line": 846,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Done"
@@ -7936,7 +8840,7 @@
       "id": "37bee4c4a9d4d9429e7f"
     },
     {
-      "line": 775,
+      "line": 847,
       "section": "Playback state and interruption recovery",
       "statuses": [
         "Pending"
@@ -7948,7 +8852,7 @@
       "id": "89432e61e72c2a871fb3"
     },
     {
-      "line": 779,
+      "line": 851,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -7965,7 +8869,7 @@
       "id": "66e8f1d99119413d6b73"
     },
     {
-      "line": 780,
+      "line": 852,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -7977,7 +8881,7 @@
       "id": "31c72f4426bce7ee6032"
     },
     {
-      "line": 781,
+      "line": 853,
       "section": "Music library integrity",
       "statuses": [
         "Pending"
@@ -7989,7 +8893,7 @@
       "id": "458770a3025af271bff8"
     },
     {
-      "line": 783,
+      "line": 855,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8006,7 +8910,7 @@
       "id": "d5498980848ca8ef5668"
     },
     {
-      "line": 784,
+      "line": 856,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8018,7 +8922,7 @@
       "id": "2d94accc9082d11417c1"
     },
     {
-      "line": 785,
+      "line": 857,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8030,7 +8934,7 @@
       "id": "317de17624847a494dff"
     },
     {
-      "line": 786,
+      "line": 858,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8042,7 +8946,7 @@
       "id": "912b20d97866c03a4736"
     },
     {
-      "line": 787,
+      "line": 859,
       "section": "Music library integrity",
       "statuses": [
         "Pending"
@@ -8054,7 +8958,7 @@
       "id": "0bfe8dd25f97eb204383"
     },
     {
-      "line": 788,
+      "line": 860,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8066,7 +8970,7 @@
       "id": "334ffc12e37767a7d67f"
     },
     {
-      "line": 789,
+      "line": 861,
       "section": "Music library integrity",
       "statuses": [
         "Pending"
@@ -8078,7 +8982,7 @@
       "id": "864099902747e3bd4057"
     },
     {
-      "line": 790,
+      "line": 862,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8090,7 +8994,7 @@
       "id": "a2e807da36d0a74a8ab1"
     },
     {
-      "line": 791,
+      "line": 863,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8102,7 +9006,7 @@
       "id": "97146af7f4b0c8e3e630"
     },
     {
-      "line": 792,
+      "line": 864,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8114,7 +9018,7 @@
       "id": "0ad778102ddf31f7017d"
     },
     {
-      "line": 793,
+      "line": 865,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8126,7 +9030,7 @@
       "id": "c99cca1ef6c2bb872f33"
     },
     {
-      "line": 794,
+      "line": 866,
       "section": "Music library integrity",
       "statuses": [
         "Done"
@@ -8138,7 +9042,7 @@
       "id": "09378eaf76d91b75d8fe"
     },
     {
-      "line": 795,
+      "line": 867,
       "section": "Music library integrity",
       "statuses": [
         "Pending"
@@ -8150,7 +9054,7 @@
       "id": "f81b8e8414da0f67cbba"
     },
     {
-      "line": 799,
+      "line": 871,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8162,7 +9066,7 @@
       "id": "5c3d37c4206d537ac387"
     },
     {
-      "line": 800,
+      "line": 872,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8174,7 +9078,7 @@
       "id": "61b83aa7c8f07d5aa311"
     },
     {
-      "line": 801,
+      "line": 873,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8186,7 +9090,7 @@
       "id": "80d6abcf56efee84e1ae"
     },
     {
-      "line": 802,
+      "line": 874,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8203,7 +9107,7 @@
       "id": "670f8d61d2954f0fc02d"
     },
     {
-      "line": 803,
+      "line": 875,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8215,7 +9119,7 @@
       "id": "2544650d18f24e3ed3fe"
     },
     {
-      "line": 804,
+      "line": 876,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8227,7 +9131,7 @@
       "id": "21f12c004d0800b15b62"
     },
     {
-      "line": 805,
+      "line": 877,
       "section": "Remote music sources",
       "statuses": [
         "Pending"
@@ -8239,7 +9143,7 @@
       "id": "8bb281e0999a99fd3a4f"
     },
     {
-      "line": 806,
+      "line": 878,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8251,7 +9155,7 @@
       "id": "b1e7619cb5720a1c1d7e"
     },
     {
-      "line": 807,
+      "line": 879,
       "section": "Remote music sources",
       "statuses": [
         "Pending"
@@ -8263,7 +9167,7 @@
       "id": "31c54f6c0f5a567e1808"
     },
     {
-      "line": 808,
+      "line": 880,
       "section": "Remote music sources",
       "statuses": [
         "Later"
@@ -8275,7 +9179,7 @@
       "id": "e437a36127ed6f71ad7a"
     },
     {
-      "line": 809,
+      "line": 881,
       "section": "Remote music sources",
       "statuses": [
         "Later"
@@ -8287,7 +9191,7 @@
       "id": "f29b9c5e36b1b59269dc"
     },
     {
-      "line": 810,
+      "line": 882,
       "section": "Remote music sources",
       "statuses": [
         "Done"
@@ -8304,7 +9208,7 @@
       "id": "e0e0a05433a6e0420b38"
     },
     {
-      "line": 811,
+      "line": 883,
       "section": "Remote music sources",
       "statuses": [
         "Pending"
@@ -8316,7 +9220,7 @@
       "id": "454d663107c44f46444a"
     },
     {
-      "line": 822,
+      "line": 894,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8328,7 +9232,7 @@
       "id": "ce7a0067c6b702568a91"
     },
     {
-      "line": 823,
+      "line": 895,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8340,7 +9244,7 @@
       "id": "ffe5644706fceaadf659"
     },
     {
-      "line": 824,
+      "line": 896,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8352,7 +9256,7 @@
       "id": "22c69801abc81cc4b92a"
     },
     {
-      "line": 825,
+      "line": 897,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8369,7 +9273,7 @@
       "id": "4aad8d87a092605e4f09"
     },
     {
-      "line": 826,
+      "line": 898,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Pending"
@@ -8381,7 +9285,7 @@
       "id": "c606a42b5f16d9c4cc97"
     },
     {
-      "line": 827,
+      "line": 899,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8393,7 +9297,7 @@
       "id": "e8bde3ed596590285724"
     },
     {
-      "line": 828,
+      "line": 900,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8405,7 +9309,7 @@
       "id": "10c60e8531cef5a67031"
     },
     {
-      "line": 829,
+      "line": 901,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8417,7 +9321,7 @@
       "id": "cef862dc4e711aba890d"
     },
     {
-      "line": 830,
+      "line": 902,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Pending"
@@ -8429,7 +9333,7 @@
       "id": "e2d283de5d974615d90a"
     },
     {
-      "line": 831,
+      "line": 903,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Pending"
@@ -8441,7 +9345,7 @@
       "id": "3a53a6e09491830a6f21"
     },
     {
-      "line": 832,
+      "line": 904,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Done"
@@ -8453,7 +9357,7 @@
       "id": "400cce26884b5fc99930"
     },
     {
-      "line": 833,
+      "line": 905,
       "section": "Lyrics and LRCLIB",
       "statuses": [
         "Later"
@@ -8465,7 +9369,7 @@
       "id": "4920fc4fa607d927510c"
     },
     {
-      "line": 838,
+      "line": 910,
       "section": "1.0.6 distribution — 2026-10-16",
       "statuses": [
         "Done"
@@ -8477,7 +9381,7 @@
       "id": "2772129ab6cb78f821e7"
     },
     {
-      "line": 839,
+      "line": 911,
       "section": "1.0.6 distribution — 2026-10-16",
       "statuses": [
         "Done"
@@ -8489,7 +9393,7 @@
       "id": "21d1aa93fe0815845104"
     },
     {
-      "line": 840,
+      "line": 912,
       "section": "1.0.6 distribution — 2026-10-16",
       "statuses": [
         "Pending"

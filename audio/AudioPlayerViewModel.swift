@@ -239,6 +239,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
     private var effectAuditRefreshTimer: Timer?
     private var isEffectAuditRefreshPrimed = false
     private var isEffectScreenActive = false
+    private var hasPreparedEffectsPresentation = false
     private var qualityRecoveryNotBefore: TimeInterval = 0
     private var spatialRequestID = UUID()
     private var headphoneSpatialApplyTimer: Timer?
@@ -1867,9 +1868,70 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
         """)
     }
 
+    /// Controls do not consume VU, spectrum or transport ticks. Keep those
+    /// publications from invalidating the entire rack, including retained pages.
+    var effectsPresentationEvents: [AnyPublisher<Void, Never>] {
+        [
+            $effectSettings.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $selectedEffectPageTab.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $headphoneSpatialSettings.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $automaticDSPStrength.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $automaticDSPVoicing.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isABReferenceMode.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isPlaying.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isProcessing.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isPlaybackStarting.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isInitialLibraryLoading.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isChangingUpsamplingMode.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isEffectProcessing.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isSpatialProcessing.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $localPlaybackFormatDescription.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $selectedSystemSongID.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isPreparingLocalPlayback.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isPreparingSystemAsset.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $systemAssetRecoveryFailure.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $audioRenderHealth.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $effectAuditSummaryText.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $isMemoryOptimizedMode.removeDuplicates().dropFirst().map { _ in () }.eraseToAnyPublisher()
+        ]
+    }
+
+    /// Called before tab selection invalidates the view tree. Cancel only
+    /// optional conversions; keep asset recovery and the audible graph intact.
+    func prepareForEffectsPresentation() {
+        guard !hasPreparedEffectsPresentation else { return }
+        hasPreparedEffectsPresentation = true
+        guard playbackSource == .local, hasInitializedHiResPlaybackEngine else { return }
+        qualityRecoveryNotBefore = max(qualityRecoveryNotBefore, CFAbsoluteTimeGetCurrent() + 2)
+        let cancelledCurrent = precisionUpgradeTask != nil
+        let cancelledNext = preloadTrackTask != nil
+        precisionUpgradeTask?.cancel()
+        precisionUpgradeTask = nil
+        preloadTrackTask?.cancel()
+        preloadTrackTask = nil
+        PlaybackDebugLogger.event("audio.optional_work.deferred reason=effects_presentation minimumDelayMs=2000 current=\(cancelledCurrent) next=\(cancelledNext)")
+    }
+
+    /// Keep the expired deadline while paused; retry optional work only when
+    /// playback is audible, and restore a cancelled next-track preload too.
+    private func resumeDeferredOptionalQualityWork() {
+        guard qualityRecoveryNotBefore > 0,
+              CFAbsoluteTimeGetCurrent() >= qualityRecoveryNotBefore,
+              hasInitializedHiResPlaybackEngine, isPlaying,
+              hiResPlaybackEngine.isPlaying else { return }
+        qualityRecoveryNotBefore = 0
+        resumeAutomaticQualityUpgradeIfNeeded()
+        if preloadTrackTask == nil, let index = systemQueueIndex {
+            scheduleNextTrackPreload(after: index)
+        }
+    }
+
     func setEffectScreenActive(_ isActive: Bool) {
+        if !isActive { hasPreparedEffectsPresentation = false }
+        guard isEffectScreenActive != isActive else { return }
         isEffectScreenActive = isActive
         if isActive {
+            prepareForEffectsPresentation()
             scheduleEffectAuditRefresh(after: 0.8)
         } else {
             stopEffectAuditRefreshTimer()
@@ -3203,10 +3265,7 @@ final class AudioPlayerViewModel: NSObject, ObservableObject {
                 cancelOptionalQualityWork(reason: "render_gap")
             }
             if renderHealth != audioRenderHealth { audioRenderHealth = renderHealth }
-            if qualityRecoveryNotBefore > 0, CFAbsoluteTimeGetCurrent() >= qualityRecoveryNotBefore {
-                qualityRecoveryNotBefore = 0
-                resumeAutomaticQualityUpgradeIfNeeded()
-            }
+            resumeDeferredOptionalQualityWork()
             let hasTrack = hiResPlaybackEngine.hasTrack
             let duration = hiResPlaybackEngine.duration
             let current = hiResPlaybackEngine.currentTime()

@@ -147,7 +147,7 @@ struct ContentView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                     }
-                    CustomTabBar(selectedTab: $selectedTab, accentColor: accentColor, onAppearance: { isShowingAppearance = true })
+                    CustomTabBar(selectedTab: tabSelection, accentColor: accentColor, onAppearance: { isShowingAppearance = true })
                 }
                 .background {
                     if !(selectedTab == .nowPlaying && artworkMode == .vuMeter) {
@@ -263,9 +263,17 @@ struct ContentView: View {
         }
     }
 
+    private var tabSelection: Binding<RootTab> {
+        Binding(get: { selectedTab }, set: { tab in
+            guard tab != selectedTab else { return }
+            if tab == .effects { player.prepareForEffectsPresentation() }
+            selectedTab = tab
+        })
+    }
+
     private func scheduleEffectsPresentationUpdate() {
-        // Controls are ordinary view state: presenting them requires no DSP
-        // preparation or delayed task. Meter auditing retains its own cadence.
+        // The button preflight runs before view invalidation. This fallback
+        // also covers programmatic navigation and foreground presentation.
         player.setEffectScreenActive(selectedTab == .effects && scenePhase == .active)
     }
 
@@ -905,9 +913,16 @@ private struct SearchTabContent: View {
 }
 
 private struct EffectsTabContent: View {
-    @ObservedObject var player: AudioPlayerViewModel
+    let player: AudioPlayerViewModel
     let isPresented: Bool
+    @StateObject private var updates: CoalescedViewUpdates
     @State private var isShowingModeHelp = false
+
+    init(player: AudioPlayerViewModel, isPresented: Bool) {
+        self.player = player
+        self.isPresented = isPresented
+        _updates = StateObject(wrappedValue: CoalescedViewUpdates(events: player.effectsPresentationEvents))
+    }
 
     var body: some View {
         ZStack {
@@ -915,9 +930,9 @@ private struct EffectsTabContent: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    // This is a bounded set of controls, including a tall nested
-                    // stack. Measure its actual height instead of restoring an
-                    // offset against LazyVStack's estimates after tab changes.
+                    // Keep the header/top anchor eager. Only the card list is
+                    // lazy; re-entry scrolls to this real anchor, never a saved
+                    // absolute offset based on estimated offscreen heights.
                     VStack(spacing: 32) {
                         SectionHeader(
                             title: L10n.tr("effects.realtime_processing"),
@@ -1126,18 +1141,20 @@ private struct EffectsTabContent: View {
                 )
             }
 
-            ForEach(player.visibleEffectSettings) { effect in
-                EffectCard(
-                    kind: effect.kind,
-                    isEnabled: effect.isEnabled,
-                    parameters: effect.parameters,
-                    isInteractive: player.supportsRealtimeEffects,
-                    onToggle: { player.setEffectEnabled($0, for: effect.kind) },
-                    onParameterChange: { key, value in
-                        player.setEffectParameter(value, key: key, for: effect.kind)
-                    },
-                    accentColor: player.accentColor
-                )
+            LazyVStack(spacing: 20) { // Defer offscreen effect cards.
+                ForEach(player.visibleEffectSettings) { effect in
+                    EffectCard(
+                        kind: effect.kind,
+                        isEnabled: effect.isEnabled,
+                        parameters: effect.parameters,
+                        isInteractive: player.supportsRealtimeEffects,
+                        onToggle: { player.setEffectEnabled($0, for: effect.kind) },
+                        onParameterChange: { key, value in
+                            player.setEffectParameter(value, key: key, for: effect.kind)
+                        },
+                        accentColor: player.accentColor
+                    )
+                }
             }
         }
         // Keep hit targets and selection feedback stable during rapid taps.

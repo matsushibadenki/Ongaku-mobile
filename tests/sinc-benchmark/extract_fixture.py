@@ -64,7 +64,7 @@ static func absolutePositionReference(_ source: AVAudioPCMBuffer, target: AVAudi
     let profile = quality.sincKernelProfile
     let radius = profile.radius * (phase == .minimumPhase ? 3 : 1)
     let size = profile.radius * (phase == .minimumPhase ? 4 : 2) + 1
-    let kernels = cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)),
+    let kernels = try cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)),
         kernelRadius: radius, kernelSize: size, numPhases: profile.numPhases, phaseMode: phase, qualityMode: quality)
     try kernels.withUnsafeBufferPointer { values in
         for channel in 0..<Int(target.channelCount) {
@@ -79,11 +79,11 @@ static func absolutePositionReference(_ source: AVAudioPCMBuffer, target: AVAudi
 }
 """)
 output.append("""
-static func benchmarkKernels(ratio: Double, phase: PrecisionSincPhaseMode, quality: PrecisionSincQualityMode) -> (values: [Float], radius: Int, size: Int, phases: Int) {
+static func benchmarkKernels(ratio: Double, phase: PrecisionSincPhaseMode, quality: PrecisionSincQualityMode) throws -> (values: [Float], radius: Int, size: Int, phases: Int) {
     let p = quality.sincKernelProfile
     let radius = p.radius * (phase == .minimumPhase ? 3 : 1)
     let size = p.radius * (phase == .minimumPhase ? 4 : 2) + 1
-    return (cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)), kernelRadius: radius, kernelSize: size, numPhases: p.numPhases, phaseMode: phase, qualityMode: quality), radius, size, p.numPhases)
+    return (try cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)), kernelRadius: radius, kernelSize: size, numPhases: p.numPhases, phaseMode: phase, qualityMode: quality), radius, size, p.numPhases)
 }
 static func benchmarkRender(source: UnsafePointer<Float>, count: Int, output: UnsafeMutablePointer<Float>, start: Int, frames: Int, kernels: UnsafePointer<Float>, ratio: Double, radius: Int, size: Int, phases: Int) throws {
     try renderSincChunk(source: source, sourceFrameCount: count, sourceFrameOffset: 0, output: output, outputStartFrame: start, outputFrameCount: frames, kernels: kernels, ratio: ratio, kernelRadius: radius, kernelSize: size, numPhases: phases)

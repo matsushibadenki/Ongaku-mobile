@@ -516,6 +516,7 @@ extension DesktopSyncController: MCSessionDelegate {
         let name = peerID.displayName
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            PlaybackDebugLogger.event("sync.session.state state=\(state.rawValue) connectedPeers=\(session.connectedPeers.count)")
             switch state {
             case .notConnected:
                 connectionState = isStarted ? .searching : .disconnected

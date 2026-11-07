@@ -64,7 +64,7 @@ static func absolutePositionReference(_ source: AVAudioPCMBuffer, target: AVAudi
     let profile = quality.sincKernelProfile
     let radius = profile.radius * (phase == .minimumPhase ? 3 : 1)
     let size = profile.radius * (phase == .minimumPhase ? 4 : 2) + 1
-    let kernels = cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)),
+    let kernels = try cachedPolyphaseSincKernels(cutoff: Float(min(1, ratio) * Double(phase.cutoffScale)),
         kernelRadius: radius, kernelSize: size, numPhases: profile.numPhases, phaseMode: phase, qualityMode: quality)
     try kernels.withUnsafeBufferPointer { values in
         for channel in 0..<Int(target.channelCount) {

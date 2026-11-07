@@ -33,8 +33,8 @@ private struct Spec {
 }
 private struct Kernel {
     let values: [Float], radius: Int, size: Int, phases: Int
-    init(_ spec: Spec) {
-        let k = ShippingSincMeasurement.benchmarkKernels(ratio: spec.ratio, phase: spec.phase, quality: spec.quality)
+    init(_ spec: Spec) throws {
+        let k = try ShippingSincMeasurement.benchmarkKernels(ratio: spec.ratio, phase: spec.phase, quality: spec.quality)
         (values, radius, size, phases) = (k.values, k.radius, k.size, k.phases)
     }
 }
@@ -175,7 +175,7 @@ struct Benchmark {
         let repeats = Int(args[6])!
         let source = signal(spec)
         let startRSS = peakRSS()
-        let prepare = now(); let k = Kernel(spec); let kernelMS = (now() - prepare) * 1000
+        let prepare = now(); let k = try Kernel(spec); let kernelMS = (now() - prepare) * 1000
         let setup = now(); let gpu = backend == "gpu" ? try GPU(k, shader: args[7]) : nil
         let setupMS = (now() - setup) * 1000
         var times: [Double] = [], deviceTimes: [Double] = [], output: [Float] = []
